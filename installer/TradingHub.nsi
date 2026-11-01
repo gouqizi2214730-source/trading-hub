@@ -40,6 +40,8 @@ Name "${NAME}"
 OutFile "${OUT}"
 ; siempre en su propia carpeta: así actualizar y desinstalar pueden reemplazarla entera sin tocar nada más
 InstallDir "$LOCALAPPDATA\Programs\Trading Hub"
+; una actualización se instala donde ya estaba (la carpeta que se eligió la primera vez)
+InstallDirRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\TradingHub" "InstallLocation"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 ManifestDPIAware true
@@ -59,6 +61,9 @@ VIAddVersionKey "LegalCopyright" "MIT License with Commons Clause"
 !define MUI_FINISHPAGE_RUN_TEXT "$(OpenApp)"
 
 !insertmacro MUI_PAGE_WELCOME
+; elegir la carpeta (al buscar con «Examinar» se agrega «\Trading Hub» solo, así siempre queda en una carpeta propia)
+!define MUI_PAGE_CUSTOMFUNCTION_LEAVE CheckInstallDir
+!insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
@@ -71,6 +76,9 @@ VIAddVersionKey "LegalCopyright" "MIT License with Commons Clause"
 LangString WelcomeText ${LANG_ENGLISH} "This installs Trading Hub ${VERSION} on your PC.$\r$\n$\r$\nIf you already have it, it gets updated: your connections, charts, strategies and indicators stay as they are.$\r$\n$\r$\nClick Install to continue."
 LangString WelcomeText ${LANG_SPANISH} "Esto instala Trading Hub ${VERSION} en tu PC.$\r$\n$\r$\nSi ya la tenés, se actualiza: tus conexiones, gráficos, estrategias e indicadores quedan como están.$\r$\n$\r$\nTocá Instalar para seguir."
 LangString WelcomeText ${LANG_SIMPCHINESE} "这将在你的电脑上安装 Trading Hub ${VERSION}。$\r$\n$\r$\n如果已经安装，会直接更新：你的连接、图表、策略和指标都保持不变。$\r$\n$\r$\n点击“安装”继续。"
+LangString NotWritable ${LANG_ENGLISH} "Can't write to this folder (it may need administrator permissions, like Program Files). Choose another folder, for example on D:\ or inside your user folder."
+LangString NotWritable ${LANG_SPANISH} "No se puede escribir en esta carpeta (puede pedir permisos de administrador, como Archivos de programa). Elegí otra, por ejemplo en D:\ o dentro de tu carpeta de usuario."
+LangString NotWritable ${LANG_SIMPCHINESE} "无法写入这个文件夹（可能需要管理员权限，比如 Program Files）。请换一个文件夹，例如 D:\ 盘或你的用户文件夹里。"
 LangString OpenApp ${LANG_ENGLISH} "Open Trading Hub"
 LangString OpenApp ${LANG_SPANISH} "Abrir Trading Hub"
 LangString OpenApp ${LANG_SIMPCHINESE} "打开 Trading Hub"
@@ -110,6 +118,42 @@ Function un.WaitClosed
   ${Loop}
 FunctionEnd
 
+; La carpeta elegida siempre termina en «Trading Hub» (si se elige D:\Apps queda D:\Apps\Trading Hub): actualizar y
+; desinstalar reemplazan esa carpeta entera, así nunca tocan otros archivos. Y tiene que poder escribirse sin permisos de
+; administrador (la instalación es por usuario).
+Function CheckInstallDir
+  ${GetFileName} "$INSTDIR" $1
+  ${If} $1 != "Trading Hub"
+    StrCpy $INSTDIR "$INSTDIR\Trading Hub"
+  ${EndIf}
+  ClearErrors
+  CreateDirectory "$INSTDIR"
+  FileOpen $0 "$INSTDIR\.tradinghub-prueba" w
+  ${If} ${Errors}
+    MessageBox MB_OK|MB_ICONEXCLAMATION "$(NotWritable)"
+    Abort
+  ${EndIf}
+  FileClose $0
+  Delete "$INSTDIR\.tradinghub-prueba"
+FunctionEnd
+
+; Si antes estaba instalada en otra carpeta, esa copia vieja se borra (con las mismas reglas: solo si es suya)
+Function RemoveOldInstall
+  ReadRegStr $R0 HKCU "${UNINSTKEY}" "InstallLocation"
+  ${If} $R0 == ""
+  ${OrIf} $R0 == "$INSTDIR"
+    Return
+  ${EndIf}
+  ${GetFileName} "$R0" $0
+  ${If} $0 == "Trading Hub"
+  ${AndIf} ${FileExists} "$R0\${EXE}"
+    RMDir /r "$R0"
+  ${ElseIf} ${FileExists} "$R0\${EXE}"
+    ; una carpeta con otro nombre: solo lo que dejó el instalador
+    Delete "$R0\Desinstalar Trading Hub.exe"
+  ${EndIf}
+FunctionEnd
+
 ; Borra la carpeta del programa solo si es la suya (se llama «Trading Hub» y tiene TradingHub.exe): aunque alguien la
 ; instale con /D en otra carpeta, nunca borra otra cosa
 Function CleanInstallDir
@@ -136,6 +180,7 @@ FunctionEnd
 Section "Trading Hub" SecMain
   Call WaitClosed
   ; una actualización reemplaza el programa entero (en su carpeta propia, nunca otra)
+  Call RemoveOldInstall
   Call CleanInstallDir
   SetOutPath "$INSTDIR"
   File /r "${SRC}\*.*"
