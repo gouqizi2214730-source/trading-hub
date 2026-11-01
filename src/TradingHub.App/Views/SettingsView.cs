@@ -126,7 +126,7 @@ internal sealed class SettingsView : UserControl, IPage
 
         var data = Section("Datos", MaterialIconKind.DatabaseOutline,
             Setting("Grabar lo que llega en vivo", "Guarda cada operación recibida para reabrir gráficos al instante, hacer replay y backtests.", record),
-            Setting("Footprint en la historia", "Cuánto hacia atrás la historia trae cada operación (footprint, perfil y delta completos en esas velas); lo más viejo llega en velas y se ve sin footprint. En Binance y Bybit los días cerrados salen de sus archivos públicos y se guardan; lo de hoy viene de la API y puede tardar unos minutos la primera vez.", tickHistory),
+            Setting("Footprint en la historia", "Cuánto hacia atrás la historia trae cada operación. Lo más viejo que tengas bajado en Datos se carga resumido por hora: velas de 1 hora o más con OHLC, volumen y delta exactos y footprint y perfil con filas de ~1 punto básico (la primera vez arma un resumen por día, después abre al instante). Sin ticks bajados, lo viejo llega en velas y se ve sin footprint.", tickHistory),
             BuildMarketDataFolder(),
             Setting("Carpeta de datos", AppPaths.Root, Ui.Button("Abrir", MaterialIconKind.FolderOpenOutline, () => Shell.OpenFolder(AppPaths.Root))),
             Setting("Indicadores propios (C#)", AppPaths.UserIndicators, Ui.Button("Abrir", MaterialIconKind.FolderOpenOutline, () => Shell.OpenFolder(AppPaths.UserIndicators))),

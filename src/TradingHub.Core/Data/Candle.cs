@@ -52,7 +52,7 @@ public sealed class Candle
     public decimal Delta => Ask - Bid;
 
     /// <summary>Agrega una operación a la vela. <paramref name="row"/> = priceTicks / paso.</summary>
-    public void AddTrade(long priceTicks, long row, decimal volume, TradeSide side, long timeTicks, int tradeIndex, bool synthetic = false)
+    public void AddTrade(long priceTicks, long row, decimal volume, TradeSide side, long timeTicks, int tradeIndex, bool synthetic = false, bool aggregated = false)
     {
         if (!synthetic) HasRealTrades = true;
         if (Trades == 0)
@@ -71,7 +71,7 @@ public sealed class Candle
         LastTime = new DateTime(timeTicks, DateTimeKind.Utc);
         Trades++;
         Volume += volume;
-        if (volume > MaxTradeVolume && !synthetic) MaxTradeVolume = volume;
+        if (volume > MaxTradeVolume && !synthetic && !aggregated) MaxTradeVolume = volume;
 
         if (synthetic)
         {

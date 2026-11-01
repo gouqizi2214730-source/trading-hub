@@ -109,6 +109,8 @@ public sealed class CandleSeries
         return new AppendResult(Math.Min(firstChanged, _candles.Count - 1), created);
     }
 
+    private bool _aggregated;
+
     private void ProcessTrade(TradeStore store, int i)
     {
         long timeTicks = store.GetTimeTicks(i);
@@ -116,7 +118,9 @@ public sealed class CandleSeries
         decimal volume = store.GetVolume(i);
         var side = store.GetSide(i);
         long row = RowOf(price);
-        bool syn = store.GetId(i) < 0; // operación armada desde velas del exchange
+        long id = store.GetId(i);
+        bool syn = KlineHistory.IsSynthetic(id); // operación armada desde velas del exchange
+        _aggregated = id < 0; // armada con velas o resumida por hora: no es una operación suelta
 
         switch (Period.Type)
         {
@@ -139,7 +143,7 @@ public sealed class CandleSeries
                     break;
                 }
 
-                _candles[^1].AddTrade(price, row, volume, side, timeTicks, i, syn);
+                _candles[^1].AddTrade(price, row, volume, side, timeTicks, i, syn, _aggregated);
                 break;
             }
 
@@ -147,7 +151,7 @@ public sealed class CandleSeries
             {
                 int n = Math.Max(1, (int)Period.Value);
                 if (_candles.Count == 0 || _candles[^1].Trades >= n) StartCandle(new DateTime(timeTicks, DateTimeKind.Utc));
-                _candles[^1].AddTrade(price, row, volume, side, timeTicks, i, syn);
+                _candles[^1].AddTrade(price, row, volume, side, timeTicks, i, syn, _aggregated);
                 break;
             }
 
@@ -164,7 +168,7 @@ public sealed class CandleSeries
                     }
 
                     decimal part = Math.Min(remaining, cap - _volumeInCandle);
-                    _candles[^1].AddTrade(price, row, part, side, timeTicks, i, syn);
+                    _candles[^1].AddTrade(price, row, part, side, timeTicks, i, syn, _aggregated);
                     _volumeInCandle += part;
                     remaining -= part;
                 }
@@ -178,7 +182,7 @@ public sealed class CandleSeries
                 var last = _candles.Count > 0 ? _candles[^1] : null;
                 if (last == null || Math.Max(last.HighTicks, price) - Math.Min(last.LowTicks, price) > range)
                     StartCandle(new DateTime(timeTicks, DateTimeKind.Utc));
-                _candles[^1].AddTrade(price, row, volume, side, timeTicks, i, syn);
+                _candles[^1].AddTrade(price, row, volume, side, timeTicks, i, syn, _aggregated);
                 break;
             }
 
@@ -187,7 +191,7 @@ public sealed class CandleSeries
                 decimal n = Math.Max(Instrument.VolumeStep, Period.Value);
                 var last = _candles.Count > 0 ? _candles[^1] : null;
                 if (last == null || Math.Abs(last.Delta) >= n) StartCandle(new DateTime(timeTicks, DateTimeKind.Utc));
-                _candles[^1].AddTrade(price, row, volume, side, timeTicks, i, syn);
+                _candles[^1].AddTrade(price, row, volume, side, timeTicks, i, syn, _aggregated);
                 break;
             }
 
@@ -219,7 +223,7 @@ public sealed class CandleSeries
                     }
                 }
 
-                _candles[^1].AddTrade(price, row, volume, side, timeTicks, i, syn);
+                _candles[^1].AddTrade(price, row, volume, side, timeTicks, i, syn, _aggregated);
                 break;
             }
         }

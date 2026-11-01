@@ -165,29 +165,63 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
     private async Task<List<Trade>> LoadRangeAsync(DateTime from, DateTime to, long maxIdExclusive, CancellationToken ct)
     {
         var real = new List<Trade>();
+        var compactCovered = new List<(DateTime From, DateTime To)>();
+        List<Trade>? compact = null;
         if (RecordingRoot != null && Feed.IsLive)
         {
-            // de lo más nuevo a lo más viejo, hasta el tope de memoria
+            // de lo más nuevo a lo más viejo: dentro de la ventana de ticks y hasta el tope de memoria, cada operación; lo
+            // de antes (o lo que no entra), resumido por hora (ver CompactHistory)
+            DateTime rawCut = (_anchor ?? Feed.Now) - TickWindow;
             var chunks = new List<List<Trade>>();
+            var compactDays = new List<DateOnly>();
             long count = 0;
+            bool rawFull = false;
             foreach (var day in EachDay(from, to).Reverse())
             {
                 var path = TickFile.DayPath(RecordingRoot, Instrument.FeedId, Instrument.Symbol, day);
                 if (!File.Exists(path)) continue;
-                var list = TickFile.Read(path).Where(t => t.Time >= from && t.Time < to && t.Id < maxIdExclusive).ToList();
-                if (count > 0 && count + list.Count > MaxDiskTrades) break;
-                chunks.Add(list);
-                count += list.Count;
+                var dayStart = day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+                bool raw = !rawFull && (dayStart.AddDays(1) > rawCut || CompactRoot == null || !UseCompactHistory);
+                if (raw)
+                {
+                    var list = TickFile.Read(path).Where(t => t.Time >= from && t.Time < to && t.Id < maxIdExclusive).ToList();
+                    if (count > 0 && count + list.Count > MaxDiskTrades) rawFull = true;
+                    else
+                    {
+                        chunks.Add(list);
+                        count += list.Count;
+                        continue;
+                    }
+                }
+
+                if (CompactRoot == null || !UseCompactHistory) break;
+                compactDays.Add(day);
             }
 
             chunks.Reverse();
             foreach (var c in chunks) real.AddRange(c);
             real = TickFile.SortAndDedupe(real);
+
+            if (compactDays.Count > 0)
+            {
+                compactDays.Reverse();
+                compact = LoadCompact(compactDays, from, to, compactCovered, ct);
+            }
         }
 
-        if (!Feed.SupportsHistory) return real;
-        var gaps = FindGaps(real, from, to, tailById: maxIdExclusive == long.MaxValue);
-        if (gaps.Count == 0) return real;
+        // los huecos se buscan en las operaciones sueltas; lo resumido por hora cuenta como cubierto
+        List<Trade> Merged()
+        {
+            if (compact == null || compact.Count == 0) return real;
+            var all = new List<Trade>(compact.Count + real.Count);
+            all.AddRange(compact);
+            all.AddRange(real);
+            return TickFile.SortAndDedupe(all);
+        }
+
+        if (!Feed.SupportsHistory) return Merged();
+        var gaps = SubtractCovered(FindGaps(real, from, to, tailById: maxIdExclusive == long.MaxValue), compactCovered);
+        if (gaps.Count == 0) return Merged();
 
         // lo reciente en ticks; lo viejo en velas (si el feed las tiene)
         var klineSource = Feed as IKlineHistory;
@@ -252,11 +286,11 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
             }
         }
 
-        if (klineGaps.Count == 0 || klineSource == null) return real;
+        if (klineGaps.Count == 0 || klineSource == null) return Merged();
 
         // velas solo donde no hay ticks reales
         var windows = KlineHistory.Subtract(klineGaps, KlineHistory.Coverage(real));
-        if (windows.Count == 0) return real;
+        if (windows.Count == 0) return Merged();
         var kFrom = windows[0].From;
         var kTo = windows[^1].To;
         int minutes = KlineHistory.MinutesFor(kTo - kFrom);
@@ -266,7 +300,123 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         var klines = await KlineHistory.LoadAsync(klineSource, Instrument, kFrom, kTo, minutes, endPrice, kProgress, ct).ConfigureAwait(false);
         var synthetic = new List<Trade>(klines.Count * 4);
         KlineHistory.Synthesize(klines, Instrument, minutes, windows, synthetic);
-        return KlineHistory.MergeByTime(synthetic, real);
+        return KlineHistory.MergeByTime(synthetic, Merged());
+    }
+
+    /// <summary>Raíz de la caché de días resumidos por hora (null = no se resume: lo que no entra va en velas).</summary>
+    public string? CompactRoot { get; set; }
+
+    /// <summary>Resumir por hora los días con ticks que quedan fuera de la ventana (se apaga en algunas pruebas).</summary>
+    public static bool UseCompactHistory { get; set; } = true;
+
+    /// <summary>Tope de operaciones resumidas en memoria (de lo más nuevo a lo más viejo).</summary>
+    public static int MaxCompactTrades { get; set; } = 40_000_000;
+
+    /// <summary>Días resumidos por hora (arma en paralelo los que faltan en la caché), del más viejo al más nuevo.</summary>
+    private List<Trade> LoadCompact(List<DateOnly> days, DateTime from, DateTime to, List<(DateTime From, DateTime To)> covered, CancellationToken ct)
+    {
+        var root = RecordingRoot!;
+        var cacheRoot = CompactRoot!;
+        var missing = days.Where(d => !CompactHistory.IsFresh(CompactHistory.CachePath(cacheRoot, Instrument.FeedId, Instrument.Symbol, d),
+            TickFile.DayPath(root, Instrument.FeedId, Instrument.Symbol, d))).ToList();
+        int done = 0;
+        if (missing.Count > 0)
+        {
+            Parallel.ForEach(missing, new ParallelOptions { MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 2, 1, 4), CancellationToken = ct }, d =>
+            {
+                try
+                {
+                    CompactHistory.EnsureCached(root, cacheRoot, Instrument, d);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // ese día queda para las velas
+                }
+
+                HistoryProgress = 0.9 * Interlocked.Increment(ref done) / missing.Count;
+            });
+        }
+
+        // de lo más nuevo a lo más viejo hasta el tope; después en orden
+        var perDay = new List<(DateOnly Day, List<Trade> Trades)>();
+        long count = 0;
+        long lastId = CompactHistory.CompressedIdBase;
+        for (int i = days.Count - 1; i >= 0; i--)
+        {
+            ct.ThrowIfCancellationRequested();
+            List<Trade> list;
+            try
+            {
+                long tmp = CompactHistory.CompressedIdBase;
+                list = CompactHistory.LoadDay(root, cacheRoot, Instrument, days[i], ref tmp);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                continue;
+            }
+
+            if (count > 0 && count + list.Count > MaxCompactTrades) break;
+            perDay.Add((days[i], list));
+            count += list.Count;
+        }
+
+        perDay.Reverse();
+        var res = new List<Trade>((int)Math.Min(count, int.MaxValue));
+        foreach (var (day, list) in perDay)
+        {
+            var dayStart = day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            DateTime cFrom = dayStart > from ? dayStart : from, cTo = dayStart.AddDays(1) < to ? dayStart.AddDays(1) : to;
+            if (cTo <= cFrom) continue;
+            // cubiertas: las horas que tienen operaciones (un día grabado a medias deja huecos para las velas)
+            long? runStart = null, runEnd = null;
+            foreach (var t in list)
+            {
+                long h = t.Time.Ticks / TimeSpan.TicksPerHour;
+                if (runEnd == h) continue;
+                if (runEnd != null && h == runEnd + 1)
+                {
+                    runEnd = h;
+                    continue;
+                }
+
+                if (runStart != null) AddCovered(runStart.Value, runEnd!.Value);
+                runStart = runEnd = h;
+            }
+
+            if (runStart != null) AddCovered(runStart.Value, runEnd!.Value);
+
+            void AddCovered(long h0, long h1)
+            {
+                DateTime a = new(h0 * TimeSpan.TicksPerHour, DateTimeKind.Utc), b = new((h1 + 1) * TimeSpan.TicksPerHour, DateTimeKind.Utc);
+                if (a < cFrom) a = cFrom;
+                if (b > cTo) b = cTo;
+                if (b > a) covered.Add((a, b));
+            }
+
+            // ids crecientes en todo el tramo (dentro de su rango: cuentan como reales para las velas)
+            foreach (var t in list)
+                if (t.Time >= from && t.Time < to)
+                {
+                    long id = CompactHistory.CompressedIdBase + (t.Time.Ticks - DateTime.UnixEpoch.Ticks) / 10 * 8;
+                    if (id <= lastId) id = lastId + 1;
+                    lastId = id;
+                    res.Add(new Trade(id, t.Time, t.Price, t.Volume, t.Side));
+                }
+        }
+
+        return res;
+    }
+
+    /// <summary>Saca de los huecos los tramos ya cubiertos (conserva el id de continuación del último hueco).</summary>
+    private static List<(DateTime From, DateTime To, long? FromId)> SubtractCovered(List<(DateTime From, DateTime To, long? FromId)> gaps, List<(DateTime From, DateTime To)> covered)
+    {
+        if (covered.Count == 0) return gaps;
+        var res = new List<(DateTime From, DateTime To, long? FromId)>();
+        foreach (var (gFrom, gTo, id) in gaps)
+            foreach (var (pf, pt) in KlineHistory.Subtract(new List<(DateTime From, DateTime To)> { (gFrom, gTo) }, covered))
+                if (pt - pf >= TimeSpan.FromMinutes(1))
+                    res.Add((pf, pt, pt == gTo ? id : null));
+        return res;
     }
 
     /// <summary>
@@ -727,6 +877,9 @@ public sealed class MarketDataHub : IDisposable
 
     public string? RecordingRoot { get; set; }
 
+    /// <summary>Caché de los días resumidos por hora (ver <see cref="CompactHistory"/>).</summary>
+    public string? CompactRoot { get; set; }
+
     /// <summary>
     /// Hasta qué antigüedad la historia trae operaciones reales (con footprint); lo anterior se completa con velas.
     /// Lo elige Ajustes → Datos.
@@ -760,7 +913,7 @@ public sealed class MarketDataHub : IDisposable
         // depende de cuánto se cargó al abrir: si después se pide más historia (más días, o arrastrando hacia atrás), lo
         // que cae dentro de la ventana también llega con sus operaciones y se ve con footprint
         var window = MaxTickWindow < TimeSpan.FromHours(2) ? TimeSpan.FromHours(2) : MaxTickWindow;
-        d = new InstrumentData(instrument, feed) { RecordingRoot = RecordingRoot, RecordLive = RecordLive, TickWindow = window };
+        d = new InstrumentData(instrument, feed) { RecordingRoot = RecordingRoot, CompactRoot = CompactRoot, RecordLive = RecordLive, TickWindow = window };
         _items[instrument.Key] = d;
         d.Start(feed.Now - history);
         return d;

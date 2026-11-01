@@ -91,7 +91,9 @@ public class LongHistoryTests
         public string DisplayName => "Test";
         public DateTime Now => DateTime.UtcNow;
         public bool SupportsHistory => true;
-        public bool IsLive => false;
+        public bool Live { get; set; }
+
+        public bool IsLive => Live;
 
         /// <summary>Como Bybit: la API solo da los últimos minutos.</summary>
         public bool RecentOnly { get; set; }
@@ -225,5 +227,103 @@ public class LongHistoryTests
         Assert.True(series.Count >= 19, $"velas: {series.Count}");
         Assert.True(series[0].IsSynthetic);
         Assert.False(series[series.Count - 1].IsSynthetic);
+    }
+
+    [Fact]
+    public void Resumir_por_hora_conserva_OHLC_volumen_delta_maximo_y_minimo_de_cada_hora()
+    {
+        var rnd = new Random(7);
+        var t0 = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc);
+        var raw = new List<Trade>();
+        decimal px = 80000m;
+        long id = 1;
+        for (int s = 0; s < 3 * 3600; s += 2)
+        {
+            px += (rnd.Next(-30, 31)) * 0.1m;
+            raw.Add(new Trade(id++, t0.AddSeconds(s), px, rnd.Next(1, 50) / 1000m, rnd.Next(2) == 0 ? TradeSide.Buy : TradeSide.Sell));
+        }
+
+        var c = CompactHistory.Compress(raw, 0.1m);
+        Assert.True(c.Count < raw.Count / 3, $"{c.Count} de {raw.Count}");
+        for (int h = 0; h < 3; h++)
+        {
+            var a = raw.Where(t => t.Time.Hour == h).ToList();
+            var b = c.Where(t => t.Time.Hour == h).ToList();
+            Assert.Equal(a[0].Price, b[0].Price); // apertura
+            Assert.Equal(a[^1].Price, b[^1].Price); // cierre
+            Assert.Equal(a.Max(t => t.Price), b.Max(t => t.Price));
+            Assert.Equal(a.Min(t => t.Price), b.Min(t => t.Price));
+            Assert.Equal(a.Sum(t => t.Volume), b.Sum(t => t.Volume));
+            Assert.Equal(a.Where(t => t.Side == TradeSide.Buy).Sum(t => t.Volume), b.Where(t => t.Side == TradeSide.Buy).Sum(t => t.Volume));
+            for (int i = 1; i < b.Count; i++) Assert.True(b[i].Time >= b[i - 1].Time);
+        }
+    }
+
+    [Fact]
+    public void Dias_viejos_con_ticks_se_cargan_resumidos_con_footprint_y_los_recientes_enteros()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "th-compact-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            var inst = new Instrument { Symbol = "TEST", FeedId = "test", TickSize = 0.5m, VolumeStep = 0.001m };
+            var now = DateTime.UtcNow;
+            var from = new DateTime(now.AddDays(-5).Ticks / TimeSpan.TicksPerHour * TimeSpan.TicksPerHour, DateTimeKind.Utc);
+            var rnd = new Random(3);
+            decimal px = 100m, rawVolume = 0;
+            long id = 1;
+            for (var day = DateOnly.FromDateTime(now.AddDays(-6)); day <= DateOnly.FromDateTime(now); day = day.AddDays(1))
+            {
+                var list = new List<Trade>();
+                var start = day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+                for (var t = start; t < start.AddDays(1) && t < now; t = t.AddSeconds(10))
+                {
+                    px = Math.Max(50, px + rnd.Next(-2, 3) * 0.5m);
+                    var v = rnd.Next(1, 9) / 100m;
+                    list.Add(new Trade(id++, t, px, v, rnd.Next(2) == 0 ? TradeSide.Buy : TradeSide.Sell));
+                    if (t >= from) rawVolume += v;
+                }
+
+                HistoricalData.WriteDay(root, inst, day, list);
+            }
+
+            var feed = new FakeFeed { Live = true };
+            var data = new InstrumentData(inst, feed)
+            {
+                RecordingRoot = root, CompactRoot = Path.Combine(root, "compact"), RecordLive = false, TickWindow = TimeSpan.FromDays(1),
+            };
+            data.Start(from);
+            Wait(data, () => data.IsLoadingHistory);
+            Assert.Null(data.HistoryError);
+            Assert.Equal(0, feed.TickRequests > 0 && feed.EarliestTickRequested < now.AddDays(-1) ? 1 : 0); // no pidió nada viejo
+
+            int compact = 0, real = 0;
+            for (int i = 0; i < data.Trades.Count; i++)
+            {
+                long tid = data.Trades.GetId(i);
+                if (CompactHistory.IsCompressed(tid)) compact++;
+                else if (tid > 0) real++;
+                Assert.False(KlineHistory.IsSynthetic(tid), "no debería haber velas del exchange");
+            }
+
+            Assert.True(compact > 0 && real > 0);
+            Assert.True(File.Exists(CompactHistory.CachePath(Path.Combine(root, "compact"), "test", "TEST", DateOnly.FromDateTime(now.AddDays(-3)))));
+
+            // velas de 1 hora: todas con footprint, mismo volumen total que los ticks crudos
+            var series = new CandleSeries(inst, ChartPeriod.H1);
+            series.Rebuild(data.Trades);
+            decimal vol = 0;
+            for (int i = 0; i < series.Count; i++)
+            {
+                Assert.False(series[i].IsSynthetic, $"{series[i].Time:dd HH}");
+                vol += series[i].Volume;
+            }
+
+            Assert.InRange(vol, rawVolume - 0.5m, rawVolume + 2m); // + lo que el feed falso agrega al final
+            Assert.True(data.Trades.Count < 5 * 8640, $"operaciones: {data.Trades.Count}");
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { }
+        }
     }
 }

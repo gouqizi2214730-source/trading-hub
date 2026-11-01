@@ -889,7 +889,7 @@
  "Cuánta historia cargar (hasta todo el historial). Se trae sola del exchange: lo reciente con ticks (footprint) y lo más viejo en velas de 1 minuto, en segundos. Lo bajado en Datos se usa con ticks.": "要加载多少历史数据（最多全部历史）。几秒内自动从交易所获取：近期数据为 tick（footprint），较早的数据为 1 分钟 K线。在“数据”中下载的内容按 tick 使用。",
  "Cuántas veces más grande tiene que ser un lado que el otro (en diagonal)": "一侧需要比另一侧大多少倍（对角比较）",
  "Cuánto (días UTC)": "范围（UTC 日）",
- "Cuánto hacia atrás la historia trae cada operación (footprint, perfil y delta completos en esas velas); lo más viejo llega en velas y se ve sin footprint. En Binance y Bybit los días cerrados salen de sus archivos públicos y se guardan; lo de hoy viene de la API y puede tardar unos minutos la primera vez.": "历史数据往回多久带逐笔成交（这些 K 线有完整的足迹、分布和 Delta）；更早的部分只有 K 线，不显示足迹。Binance 和 Bybit 已收盘的日子从交易所公开文件下载并保存；当天的数据走 API，第一次可能要几分钟。",
+ "Cuánto hacia atrás la historia trae cada operación. Lo más viejo que tengas bajado en Datos se carga resumido por hora: velas de 1 hora o más con OHLC, volumen y delta exactos y footprint y perfil con filas de ~1 punto básico (la primera vez arma un resumen por día, después abre al instante). Sin ticks bajados, lo viejo llega en velas y se ve sin footprint.": "历史数据往回多久带完整的逐笔成交。更早的部分只要在「数据」里下载过，就会按小时汇总加载：1 小时及以上周期的 K 线开高低收、成交量和 Delta 完全准确，足迹和分布按约 1 个基点一行显示（第一次会给每天生成汇总，之后秒开）。没有下载逐笔的更早历史只有 K 线，不显示足迹。",
  "Cálculo": "计算",
  "Código": "代码",
  "Cómo corre": "运行方式",

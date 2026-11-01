@@ -24,6 +24,9 @@ public static class AppPaths
 
     /// <summary>Caché de velas del exchange.</summary>
     public static string Klines => Path.Combine(DataLocation.Root, "Klines");
+
+    /// <summary>Caché de los días de ticks resumidos por hora (para ver meses o años con footprint).</summary>
+    public static string TicksCompact => Path.Combine(DataLocation.Root, "TicksCompact");
     public static string WorkspaceFile => Path.Combine(Root, "workspace.json");
     public static string Drawings => Path.Combine(Root, "Drawings");
     public static string Backtests => Path.Combine(Root, "Backtests");
@@ -386,6 +389,7 @@ public sealed class AppServices
         // una mudanza de los datos de mercado a otra carpeta se termina antes de grabar nada
         DataMoveError = DataLocation.FinishPendingMove();
         Hub.RecordingRoot = AppPaths.Ticks;
+        Hub.CompactRoot = AppPaths.TicksCompact;
         KlineHistory.CacheRoot = AppPaths.Klines;
         // TRADINGHUB_LIVE_DIR: cartera alternativa (pruebas)
         TradingHub.Strategies.LiveStore.Root = Environment.GetEnvironmentVariable("TRADINGHUB_LIVE_DIR") is { Length: > 0 } live ? live : Path.Combine(AppPaths.Root, "Live");

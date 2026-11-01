@@ -18,7 +18,8 @@ public static class KlineHistory
     /// <summary>Base de los ids sintéticos (siempre negativos y crecientes con el tiempo).</summary>
     public const long SyntheticIdBase = long.MinValue / 2;
 
-    public static bool IsSynthetic(long tradeId) => tradeId < 0;
+    /// <summary>Armada con velas (por debajo de las resumidas por hora, que sí cuentan como reales para las velas).</summary>
+    public static bool IsSynthetic(long tradeId) => tradeId < CompactHistory.CompressedIdBase;
 
     /// <summary>Resolución según el largo del rango: menos memoria cuando son años.</summary>
     public static int MinutesFor(TimeSpan range) => range.TotalDays <= 400 ? 1 : range.TotalDays <= 1500 ? 5 : 15;
