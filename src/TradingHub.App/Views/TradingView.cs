@@ -1042,7 +1042,7 @@ public sealed partial class TradingView : UserControl
         var tz = chart.Model!.Settings.TimeZone;
         string fromText = TimeZoneInfo.ConvertTimeFromUtc(data.Trades.Count > 0 ? data.Trades.FirstTime : from, tz).ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture);
         string ticks = data.RealTicksFrom < DateTime.MaxValue
-            ? $" · footprint (ticks) desde {TimeZoneInfo.ConvertTimeFromUtc(data.RealTicksFrom, tz):dd/MM HH:mm}; antes, velas de 1 minuto del exchange (para más footprint, bajá días en Datos)"
+            ? Localization.Lang.T($" · footprint (ticks) desde {TimeZoneInfo.ConvertTimeFromUtc(data.RealTicksFrom, tz):dd/MM HH:mm}; antes, velas de 1 minuto sin footprint (para más días: Ajustes → Datos → Footprint en la historia, y volvé a abrir Trading Hub)")
             : "";
         _status(data.HistoryError != null
             ? $"{chart.Symbol}: no se pudo traer toda la historia ({data.HistoryError})"

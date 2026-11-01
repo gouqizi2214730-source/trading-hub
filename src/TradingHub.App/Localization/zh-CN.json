@@ -65,6 +65,7 @@
  " · faltan ~{0} h": " · 剩余约 {0} 小时",
  " · faltan ~{0} min": " · 剩余约 {0} 分钟",
  " · footprint (ticks) desde {0}; antes, velas de 1 minuto del exchange (para más footprint, bajá días en Datos)": " · 自 {0} 起为 footprint（tick）；此前为交易所的 1 分钟K线（如需更多 footprint，请在“数据”中下载更多天）",
+ " · footprint (ticks) desde {0}; antes, velas de 1 minuto sin footprint (para más días: Ajustes → Datos → Footprint en la historia, y volvé a abrir Trading Hub)": " · 自 {0} 起有足迹（逐笔）；更早的是没有足迹的 1 分钟 K 线（要更多天：设置 → 数据 → 历史足迹范围，然后重新打开 Trading Hub）",
  " · forex": " · 外汇",
  " · frenada por hoy": " · 今日已停止",
  " · guardado en el historial": " · 已保存到历史记录",
