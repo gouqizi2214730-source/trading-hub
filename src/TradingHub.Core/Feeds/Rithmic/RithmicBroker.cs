@@ -17,6 +17,11 @@ public sealed class RithmicBroker : ITradingAccount, IDisposable
     private readonly object _gate = new();
     private readonly Dictionary<string, Order> _byTag = new();
     private readonly Dictionary<string, Order> _byBasket = new();
+
+    // precios recién modificados que Rithmic todavía no confirmó: los avisos viejos que llegan en el medio (de cuando se
+    // abrió la orden) no los pisan, así la orden no salta al precio anterior un instante en el DOM y el gráfico
+    private readonly Dictionary<Order, (decimal Price, DateTime Until)> _pendingPrice = new(ReferenceEqualityComparer.Instance);
+    private static readonly TimeSpan PendingPriceTimeout = TimeSpan.FromSeconds(5);
     private (string Symbol, string Exchange)? _resolved;
     private List<Order> _active = new();
 
@@ -86,6 +91,22 @@ public sealed class RithmicBroker : ITradingAccount, IDisposable
         }
     }
 
+    /// <summary>Si hay un cambio de precio sin confirmar, lo deja a la vista hasta que Rithmic lo confirme (o 5 s).</summary>
+    private void KeepPendingPrice(RithmicOrderState s, Order o)
+    {
+        if (!_pendingPrice.TryGetValue(o, out var p)) return;
+        bool stop = s.PriceType is 3 or 4;
+        decimal reported = stop ? s.Trigger : s.Price;
+        if (reported == p.Price || s.Done || DateTime.UtcNow > p.Until)
+        {
+            _pendingPrice.Remove(o);
+            return;
+        }
+
+        if (stop) o.TriggerPrice = p.Price;
+        else o.Price = o.TriggerPrice = p.Price;
+    }
+
     /// <summary>Junta lo que cuenta Rithmic (órdenes y posición) con las órdenes de Trading Hub (mismos objetos).</summary>
     private void Sync()
     {
@@ -113,6 +134,7 @@ public sealed class RithmicBroker : ITradingAccount, IDisposable
                 }
 
                 Apply(s, o);
+                KeepPendingPrice(s, o);
                 if (s.Rejected && s.Reason.Length > 0) LastError = "Rithmic rechazó la orden: " + s.Reason;
                 if (o.State == OrderStates.Active && seen.Add(o)) active.Add(o);
             }
@@ -232,8 +254,11 @@ public sealed class RithmicBroker : ITradingAccount, IDisposable
     {
         decimal px = Instrument.RoundPrice(newPrice);
         int total = (int)Math.Round(order.Filled + newQuantity);
-        if (order.Type == OrderTypes.Stop) order.TriggerPrice = px;
+        bool stop = order.Type == OrderTypes.Stop;
+        decimal oldPrice = order.Price, oldTrigger = order.TriggerPrice;
+        if (stop) order.TriggerPrice = px;
         else order.Price = px;
+        lock (_gate) _pendingPrice[order] = (px, DateTime.UtcNow + PendingPriceTimeout);
         _ = Task.Run(async () =>
         {
             try
@@ -245,6 +270,10 @@ public sealed class RithmicBroker : ITradingAccount, IDisposable
             catch (Exception ex)
             {
                 LastError = ex.Message;
+                // no se modificó: vuelve a mostrar el precio que sigue en Rithmic
+                lock (_gate) _pendingPrice.Remove(order);
+                order.Price = oldPrice;
+                order.TriggerPrice = oldTrigger;
             }
 
             Sync();

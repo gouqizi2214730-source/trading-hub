@@ -109,8 +109,22 @@ internal sealed class SettingsView : UserControl, IPage
             Setting("Confirmar órdenes reales", "Pide confirmación antes de enviar órdenes a cuentas reales (además de lo configurado en cada conexión).", confirm),
             Setting("Cuenta simulada", $"Saldo inicial {_svc.Portfolio.BeginBalance:N2}. Las órdenes del simulador se llenan con la cola del libro y el tape real.", new TextBlock()));
 
+        var tickHistory = new ComboBox { MinWidth = 200 };
+        foreach (var (hours, label) in new[] { (2.0, "2 horas"), (6.0, "6 horas"), (24.0, "1 día"), (72.0, "3 días"), (168.0, "7 días"), (336.0, "14 días"), (720.0, "30 días") })
+            tickHistory.Items.Add(new ComboBoxItem { Content = label, Tag = hours });
+        tickHistory.SelectedItem = tickHistory.Items.OfType<ComboBoxItem>().OrderBy(i => Math.Abs((double)i.Tag! - s.TickHistoryHours)).First();
+        tickHistory.SelectionChanged += (_, _) =>
+        {
+            if (tickHistory.SelectedItem is not ComboBoxItem { Tag: double h }) return;
+            s.TickHistoryHours = h;
+            s.Save();
+            _svc.Hub.MaxTickWindow = TimeSpan.FromHours(h);
+            _status("Footprint: se aplica a los mercados que abras desde ahora (los ya abiertos, al volver a abrir Trading Hub)");
+        };
+
         var data = Section("Datos", MaterialIconKind.DatabaseOutline,
             Setting("Grabar lo que llega en vivo", "Guarda cada operación recibida para reabrir gráficos al instante, hacer replay y backtests.", record),
+            Setting("Footprint en la historia", "Cuánto hacia atrás la historia trae cada operación (footprint, perfil y delta completos en esas velas); lo más viejo llega en velas y se ve sin footprint. En Binance y Bybit los días cerrados salen de sus archivos públicos y se guardan; lo de hoy viene de la API y puede tardar unos minutos la primera vez.", tickHistory),
             Setting("Carpeta de datos", AppPaths.Root, Ui.Button("Abrir", MaterialIconKind.FolderOpenOutline, () => Shell.OpenFolder(AppPaths.Root))),
             Setting("Indicadores propios (C#)", AppPaths.UserIndicators, Ui.Button("Abrir", MaterialIconKind.FolderOpenOutline, () => Shell.OpenFolder(AppPaths.UserIndicators))),
             Setting("Estrategias (C#)", AppPaths.Strategies, Ui.Button("Abrir", MaterialIconKind.FolderOpenOutline, () => Shell.OpenFolder(AppPaths.Strategies))));
@@ -118,11 +132,12 @@ internal sealed class SettingsView : UserControl, IPage
         var sleep = BuildSleep();
         var liveStart = BuildLiveStart();
         var hotkeys = BuildHotkeys();
+        var updates = BuildUpdates();
 
         var logo = new Image { Source = AppIcon.Bitmap, Width = 56, Height = 56 };
         var about = Ui.Card(Ui.H(16, logo, Ui.V(4,
             new TextBlock { Text = TradingHub.Common.Product.Name, Classes = { "h1" } },
-            Ui.Muted($"Versión {typeof(App).Assembly.GetName().Version?.ToString(3)} · .NET {Environment.Version} · Avalonia + SkiaSharp"),
+            Ui.Muted($"Versión {UpdateChecker.Current} · .NET {Environment.Version} · Avalonia + SkiaSharp"),
             Ui.Faint("Plataforma personal de order flow: footprint, DOM, cinta, indicadores en C#, estrategias y backtesting."),
             Creator())));
 
@@ -131,7 +146,7 @@ internal sealed class SettingsView : UserControl, IPage
             Spacing = 18,
             MaxWidth = 860,
             HorizontalAlignment = HorizontalAlignment.Left,
-            Children = { Ui.V(4, Ui.H1("Ajustes"), Ui.Muted("Preferencias generales de Trading Hub")), general, trading, liveStart, sleep, hotkeys, data, about },
+            Children = { Ui.V(4, Ui.H1("Ajustes"), Ui.Muted("Preferencias generales de Trading Hub")), general, trading, liveStart, sleep, hotkeys, data, updates, about },
         };
     }
 
@@ -218,6 +233,87 @@ internal sealed class SettingsView : UserControl, IPage
         _sleepState.Text = (g.Awake ? $"Ahora: despierta ({g.Reason})." : $"Ahora: puede dormir ({reason}).") +
                            (!SleepGuard.SupportsLidClosed ? "" : g.LidHelperRunning ? " Tapa cerrada: activo." : _svc.Settings.KeepAwakeLidClosed ? " Tapa cerrada: se activa cuando haya algo corriendo." : "") +
                            (g.LidError != null ? " " + g.LidError : "");
+    }
+
+    // ===================================================================== actualizaciones
+
+    private readonly TextBlock _updateState = new() { Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap };
+    private Button? _updateInstall, _updateCheck;
+
+    private Control BuildUpdates()
+    {
+        var s = _svc.Settings;
+        var auto = Switch(s.CheckUpdates, v => s.CheckUpdates = v);
+        _updateCheck = Ui.Button("Buscar ahora", MaterialIconKind.Refresh, () => _ = CheckUpdatesNow());
+        _updateInstall = Ui.Button("Bajar e instalar", MaterialIconKind.Download, () => _ = InstallUpdate(), "primary");
+        _updateInstall.IsVisible = false;
+        var page = Ui.Button("Versiones en GitHub", MaterialIconKind.OpenInNew, () => Shell.OpenUrl(UpdateChecker.ReleasesUrl), "ghost");
+        UpdateUi.Checked += r => ShowUpdate(r);
+        if (UpdateUi.Last is { } last) ShowUpdate(last);
+        else _updateState.Text = s.LastUpdateCheck is { } t
+            ? $"Tenés la versión {UpdateChecker.Current}. Última búsqueda: {t.ToLocalTime():yyyy-MM-dd HH:mm}."
+            : $"Tenés la versión {UpdateChecker.Current}.";
+
+        return Section("Actualizaciones", MaterialIconKind.Update,
+            Setting("Buscar versiones nuevas al abrir", $"Mira en GitHub ({UpdateChecker.Repo}) si hay un instalador nuevo y avisa también cuando el proyecto original ({UpdateChecker.Upstream}) publica una versión. Nunca instala sin preguntarte.", auto),
+            Setting("Versión", "Tus datos, conexiones y estrategias quedan como están al actualizar.", Ui.H(8, _updateCheck, _updateInstall, page)),
+            _updateState);
+    }
+
+    private async Task CheckUpdatesNow()
+    {
+        if (_updateCheck != null) _updateCheck.IsEnabled = false;
+        _updateState.Text = "Buscando…";
+        try
+        {
+            var r = await UpdateUi.CheckAsync(_svc.Settings);
+            if (r != null) ShowUpdate(r);
+        }
+        finally
+        {
+            if (_updateCheck != null) _updateCheck.IsEnabled = true;
+        }
+    }
+
+    private void ShowUpdate(UpdateChecker.Result r)
+    {
+        var lines = new List<string>();
+        if (r.Update is { } u)
+        {
+            lines.Add($"Versión nueva: {u.Version} (tenés la {UpdateChecker.Current}).");
+            if (!string.IsNullOrWhiteSpace(u.Notes)) lines.Add(u.Notes.Trim().Split('\n').FirstOrDefault()?.Trim() ?? "");
+        }
+        else if (r.Error != null) lines.Add($"Tenés la versión {UpdateChecker.Current}. {r.Error}");
+        else lines.Add($"Tenés la última versión ({UpdateChecker.Current}).");
+
+        if (r.UpstreamNewer is { } up)
+            lines.Add($"El proyecto original ya publicó la {up.Version}: tu repositorio la junta y arma el instalador solo (cada 6 h), o al momento desde Actions → «Sincronizar con el original».");
+        _updateState.Text = string.Join("\n", lines.Where(l => l.Length > 0));
+        if (_updateInstall != null) _updateInstall.IsVisible = r.Update != null;
+    }
+
+    private async Task InstallUpdate()
+    {
+        if (UpdateUi.Last?.Update is not { } u || _updateInstall == null) return;
+        _updateInstall.IsEnabled = false;
+        try
+        {
+            if (!OperatingSystem.IsWindows() || u.InstallerUrl == null)
+            {
+                Shell.OpenUrl(u.PageUrl);
+                return;
+            }
+
+            await UpdateUi.InstallAsync(u, t =>
+            {
+                _updateState.Text = t;
+                _status(t);
+            });
+        }
+        finally
+        {
+            _updateInstall.IsEnabled = true;
+        }
     }
 
     // ===================================================================== atajos de teclado

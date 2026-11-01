@@ -212,13 +212,22 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         foreach (var (gFrom, gTo, fromId) in tickGaps)
         {
             int index = part++;
-            var progress = new Progress<double>(p => HistoryProgress = (index + Math.Clamp(p, 0, 1)) / parts);
-            await Feed.LoadTradesAsync(Instrument, gFrom, gTo, fromId, batch =>
+            // los días ya cerrados salen del archivo público del exchange (un día entero en segundos, en vez de miles de
+            // pedidos a la API); lo de hoy y lo que el archivo todavía no tenga, de la API como siempre
+            var rest = await LoadFromArchivesAsync(gFrom, gTo, fromId, fetched, from, to, maxIdExclusive,
+                p => HistoryProgress = (index + Math.Clamp(p, 0, 1) * 0.5) / parts, ct).ConfigureAwait(false);
+            for (int r = 0; r < rest.Count; r++)
             {
-                foreach (var t in batch)
-                    if (t.Id < maxIdExclusive && t.Time >= from && t.Time <= to) fetched.Add(t);
-                return !ct.IsCancellationRequested;
-            }, progress, ct).ConfigureAwait(false);
+                var (rFrom, rTo, rId) = rest[r];
+                double share = 1.0 / rest.Count, done = (double)r / rest.Count;
+                var progress = new Progress<double>(p => HistoryProgress = (index + 0.5 + 0.5 * (done + share * Math.Clamp(p, 0, 1))) / parts);
+                await Feed.LoadTradesAsync(Instrument, rFrom, rTo, rId, batch =>
+                {
+                    foreach (var t in batch)
+                        if (t.Id < maxIdExclusive && t.Time >= from && t.Time <= to) fetched.Add(t);
+                    return !ct.IsCancellationRequested;
+                }, progress, ct).ConfigureAwait(false);
+            }
         }
 
         if (fetched.Count > 0)
@@ -244,6 +253,72 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         var synthetic = new List<Trade>(klines.Count * 4);
         KlineHistory.Synthesize(klines, Instrument, minutes, windows, synthetic);
         return KlineHistory.MergeByTime(synthetic, real);
+    }
+
+    /// <summary>
+    /// Usar los archivos públicos diarios (Binance y Bybit) para los días cerrados que faltan. Se apaga en las pruebas.
+    /// </summary>
+    public static bool UsePublicArchives { get; set; } = true;
+
+    /// <summary>
+    /// Baja de los archivos públicos los días ya cerrados (UTC) que tocan [<paramref name="gFrom"/>, <paramref name="gTo"/>)
+    /// y devuelve lo que queda para pedir a la API (hoy, y los días cuyo archivo todavía no se publicó).
+    /// </summary>
+    private async Task<List<(DateTime From, DateTime To, long? FromId)>> LoadFromArchivesAsync(DateTime gFrom, DateTime gTo, long? fromId,
+        List<Trade> output, DateTime from, DateTime to, long maxIdExclusive, Action<double> progress, CancellationToken ct)
+    {
+        var rest = new List<(DateTime From, DateTime To, long? FromId)>();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        if (!UsePublicArchives || !PublicArchives.Supports(Instrument.FeedId) || DateOnly.FromDateTime(gFrom) >= today)
+        {
+            rest.Add((gFrom, gTo, fromId));
+            return rest;
+        }
+
+        var days = EachDay(gFrom, gTo).Where(d => d < today).ToList();
+        DateTime cursor = gFrom;
+        long? id = fromId;
+        for (int i = 0; i < days.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var day = days[i];
+            var dayStart = day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            var dayEnd = dayStart.AddDays(1);
+            DateTime sFrom = gFrom > dayStart ? gFrom : dayStart, sTo = gTo < dayEnd ? gTo : dayEnd;
+            if (sTo <= sFrom) continue;
+            List<Trade>? list = null;
+            // menos de una hora: no vale bajar el día entero
+            if (sTo - sFrom >= TimeSpan.FromHours(1))
+            {
+                try
+                {
+                    int index = i;
+                    list = await PublicArchives.DownloadDayAsync(Instrument, day, new Progress<double>(p => progress((index + Math.Clamp(p, 0, 1)) / days.Count)), ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    list = null; // sin archivo (o sin red para él): queda para la API
+                }
+            }
+
+            if (list == null)
+            {
+                if (cursor < sTo) rest.Add((cursor, sTo, id));
+                cursor = sTo;
+                id = null;
+                continue;
+            }
+
+            if (cursor < sFrom) rest.Add((cursor, sFrom, id));
+            foreach (var t in list)
+                if (t.Id < maxIdExclusive && t.Time >= sFrom && t.Time < sTo && t.Time >= from && t.Time <= to) output.Add(t);
+            cursor = sTo;
+            id = null;
+        }
+
+        if (cursor < gTo) rest.Add((cursor, gTo, id));
+        progress(1);
+        return rest;
     }
 
     /// <summary>Rangos que faltan en <paramref name="local"/> (ordenado) para cubrir [from, to).</summary>
@@ -565,6 +640,12 @@ public sealed class MarketDataHub : IDisposable
 
     public string? RecordingRoot { get; set; }
 
+    /// <summary>
+    /// Hasta qué antigüedad la historia trae operaciones reales (con footprint); lo anterior se completa con velas.
+    /// Lo elige Ajustes → Datos.
+    /// </summary>
+    public TimeSpan MaxTickWindow { get; set; } = TimeSpan.FromDays(1);
+
     /// <summary>Si los instrumentos nuevos graban el vivo.</summary>
     public bool RecordLive { get; set; } = true;
 
@@ -573,8 +654,10 @@ public sealed class MarketDataHub : IDisposable
     public InstrumentData GetOrStart(IMarketDataFeed feed, Instrument instrument, TimeSpan history)
     {
         if (_items.TryGetValue(instrument.Key, out var d)) return d;
-        // ticks del exchange para lo reciente; lo más viejo se completa con velas (rápido aunque sean años)
-        var window = history < TimeSpan.FromHours(2) ? TimeSpan.FromHours(2) : history > TimeSpan.FromDays(1) ? TimeSpan.FromDays(1) : history;
+        // ticks del exchange para lo reciente; lo más viejo se completa con velas (rápido aunque sean años). La ventana no
+        // depende de cuánto se cargó al abrir: si después se pide más historia (más días, o arrastrando hacia atrás), lo
+        // que cae dentro de la ventana también llega con sus operaciones y se ve con footprint
+        var window = MaxTickWindow < TimeSpan.FromHours(2) ? TimeSpan.FromHours(2) : MaxTickWindow;
         d = new InstrumentData(instrument, feed) { RecordingRoot = RecordingRoot, RecordLive = RecordLive, TickWindow = window };
         _items[instrument.Key] = d;
         d.Start(feed.Now - history);

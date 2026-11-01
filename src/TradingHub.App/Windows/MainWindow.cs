@@ -106,6 +106,18 @@ public sealed class MainWindow : Window
                     CrashLog.Write(ex);
                 }
             }), TaskScheduler.Default);
+            // versiones nuevas (en GitHub, cada 12 h como mucho; se apaga en Ajustes)
+            _ = Task.Delay(TimeSpan.FromSeconds(20)).ContinueWith(_ => Dispatcher.UIThread.Post(async () =>
+            {
+                try
+                {
+                    await UpdateUi.CheckAtStartupAsync(this, _svc.Settings, SetStatus);
+                }
+                catch (Exception ex)
+                {
+                    CrashLog.Write(ex);
+                }
+            }), TaskScheduler.Default);
         };
 
         // atajos de teclado configurables (solo con la sección Trading a la vista)

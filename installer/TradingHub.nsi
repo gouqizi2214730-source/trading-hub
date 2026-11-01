@@ -18,6 +18,10 @@ ${UnStrStr}
 !ifndef VERSION
   !define VERSION "1.1.0"
 !endif
+; VIProductVersion necesita 4 números: 1.2.0 → 1.2.0.0; los empaquetados de esta copia ya traen 4 (1.2.0.1)
+!ifndef VIVERSION
+  !define VIVERSION "${VERSION}.0"
+!endif
 !ifndef ARCH
   !define ARCH "x64"
 !endif
@@ -40,7 +44,7 @@ RequestExecutionLevel user
 SetCompressor /SOLID lzma
 ManifestDPIAware true
 BrandingText "Trading Hub ${VERSION}"
-VIProductVersion "${VERSION}.0"
+VIProductVersion "${VIVERSION}"
 VIAddVersionKey "ProductName" "${NAME}"
 VIAddVersionKey "FileDescription" "${NAME} Setup"
 VIAddVersionKey "FileVersion" "${VERSION}"
@@ -143,7 +147,8 @@ Section "Trading Hub" SecMain
   WriteRegStr HKCU "${UNINSTKEY}" "DisplayName" "${NAME}"
   WriteRegStr HKCU "${UNINSTKEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "${UNINSTKEY}" "Publisher" "Trading Hub"
-  WriteRegStr HKCU "${UNINSTKEY}" "URLInfoAbout" "https://github.com/ralphtradesz/trading-hub"
+  WriteRegStr HKCU "${UNINSTKEY}" "URLInfoAbout" "https://github.com/gouqizi2214730-source/trading-hub"
+  WriteRegStr HKCU "${UNINSTKEY}" "URLUpdateInfo" "https://github.com/gouqizi2214730-source/trading-hub/releases"
   WriteRegStr HKCU "${UNINSTKEY}" "DisplayIcon" "$INSTDIR\${EXE}"
   WriteRegStr HKCU "${UNINSTKEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "${UNINSTKEY}" "UninstallString" '"$INSTDIR\Desinstalar Trading Hub.exe"'

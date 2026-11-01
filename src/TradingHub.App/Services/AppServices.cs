@@ -142,6 +142,12 @@ public sealed class AppSettings
 
     public bool RecordLiveData { get; set; } = true;
 
+    /// <summary>
+    /// Horas hacia atrás con operaciones reales (footprint completo) al cargar la historia de un gráfico; lo anterior va
+    /// en velas. Los días cerrados de Binance y Bybit salen de sus archivos públicos (rápido).
+    /// </summary>
+    public double TickHistoryHours { get; set; } = 72;
+
     /// <summary>Modo sin dormir: la Mac no se duerme mientras haya estrategias en vivo o agentes trabajando.</summary>
     public bool KeepAwake { get; set; } = true;
 
@@ -150,6 +156,15 @@ public sealed class AppSettings
     public bool LidClosedOnlyOnPower { get; set; } = true;
     /// <summary>Idioma de la interfaz (es, en, zh-CN). null = todavía no se eligió: se toma el del sistema al arrancar.</summary>
     public string? Language { get; set; }
+
+    /// <summary>Buscar versiones nuevas al abrir (cada 12 h como mucho).</summary>
+    public bool CheckUpdates { get; set; } = true;
+
+    /// <summary>Cuándo se buscó por última vez (UTC).</summary>
+    public DateTime? LastUpdateCheck { get; set; }
+
+    /// <summary>Versión que se eligió no instalar: no se vuelve a ofrecer sola (sí desde Ajustes).</summary>
+    public string? SkippedUpdate { get; set; }
 
     /// <summary>Si ya había ajustes guardados (alguien que ya usaba la app antes de que hubiera idiomas).</summary>
     public static bool Saved => File.Exists(FilePath);
@@ -363,6 +378,7 @@ public sealed class AppServices
         // las que corrían al cerrar Trading Hub (enseguida el guardado periódico las marca detenidas): para reanudarlas al abrir
         RunningAtLastClose = TradingHub.Strategies.LiveStore.LoadRunners().Where(i => i.Running && !LiveEntry.IsManaged(i.Source)).ToList();
         Hub.RecordLive = Settings.RecordLiveData;
+        Hub.MaxTickWindow = TimeSpan.FromHours(Math.Clamp(Settings.TickHistoryHours, 2, 24 * 30));
         StatsProvider.SetSource(Statistics);
         Catalog.Scan(typeof(TradingHub.Indicators.Native.BigTrades).Assembly, "Trading Hub");
         // los indicadores técnicos, si vienen en esta versión (la de código abierto no los trae)
