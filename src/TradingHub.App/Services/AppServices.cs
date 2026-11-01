@@ -367,6 +367,14 @@ public sealed class AppServices
                     _realBrokers.Remove(key);
                 }
             }
+
+            // Bybit: claves o entorno nuevos → la cuenta se vuelve a crear con ellos la próxima vez que se pide
+            if (p.Kind == ConnectionKind.Bybit)
+                foreach (var key in _realBrokers.Keys.Where(k => k.StartsWith(p.Id + "|", StringComparison.Ordinal)).ToList())
+                {
+                    (_realBrokers[key] as IDisposable)?.Dispose();
+                    _realBrokers.Remove(key);
+                }
         };
         Directory.CreateDirectory(AppPaths.Root);
         Directory.CreateDirectory(AppPaths.UserIndicators);
@@ -524,6 +532,13 @@ public sealed class AppServices
             else if (p.AllowRealOrders) yield return new AccountOption(p.Id, $"{p.Name} — REAL", true);
         }
 
+        // cuentas de Bybit (perpetuos USDT): demo y testnet siempre; la real solo si se permitió en Conexiones
+        foreach (var p in Connections.Enabled.Where(p => p.Kind == ConnectionKind.Bybit && p.MarketDataId == data.Instrument.FeedId && !string.IsNullOrWhiteSpace(p.ApiKey)))
+        {
+            if (p.BybitEnv != TradingHub.Feeds.Bybit.BybitEnvironment.Real) yield return new AccountOption(p.Id, $"{p.Name} ({BybitEnvLabel(p.BybitEnv)})", false);
+            else if (p.AllowRealOrders) yield return new AccountOption(p.Id, $"{p.Name} — REAL", true);
+        }
+
         // cuentas de Tradovate: operan cualquier futuro de CME, también desde un gráfico de Rithmic
         if (IsCmeFuture(data.Instrument))
             foreach (var p in Connections.Enabled.Where(p => p.Kind == ConnectionKind.Tradovate && !string.IsNullOrWhiteSpace(p.TradovateUser)))
@@ -578,10 +593,26 @@ public sealed class AppServices
         }
 
         var p = Connections.Find(accountId) ?? throw new KeyNotFoundException(accountId);
+        if (p.Kind == ConnectionKind.Bybit)
+        {
+            var bb = new TradingHub.Feeds.Bybit.BybitBroker(data, Connections.BybitSettingsOf(p),
+                p.BybitEnv == TradingHub.Feeds.Bybit.BybitEnvironment.Real ? $"{p.Name} — REAL" : $"{p.Name} ({BybitEnvLabel(p.BybitEnv)})");
+            _realBrokers[key] = bb;
+            return bb;
+        }
+
         b = new BinanceBroker(data, Connections.BinanceSettingsOf(p), p.Testnet ? $"{p.Name} (testnet)" : $"{p.Name} — REAL");
         _realBrokers[key] = b;
         return b;
     }
+
+    /// <summary>Cómo se llama cada entorno de Bybit en la interfaz.</summary>
+    public static string BybitEnvLabel(TradingHub.Feeds.Bybit.BybitEnvironment env) => env switch
+    {
+        TradingHub.Feeds.Bybit.BybitEnvironment.Demo => "demo",
+        TradingHub.Feeds.Bybit.BybitEnvironment.Testnet => "testnet",
+        _ => "REAL",
+    };
 
     public void Shutdown()
     {

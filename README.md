@@ -5,6 +5,7 @@
 > - **自动跟进上游**：GitHub Actions 每 6 小时检查一次原项目，有更新就自动合并、跑测试、打包 Windows 安装程序并发布 Release（有冲突时不推送，只开一个 issue）。
 > - **足迹图历史更完整**：可在 设置 → 数据 →「历史足迹范围」选 2 小时到 30 天；Binance / Bybit 已收盘的日子直接从交易所公开文件下载，远处的 K 线也有足迹。
 > - **成交量分布可调行数**：「交易时段成交量分布」指标新增「每行 Tick 数」和「行数」两种调法。
+> - **用 Bybit 账户交易**：USDT 永续合约（统一账户 UTA），支持模拟盘 Demo Trading、测试网和实盘；市价、限价、止损单，改单不撤单，图表上一键平仓/反手。在 连接 → Bybit 里填 API Key。
 > - **更快启动**：ReadyToRun 预编译；修复 Rithmic 改单后价格短暂跳回旧价的问题。
 >
 > **下载 Windows 安装程序：[TradingHub-Setup-x64.exe](https://github.com/gouqizi2214730-source/trading-hub/releases/latest/download/TradingHub-Setup-x64.exe)**（ARM 电脑用 [arm64 版](https://github.com/gouqizi2214730-source/trading-hub/releases/latest/download/TradingHub-Setup-arm64.exe)）· [全部版本](https://github.com/gouqizi2214730-source/trading-hub/releases)

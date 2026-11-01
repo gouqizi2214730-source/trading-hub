@@ -128,6 +128,10 @@ public sealed class ConnectionProfile
     public bool ConfirmOrders { get; set; } = true;
     public decimal MaxOrderQuantity { get; set; }
 
+    // Bybit: dónde opera la cuenta (demo, testnet o real) y un servidor propio opcional (p. ej. api.bytick.com)
+    public TradingHub.Feeds.Bybit.BybitEnvironment BybitEnv { get; set; } = TradingHub.Feeds.Bybit.BybitEnvironment.Demo;
+    public string BybitServer { get; set; } = "";
+
     // Rithmic
     public string RithmicUri { get; set; } = RithmicGateways.TestUri;
     public string RithmicSystem { get; set; } = "Rithmic Test";
@@ -408,6 +412,14 @@ public sealed class ConnectionManager
     public TradingHub.Feeds.Databento.DatabentoClient DatabentoOf(ConnectionProfile p) =>
         new(GetSecret(p), Environment.GetEnvironmentVariable("TRADINGHUB_DATABENTO_URL") is { Length: > 0 } u ? u : null);
 
+    public TradingHub.Feeds.Bybit.BybitAccountSettings BybitSettingsOf(ConnectionProfile p) => new()
+    {
+        Environment = p.BybitEnv,
+        ApiKey = p.ApiKey,
+        ApiSecret = GetSecret(p),
+        BaseUrl = Environment.GetEnvironmentVariable("TRADINGHUB_BYBIT_URL") is { Length: > 0 } u ? u : string.IsNullOrWhiteSpace(p.BybitServer) ? null : p.BybitServer,
+    };
+
     public BinanceAccountSettings BinanceSettingsOf(ConnectionProfile p) => new()
     {
         Futures = p.Kind == ConnectionKind.BinanceFutures,
@@ -437,7 +449,10 @@ public sealed class ConnectionManager
                 case ConnectionKind.Bybit:
                 {
                     var inst = await new BybitFeed().GetInstrumentsAsync(ct);
-                    return (true, $"{inst.Count} perpetuos disponibles (datos públicos).");
+                    if (string.IsNullOrWhiteSpace(p.ApiKey)) return (true, $"{inst.Count} perpetuos disponibles (datos públicos). Sin API key: solo datos.");
+                    using var acc = new TradingHub.Feeds.Bybit.BybitAccountClient(BybitSettingsOf(p));
+                    var (ok, msg) = await acc.TestAsync(ct);
+                    return (ok, $"{inst.Count} perpetuos disponibles. {msg}");
                 }
                 case ConnectionKind.Rithmic:
                 case ConnectionKind.AmpFutures:

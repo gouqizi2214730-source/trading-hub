@@ -145,7 +145,11 @@ internal sealed class ConnectionsView : UserControl, IPage
             ConnectionKind.BinanceFutures or ConnectionKind.BinanceSpot => string.IsNullOrWhiteSpace(p.ApiKey)
                 ? "datos públicos · sin cuenta"
                 : p.Testnet ? "datos + cuenta testnet" : p.AllowRealOrders ? "datos + cuenta REAL" : "datos + cuenta real (solo lectura)",
-            ConnectionKind.Bybit => "datos públicos",
+            ConnectionKind.Bybit => string.IsNullOrWhiteSpace(p.ApiKey)
+                ? "datos públicos · sin cuenta"
+                : p.BybitEnv == TradingHub.Feeds.Bybit.BybitEnvironment.Real
+                    ? p.AllowRealOrders ? "datos + cuenta REAL" : "datos + cuenta real (solo lectura)"
+                    : $"datos + cuenta {AppServices.BybitEnvLabel(p.BybitEnv)}",
             ConnectionKind.Rithmic or ConnectionKind.AmpFutures => string.IsNullOrWhiteSpace(p.RithmicUser) ? "sin usuario configurado" : $"{p.RithmicUser} · {p.RithmicSystem}",
             ConnectionKind.Tradovate => string.IsNullOrWhiteSpace(p.TradovateUser) ? "sin usuario configurado" : $"{p.TradovateUser} · {(p.Testnet ? "demo" : p.AllowRealOrders ? "REAL" : "real (solo lectura)")}",
             ConnectionKind.CTrader => string.IsNullOrWhiteSpace(p.CTraderClientId) ? "sin aplicación configurada" : $"{(p.Testnet ? "demo" : "real")}{(p.CTraderLogin > 0 ? " · cuenta " + p.CTraderLogin : "")}",
@@ -232,7 +236,8 @@ internal sealed class ConnectionsView : UserControl, IPage
                 sections.Children.Add(Ui.Card(BinanceAccount(p, apply)));
                 break;
             case ConnectionKind.Bybit:
-                dataSection.Children.Add(Note(MaterialIconKind.InformationOutline, "Datos públicos de los perpetuos lineales (USDT) de Bybit. Operar con cuenta Bybit todavía no está disponible."));
+                dataSection.Children.Add(Note(MaterialIconKind.InformationOutline, "Los datos de los perpetuos lineales (USDT) de Bybit son públicos: no hace falta cuenta para ver gráficos, DOM y cinta."));
+                sections.Children.Add(Ui.Card(BybitAccount(p, apply)));
                 break;
             case ConnectionKind.Rithmic:
             case ConnectionKind.AmpFutures:
@@ -404,6 +409,70 @@ internal sealed class ConnectionsView : UserControl, IPage
             testnet,
             TwoColumns(Ui.Field("API key", key), Ui.Field("API secret", secret)),
             help,
+            Ui.Divider(),
+            allowReal,
+            confirm,
+            Ui.Field("Cantidad máxima por orden (0 = sin límite)", maxQty),
+            warn);
+    }
+
+    private Control BybitAccount(ConnectionProfile p, List<Action> apply)
+    {
+        var env = new ComboBox { MinWidth = 320 };
+        foreach (var (value, label) in new[]
+                 {
+                     (TradingHub.Feeds.Bybit.BybitEnvironment.Demo, "Demo Trading (mercado real, dinero de prueba)"),
+                     (TradingHub.Feeds.Bybit.BybitEnvironment.Testnet, "Testnet (testnet.bybit.com)"),
+                     (TradingHub.Feeds.Bybit.BybitEnvironment.Real, "Cuenta real"),
+                 })
+            env.Items.Add(new ComboBoxItem { Content = label, Tag = value });
+        env.SelectedItem = env.Items.OfType<ComboBoxItem>().First(i => (TradingHub.Feeds.Bybit.BybitEnvironment)i.Tag! == p.BybitEnv);
+        var key = new TextBox { Text = p.ApiKey, Watermark = "API key" };
+        var secret = new TextBox { PasswordChar = '•', Watermark = string.IsNullOrEmpty(_svc.Connections.GetSecret(p)) ? "API secret" : $"•••••••• (guardado en {Os.SecretStoreShort})" };
+        var server = new TextBox { Text = p.BybitServer, Watermark = "vacío = el servidor de Bybit para ese entorno" };
+        var allowReal = new CheckBox { Content = "Permitir órdenes REALES desde Trading Hub", IsChecked = p.AllowRealOrders };
+        var confirm = new CheckBox { Content = "Pedir confirmación antes de cada orden real", IsChecked = p.ConfirmOrders };
+        var maxQty = new NumericUpDown { Value = p.MaxOrderQuantity, Minimum = 0, Increment = 0.001m, FormatString = "0.#####", Watermark = "sin límite" };
+        var warn = Note(MaterialIconKind.AlertOutline, "Con la cuenta real las órdenes mueven dinero de verdad. Probá primero con Demo Trading; activá las órdenes reales únicamente si sabés lo que hacés.");
+        TradingHub.Feeds.Bybit.BybitEnvironment Selected() => env.SelectedItem is ComboBoxItem { Tag: TradingHub.Feeds.Bybit.BybitEnvironment e } ? e : TradingHub.Feeds.Bybit.BybitEnvironment.Demo;
+        void UpdateEnabled()
+        {
+            bool real = Selected() == TradingHub.Feeds.Bybit.BybitEnvironment.Real;
+            allowReal.IsEnabled = real;
+            confirm.IsEnabled = real && allowReal.IsChecked == true;
+            maxQty.IsEnabled = real && allowReal.IsChecked == true;
+            warn.IsVisible = real;
+        }
+
+        env.SelectionChanged += (_, _) => UpdateEnabled();
+        allowReal.IsCheckedChanged += (_, _) => UpdateEnabled();
+        UpdateEnabled();
+
+        apply.Add(() =>
+        {
+            p.BybitEnv = Selected();
+            p.Testnet = p.BybitEnv != TradingHub.Feeds.Bybit.BybitEnvironment.Real;
+            p.ApiKey = (key.Text ?? "").Trim();
+            p.BybitServer = (server.Text ?? "").Trim();
+            if (!string.IsNullOrWhiteSpace(secret.Text)) _svc.Connections.SetSecret(p, secret.Text.Trim());
+            secret.Text = "";
+            p.AllowRealOrders = !p.Testnet && allowReal.IsChecked == true;
+            p.ConfirmOrders = confirm.IsChecked != false;
+            p.MaxOrderQuantity = maxQty.Value ?? 0;
+        });
+
+        var help = new Button { Content = "¿Cómo creo una API key?", Classes = { "ghost" }, Padding = new Thickness(0), FontSize = 12, Foreground = Ui.Focus };
+        help.Click += (_, _) => Shell.Open(Selected() == TradingHub.Feeds.Bybit.BybitEnvironment.Testnet
+            ? "https://testnet.bybit.com/app/user/api-management"
+            : "https://www.bybit.com/app/user/api-management");
+
+        return Ui.V(14,
+            Ui.H2("Cuenta para operar"),
+            Note(MaterialIconKind.ShieldKeyOutline, "Creá una API key de sistema (HMAC) solo con permiso de Contratos → Órdenes y Posiciones (sin retiros). Para Demo Trading, creala con Bybit en modo Demo. Trading Hub opera los perpetuos USDT de la cuenta unificada (UTA) en modo unidireccional (one-way). El secret se guarda en " + (Os.IsWindows ? "el Administrador de credenciales de Windows." : "el Llavero de macOS.")),
+            Ui.Field("Entorno", env),
+            TwoColumns(Ui.Field("API key", key), Ui.Field("API secret", secret)),
+            help,
+            Ui.Field("Servidor (opcional; por ejemplo https://api.bytick.com si api.bybit.com no responde desde tu red)", server),
             Ui.Divider(),
             allowReal,
             confirm,
