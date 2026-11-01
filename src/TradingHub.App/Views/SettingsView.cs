@@ -111,7 +111,7 @@ internal sealed class SettingsView : UserControl, IPage
             Setting("Cuenta simulada", $"Saldo inicial {_svc.Portfolio.BeginBalance:N2}. Las órdenes del simulador se llenan con la cola del libro y el tape real.", new TextBlock()));
 
         var tickHistory = new ComboBox { MinWidth = 200 };
-        foreach (var (hours, label) in new[] { (2.0, "2 horas"), (6.0, "6 horas"), (24.0, "1 día"), (72.0, "3 días"), (168.0, "7 días"), (336.0, "14 días"), (720.0, "30 días") })
+        foreach (var (hours, label) in new[] { (2.0, "2 horas"), (6.0, "6 horas"), (24.0, "1 día"), (72.0, "3 días"), (168.0, "7 días"), (336.0, "14 días"), (720.0, "30 días"), (1440.0, "60 días"), (2160.0, "90 días"), (4320.0, "180 días"), (8760.0, "1 año"), (17520.0, "2 años") })
             tickHistory.Items.Add(new ComboBoxItem { Content = label, Tag = hours });
         tickHistory.SelectedItem = tickHistory.Items.OfType<ComboBoxItem>().OrderBy(i => Math.Abs((double)i.Tag! - s.TickHistoryHours)).First();
         tickHistory.SelectionChanged += (_, _) =>
@@ -152,7 +152,7 @@ internal sealed class SettingsView : UserControl, IPage
             Setting("Resumen de la historia más vieja",
                 $"Lo bajado que queda antes de la ventana de footprint se carga juntado en tramos de este largo: las velas de ese tramo o más largas quedan exactas (OHLC, volumen, delta y footprint); las más cortas, no. 1 minuto usa unas 4 veces más memoria que 1 hora. Esta computadora tiene {ram / (double)(1L << 30):0} GB: entran unos {TradingHub.Data.InstrumentData.MaxCompactTrades / 1_000_000:N0} millones de operaciones resumidas (BTC: ~100-200 mil por día con 1 minuto).",
                 compact),
-            Setting("Footprint en la historia", "Cuánto hacia atrás la historia trae cada operación. Lo más viejo que tengas bajado en Datos se carga resumido (ver «Resumen de la historia más vieja»), con footprint y perfil en filas de ~1 punto básico; la primera vez arma un resumen por día y después abre al instante. Sin ticks bajados, lo viejo llega en velas y se ve sin footprint.", tickHistory),
+            Setting("Footprint en la historia", "Cuánto hacia atrás la historia trae cada operación. Lo más viejo que tengas bajado en Datos se carga resumido (ver «Resumen de la historia más vieja»), con footprint y perfil en filas de ~1 punto básico; la primera vez arma un resumen por día y después abre al instante. Sin ticks bajados, lo viejo llega en velas y se ve sin footprint. Del exchange se traen solos hasta 30 días; para más, bajalos en Datos. Lo que no entra en la memoria se carga resumido.", tickHistory),
             BuildMarketDataFolder(),
             FolderRow("Carpeta de datos", $"{AppPaths.Root} · ajustes, conexiones, espacio de trabajo, cuentas, backtests y estrategias en vivo",
                 AppPaths.Root, TradingHub.Common.Product.DefaultAppData, FolderKind.App),

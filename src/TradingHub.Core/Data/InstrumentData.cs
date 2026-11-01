@@ -152,6 +152,9 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
     /// </summary>
     public TimeSpan TickWindow { get; set; } = TimeSpan.FromHours(2);
 
+    /// <summary>Hasta cuánto atrás se piden ticks al exchange al abrir un gráfico (lo más viejo, de lo bajado en Datos).</summary>
+    public static TimeSpan MaxFetchWindow { get; set; } = TimeSpan.FromDays(30);
+
     /// <summary>Máximo de operaciones reales que se leen de disco por carga (lo que no entra se completa con velas).</summary>
     public static long MaxDiskTrades { get; set; } = MemoryBudget(0.12, 30_000_000, 200_000_000);
 
@@ -244,7 +247,9 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         // lo reciente en ticks; lo viejo en velas (si el feed las tiene)
         var klineSource = Feed as IKlineHistory;
         // los ticks cubren las últimas horas de mercado (con el mercado cerrado, antes de la última operación)
-        DateTime tickCut = klineSource != null ? (_anchor ?? Feed.Now) - TickWindow : DateTime.MinValue;
+        // (con ventanas largas, del exchange se piden ticks como mucho de MaxFetchWindow: lo de antes sale de lo bajado en
+        // Datos o va en velas; si no, meses de ticks bajados de una vez llenarían la memoria)
+        DateTime tickCut = klineSource != null ? (_anchor ?? Feed.Now) - (TickWindow < MaxFetchWindow ? TickWindow : MaxFetchWindow) : DateTime.MinValue;
         var tickGaps = new List<(DateTime From, DateTime To, long? FromId)>();
         var klineGaps = new List<(DateTime From, DateTime To)>();
         foreach (var (gFrom, gTo, fromId) in gaps)

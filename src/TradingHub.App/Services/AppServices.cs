@@ -409,7 +409,7 @@ public sealed class AppServices
         // las que corrían al cerrar Trading Hub (enseguida el guardado periódico las marca detenidas): para reanudarlas al abrir
         RunningAtLastClose = TradingHub.Strategies.LiveStore.LoadRunners().Where(i => i.Running && !LiveEntry.IsManaged(i.Source)).ToList();
         Hub.RecordLive = Settings.RecordLiveData;
-        Hub.MaxTickWindow = TimeSpan.FromHours(Math.Clamp(Settings.TickHistoryHours, 2, 24 * 30));
+        Hub.MaxTickWindow = TimeSpan.FromHours(Math.Clamp(Settings.TickHistoryHours, 2, 24 * 731));
         StatsProvider.SetSource(Statistics);
         Catalog.Scan(typeof(TradingHub.Indicators.Native.BigTrades).Assembly, "Trading Hub");
         // los indicadores técnicos, si vienen en esta versión (la de código abierto no los trae)
