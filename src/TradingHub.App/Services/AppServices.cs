@@ -378,8 +378,9 @@ public sealed class AppServices
                 }
             }
 
-            // Bybit: claves o entorno nuevos → la cuenta se vuelve a crear con ellos la próxima vez que se pide
-            if (p.Kind == ConnectionKind.Bybit)
+            // Bybit y Binance: claves o entorno nuevos → la cuenta se vuelve a crear con ellos la próxima vez que se pide
+            // (los datos de mercado siguen con el mismo feed: no dependen de las claves)
+            if (p.Kind is ConnectionKind.Bybit or ConnectionKind.BinanceFutures or ConnectionKind.BinanceSpot)
                 foreach (var key in _realBrokers.Keys.Where(k => k.StartsWith(p.Id + "|", StringComparison.Ordinal)).ToList())
                 {
                     (_realBrokers[key] as IDisposable)?.Dispose();
