@@ -7,10 +7,11 @@ namespace TradingHub.Data;
 /// Historia resumida para ver meses o años de ticks guardados sin llenar la memoria.
 ///
 /// Los días con ticks en disco que quedan fuera de la ventana de ticks (Ajustes → Datos → Footprint en la historia) se
-/// cargan resumidos por hora: en cada hora, la primera y la última operación tal cual (apertura y cierre exactos), la más
-/// alta y la más baja (máximo y mínimo exactos) y el resto juntado por lado y por fila de precio de ~1 punto básico
-/// (BTC a 80.000: filas de 0,8). Así las velas de 1 hora o más conservan su OHLC, su volumen y su delta exactos y un
-/// footprint y perfil fieles (con filas de ese tamaño), con 50-100 veces menos operaciones.
+/// cargan resumidos en tramos de N minutos (1, 5, 15 o 60; Ajustes → Datos): en cada tramo, la primera y la última
+/// operación tal cual (apertura y cierre exactos), la más alta y la más baja (máximo y mínimo exactos) y el resto juntado
+/// por lado y por fila de precio de ~1 punto básico (BTC a 80.000: filas de 0,8). Así las velas de N minutos o más
+/// conservan su OHLC, su volumen y su delta exactos y un footprint y perfil fieles (con filas de ese tamaño). Un día real
+/// de BTCUSDT en Bybit: 2,38 millones de operaciones → ~180 mil por minuto o ~43 mil por hora.
 ///
 /// Las operaciones resumidas tienen ids negativos por encima de <see cref="CompressedIdBase"/>: cuentan como reales para
 /// las velas (hay footprint) pero no como operaciones sueltas (Big Trades las ignora). Cada día se resume una sola vez y
@@ -21,13 +22,16 @@ public static class CompactHistory
     /// <summary>Los ids de las operaciones resumidas van de acá hasta 0 (las armadas con velas, por debajo).</summary>
     public const long CompressedIdBase = long.MinValue / 4;
 
-    private const int Version = 1;
+    private const int Version = 2;
+
+    /// <summary>Tramos posibles (minutos).</summary>
+    public static readonly int[] Granularities = { 1, 5, 15, 60 };
     private const int Magic = 0x48434854; // "THCH"
 
     public static bool IsCompressed(long id) => id >= CompressedIdBase && id < 0;
 
-    public static string CachePath(string root, string feedId, string symbol, DateOnly day) =>
-        Path.ChangeExtension(TickFile.DayPath(root, feedId, symbol, day), ".thc");
+    public static string CachePath(string root, string feedId, string symbol, DateOnly day, int minutes = 60) =>
+        Path.ChangeExtension(TickFile.DayPath(root, feedId, symbol, day), $".m{minutes}.thc");
 
     /// <summary>Alto de las filas de precio en que se junta (múltiplo del tick, ~1 punto básico del precio).</summary>
     public static decimal BucketFor(decimal price, decimal tick)
@@ -38,8 +42,9 @@ public static class CompactHistory
     }
 
     /// <summary>Resume un día (ordenado por tiempo). Devuelve operaciones con id 0 (los ids se asignan al cargar).</summary>
-    public static List<Trade> Compress(IReadOnlyList<Trade> trades, decimal tick)
+    public static List<Trade> Compress(IReadOnlyList<Trade> trades, decimal tick, int minutes = 60)
     {
+        long span = TimeSpan.TicksPerMinute * Math.Max(1, minutes);
         var res = new List<Trade>(Math.Min(trades.Count, 1 << 16));
         if (trades.Count == 0) return res;
         decimal bucket = BucketFor(trades[0].Price, tick);
@@ -47,9 +52,9 @@ public static class CompactHistory
         int i = 0;
         while (i < trades.Count)
         {
-            long hour = trades[i].Time.Ticks / TimeSpan.TicksPerHour;
+            long slot = trades[i].Time.Ticks / span;
             int start = i;
-            while (i < trades.Count && trades[i].Time.Ticks / TimeSpan.TicksPerHour == hour) i++;
+            while (i < trades.Count && trades[i].Time.Ticks / span == slot) i++;
             int end = i - 1;
             int hi = start, lo = start;
             for (int k = start; k <= end; k++)
@@ -94,22 +99,22 @@ public static class CompactHistory
     /// El día resumido, desde la caché si está al día con el archivo de ticks (si no, se arma y se guarda). Los ids se
     /// asignan crecientes con el tiempo a partir de <paramref name="lastId"/>.
     /// </summary>
-    public static List<Trade> LoadDay(string ticksRoot, string cacheRoot, Instrument inst, DateOnly day, ref long lastId)
+    public static List<Trade> LoadDay(string ticksRoot, string cacheRoot, Instrument inst, DateOnly day, ref long lastId, int minutes = 60)
     {
         var source = TickFile.DayPath(ticksRoot, inst.FeedId, inst.Symbol, day);
-        var cache = CachePath(cacheRoot, inst.FeedId, inst.Symbol, day);
-        var list = TryReadCache(cache, source) ?? Build(source, cache, inst.TickSize);
+        var cache = CachePath(cacheRoot, inst.FeedId, inst.Symbol, day, minutes);
+        var list = TryReadCache(cache, source) ?? Build(source, cache, inst.TickSize, minutes);
         var res = new List<Trade>(list.Count);
         foreach (var t in list) res.Add(new Trade(NextId(t.Time, ref lastId), t.Time, t.Price, t.Volume, t.Side));
         return res;
     }
 
     /// <summary>Arma la caché de un día si falta o quedó vieja (se puede llamar en paralelo para días distintos).</summary>
-    public static void EnsureCached(string ticksRoot, string cacheRoot, Instrument inst, DateOnly day)
+    public static void EnsureCached(string ticksRoot, string cacheRoot, Instrument inst, DateOnly day, int minutes = 60)
     {
         var source = TickFile.DayPath(ticksRoot, inst.FeedId, inst.Symbol, day);
-        var cache = CachePath(cacheRoot, inst.FeedId, inst.Symbol, day);
-        if (!IsFresh(cache, source)) Build(source, cache, inst.TickSize);
+        var cache = CachePath(cacheRoot, inst.FeedId, inst.Symbol, day, minutes);
+        if (!IsFresh(cache, source)) Build(source, cache, inst.TickSize, minutes);
     }
 
     public static bool IsFresh(string cache, string source)
@@ -136,12 +141,12 @@ public static class CompactHistory
         return id;
     }
 
-    private static List<Trade> Build(string source, string cache, decimal tick)
+    private static List<Trade> Build(string source, string cache, decimal tick, int minutes)
     {
         var src = new FileInfo(source);
         long len = src.Length, mtime = src.LastWriteTimeUtc.Ticks;
         var raw = TickFile.SortAndDedupe(TickFile.Read(source));
-        var list = Compress(raw, tick);
+        var list = Compress(raw, tick, minutes);
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(cache)!);

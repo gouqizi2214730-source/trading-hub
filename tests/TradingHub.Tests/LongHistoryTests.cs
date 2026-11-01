@@ -243,8 +243,20 @@ public class LongHistoryTests
             raw.Add(new Trade(id++, t0.AddSeconds(s), px, rnd.Next(1, 50) / 1000m, rnd.Next(2) == 0 ? TradeSide.Buy : TradeSide.Sell));
         }
 
-        var c = CompactHistory.Compress(raw, 0.1m);
+        var c = CompactHistory.Compress(raw, 0.1m, 60);
         Assert.True(c.Count < raw.Count / 3, $"{c.Count} de {raw.Count}");
+        // por minuto: cada minuto conserva apertura, cierre, máximo, mínimo y volumen
+        var m = CompactHistory.Compress(raw, 0.1m, 1);
+        for (int k = 0; k < 180; k += 17)
+        {
+            var a = raw.Where(t => (int)(t.Time - t0).TotalMinutes == k).ToList();
+            var b = m.Where(t => (int)(t.Time - t0).TotalMinutes == k).ToList();
+            Assert.Equal(a[0].Price, b[0].Price);
+            Assert.Equal(a[^1].Price, b[^1].Price);
+            Assert.Equal(a.Max(t => t.Price), b.Max(t => t.Price));
+            Assert.Equal(a.Min(t => t.Price), b.Min(t => t.Price));
+            Assert.Equal(a.Sum(t => t.Volume), b.Sum(t => t.Volume));
+        }
         for (int h = 0; h < 3; h++)
         {
             var a = raw.Where(t => t.Time.Hour == h).ToList();
@@ -289,7 +301,7 @@ public class LongHistoryTests
             var feed = new FakeFeed { Live = true };
             var data = new InstrumentData(inst, feed)
             {
-                RecordingRoot = root, CompactRoot = Path.Combine(root, "compact"), RecordLive = false, TickWindow = TimeSpan.FromDays(1),
+                RecordingRoot = root, CompactRoot = Path.Combine(root, "compact"), CompactMinutes = 15, RecordLive = false, TickWindow = TimeSpan.FromDays(1),
             };
             data.Start(from);
             Wait(data, () => data.IsLoadingHistory);
@@ -306,10 +318,10 @@ public class LongHistoryTests
             }
 
             Assert.True(compact > 0 && real > 0);
-            Assert.True(File.Exists(CompactHistory.CachePath(Path.Combine(root, "compact"), "test", "TEST", DateOnly.FromDateTime(now.AddDays(-3)))));
+            Assert.True(File.Exists(CompactHistory.CachePath(Path.Combine(root, "compact"), "test", "TEST", DateOnly.FromDateTime(now.AddDays(-3)), 15)));
 
-            // velas de 1 hora: todas con footprint, mismo volumen total que los ticks crudos
-            var series = new CandleSeries(inst, ChartPeriod.H1);
+            // velas de 15 minutos (el tramo del resumen): todas con footprint, mismo volumen total que los ticks crudos
+            var series = new CandleSeries(inst, ChartPeriod.Parse("M15"));
             series.Rebuild(data.Trades);
             decimal vol = 0;
             for (int i = 0; i < series.Count; i++)
@@ -320,6 +332,7 @@ public class LongHistoryTests
 
             Assert.InRange(vol, rawVolume - 0.5m, rawVolume + 2m); // + lo que el feed falso agrega al final
             Assert.True(data.Trades.Count < 5 * 8640, $"operaciones: {data.Trades.Count}");
+            Assert.True(series.Count >= 5 * 96 - 2, $"velas: {series.Count}"); // sin huecos
         }
         finally
         {

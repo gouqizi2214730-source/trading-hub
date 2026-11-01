@@ -153,7 +153,7 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
     public TimeSpan TickWindow { get; set; } = TimeSpan.FromHours(2);
 
     /// <summary>Máximo de operaciones reales que se leen de disco por carga (lo que no entra se completa con velas).</summary>
-    public static int MaxDiskTrades { get; set; } = 30_000_000;
+    public static long MaxDiskTrades { get; set; } = MemoryBudget(0.12, 30_000_000, 200_000_000);
 
     /// <summary>Desde cuándo hay ticks reales (antes, la historia viene de velas del exchange).</summary>
     public DateTime RealTicksFrom { get; private set; } = DateTime.MaxValue;
@@ -309,15 +309,37 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
     /// <summary>Resumir por hora los días con ticks que quedan fuera de la ventana (se apaga en algunas pruebas).</summary>
     public static bool UseCompactHistory { get; set; } = true;
 
-    /// <summary>Tope de operaciones resumidas en memoria (de lo más nuevo a lo más viejo).</summary>
-    public static int MaxCompactTrades { get; set; } = 40_000_000;
+    /// <summary>Tramo del resumen en minutos (1, 5, 15 o 60): las velas de ese largo o más quedan exactas.</summary>
+    public int CompactMinutes { get; set; } = 1;
+
+    /// <summary>
+    /// Tope de operaciones resumidas en memoria (de lo más nuevo a lo más viejo): ~25 % de la memoria a ~100 bytes por
+    /// operación mientras se carga (64 GB → ~170 millones), entre 20 y 400 millones.
+    /// </summary>
+    public static long MaxCompactTrades { get; set; } = MemoryBudget(0.25, 20_000_000, 400_000_000);
+
+    /// <summary>Operaciones que entran en una parte de la memoria de la computadora.</summary>
+    public static long MemoryBudget(double share, long min, long max)
+    {
+        long total;
+        try
+        {
+            total = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
+        }
+        catch
+        {
+            total = 0;
+        }
+
+        return total <= 0 ? min : Math.Clamp((long)(total * share / 100), min, max);
+    }
 
     /// <summary>Días resumidos por hora (arma en paralelo los que faltan en la caché), del más viejo al más nuevo.</summary>
     private List<Trade> LoadCompact(List<DateOnly> days, DateTime from, DateTime to, List<(DateTime From, DateTime To)> covered, CancellationToken ct)
     {
         var root = RecordingRoot!;
         var cacheRoot = CompactRoot!;
-        var missing = days.Where(d => !CompactHistory.IsFresh(CompactHistory.CachePath(cacheRoot, Instrument.FeedId, Instrument.Symbol, d),
+        var missing = days.Where(d => !CompactHistory.IsFresh(CompactHistory.CachePath(cacheRoot, Instrument.FeedId, Instrument.Symbol, d, CompactMinutes),
             TickFile.DayPath(root, Instrument.FeedId, Instrument.Symbol, d))).ToList();
         int done = 0;
         if (missing.Count > 0)
@@ -326,7 +348,7 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
             {
                 try
                 {
-                    CompactHistory.EnsureCached(root, cacheRoot, Instrument, d);
+                    CompactHistory.EnsureCached(root, cacheRoot, Instrument, d, CompactMinutes);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -348,7 +370,7 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
             try
             {
                 long tmp = CompactHistory.CompressedIdBase;
-                list = CompactHistory.LoadDay(root, cacheRoot, Instrument, days[i], ref tmp);
+                list = CompactHistory.LoadDay(root, cacheRoot, Instrument, days[i], ref tmp, CompactMinutes);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -880,6 +902,9 @@ public sealed class MarketDataHub : IDisposable
     /// <summary>Caché de los días resumidos por hora (ver <see cref="CompactHistory"/>).</summary>
     public string? CompactRoot { get; set; }
 
+    /// <summary>Tramo del resumen de la historia vieja, en minutos (Ajustes → Datos).</summary>
+    public int CompactMinutes { get; set; } = 1;
+
     /// <summary>
     /// Hasta qué antigüedad la historia trae operaciones reales (con footprint); lo anterior se completa con velas.
     /// Lo elige Ajustes → Datos.
@@ -913,7 +938,7 @@ public sealed class MarketDataHub : IDisposable
         // depende de cuánto se cargó al abrir: si después se pide más historia (más días, o arrastrando hacia atrás), lo
         // que cae dentro de la ventana también llega con sus operaciones y se ve con footprint
         var window = MaxTickWindow < TimeSpan.FromHours(2) ? TimeSpan.FromHours(2) : MaxTickWindow;
-        d = new InstrumentData(instrument, feed) { RecordingRoot = RecordingRoot, CompactRoot = CompactRoot, RecordLive = RecordLive, TickWindow = window };
+        d = new InstrumentData(instrument, feed) { RecordingRoot = RecordingRoot, CompactRoot = CompactRoot, CompactMinutes = CompactMinutes, RecordLive = RecordLive, TickWindow = window };
         _items[instrument.Key] = d;
         d.Start(feed.Now - history);
         return d;

@@ -124,9 +124,34 @@ internal sealed class SettingsView : UserControl, IPage
                 : "Footprint: listo, se aplica a la historia que cargues desde ahora");
         };
 
+        var compact = new ComboBox { MinWidth = 200 };
+        foreach (var (minutes, label) in new[] { (1, "1 minuto"), (5, "5 minutos"), (15, "15 minutos"), (60, "1 hora") })
+            compact.Items.Add(new ComboBoxItem { Content = label, Tag = minutes });
+        compact.SelectedItem = compact.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (int)i.Tag! == s.CompactMinutes) ?? compact.Items[0];
+        compact.SelectionChanged += (_, _) =>
+        {
+            if (compact.SelectedItem is not ComboBoxItem { Tag: int m }) return;
+            s.CompactMinutes = m;
+            s.Save();
+            _svc.Hub.CompactMinutes = m;
+            _status("Resumen de la historia: se aplica a los mercados que abras desde ahora (los ya abiertos, al volver a abrir Trading Hub)");
+        };
+        long ram = 0;
+        try
+        {
+            ram = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
+        }
+        catch
+        {
+            // sin el dato
+        }
+
         var data = Section("Datos", MaterialIconKind.DatabaseOutline,
             Setting("Grabar lo que llega en vivo", "Guarda cada operación recibida para reabrir gráficos al instante, hacer replay y backtests.", record),
-            Setting("Footprint en la historia", "Cuánto hacia atrás la historia trae cada operación. Lo más viejo que tengas bajado en Datos se carga resumido por hora: velas de 1 hora o más con OHLC, volumen y delta exactos y footprint y perfil con filas de ~1 punto básico (la primera vez arma un resumen por día, después abre al instante). Sin ticks bajados, lo viejo llega en velas y se ve sin footprint.", tickHistory),
+            Setting("Resumen de la historia más vieja",
+                $"Lo bajado que queda antes de la ventana de footprint se carga juntado en tramos de este largo: las velas de ese tramo o más largas quedan exactas (OHLC, volumen, delta y footprint); las más cortas, no. 1 minuto usa unas 4 veces más memoria que 1 hora. Esta computadora tiene {ram / (double)(1L << 30):0} GB: entran unos {TradingHub.Data.InstrumentData.MaxCompactTrades / 1_000_000:N0} millones de operaciones resumidas (BTC: ~100-200 mil por día con 1 minuto).",
+                compact),
+            Setting("Footprint en la historia", "Cuánto hacia atrás la historia trae cada operación. Lo más viejo que tengas bajado en Datos se carga resumido (ver «Resumen de la historia más vieja»), con footprint y perfil en filas de ~1 punto básico; la primera vez arma un resumen por día y después abre al instante. Sin ticks bajados, lo viejo llega en velas y se ve sin footprint.", tickHistory),
             BuildMarketDataFolder(),
             Setting("Carpeta de datos", AppPaths.Root, Ui.Button("Abrir", MaterialIconKind.FolderOpenOutline, () => Shell.OpenFolder(AppPaths.Root))),
             Setting("Indicadores propios (C#)", AppPaths.UserIndicators, Ui.Button("Abrir", MaterialIconKind.FolderOpenOutline, () => Shell.OpenFolder(AppPaths.UserIndicators))),

@@ -155,6 +155,9 @@ public sealed class AppSettings
     /// </summary>
     public double TickHistoryHours { get; set; } = 72;
 
+    /// <summary>Tramo (minutos) en que se resume la historia con ticks más vieja que la ventana: 1, 5, 15 o 60.</summary>
+    public int CompactMinutes { get; set; } = 1;
+
     /// <summary>Modo sin dormir: la Mac no se duerme mientras haya estrategias en vivo o agentes trabajando.</summary>
     public bool KeepAwake { get; set; } = true;
 
@@ -390,6 +393,7 @@ public sealed class AppServices
         DataMoveError = DataLocation.FinishPendingMove();
         Hub.RecordingRoot = AppPaths.Ticks;
         Hub.CompactRoot = AppPaths.TicksCompact;
+        Hub.CompactMinutes = TradingHub.Data.CompactHistory.Granularities.Contains(Settings.CompactMinutes) ? Settings.CompactMinutes : 1;
         KlineHistory.CacheRoot = AppPaths.Klines;
         // TRADINGHUB_LIVE_DIR: cartera alternativa (pruebas)
         TradingHub.Strategies.LiveStore.Root = Environment.GetEnvironmentVariable("TRADINGHUB_LIVE_DIR") is { Length: > 0 } live ? live : Path.Combine(AppPaths.Root, "Live");
