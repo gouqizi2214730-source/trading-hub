@@ -195,7 +195,7 @@ public static class AppLocation
     }
 
     /// <summary>Al reiniciar, la instancia anterior todavía puede estar guardando: se espera que termine.</summary>
-    private static void WaitForOtherInstances()
+    internal static void WaitForOtherInstances()
     {
         var me = Environment.ProcessId;
         var name = Process.GetCurrentProcess().ProcessName;

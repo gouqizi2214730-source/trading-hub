@@ -23,6 +23,19 @@ public static class DataLocation
         public string? MoveFrom { get; set; }
     }
 
+    /// <summary>
+    /// Archivos que no se copian: el candado de grabación (lo tiene abierto en exclusiva la app que graba; copiarlo daba
+    /// «el archivo está siendo usado por otro proceso» y la mudanza no avanzaba nunca) y temporales.
+    /// </summary>
+    internal static bool Skip(string file)
+    {
+        var name = Path.GetFileName(file);
+        return name.EndsWith(".lock", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)
+               || name.EndsWith(".reparando", StringComparison.OrdinalIgnoreCase) || name.StartsWith(".tradinghub-prueba", StringComparison.Ordinal);
+    }
+
+    private static IEnumerable<string> DataFiles(string dir) => Files(dir).Where(f => !Skip(f));
+
     private static string ConfigPath => Path.Combine(AppPaths.Root, FileName);
 
     private static Config? _config;
@@ -93,7 +106,7 @@ public static class DataLocation
 
     /// <summary>Lo que ocupan los datos actuales.</summary>
     public static long CurrentSize() => Folders.Select(f => Path.Combine(Root, f)).Where(Directory.Exists)
-        .Sum(d => Files(d).Sum(f => SafeLength(f)));
+        .Sum(d => DataFiles(d).Sum(f => SafeLength(f)));
 
     private static IEnumerable<string> Files(string dir)
     {
@@ -146,17 +159,25 @@ public static class DataLocation
     /// <summary>Copia Ticks y Klines de una carpeta base a otra (aunque haya archivos abiertos grabándose).</summary>
     internal static void CopyAll(string from, string target, IProgress<(long Done, long Total)>? progress, CancellationToken ct)
     {
-        long total = Folders.Select(f => Path.Combine(from, f)).Where(Directory.Exists).Sum(d => Files(d).Sum(SafeLength)), done = 0;
+        long total = Folders.Select(f => Path.Combine(from, f)).Where(Directory.Exists).Sum(d => DataFiles(d).Sum(SafeLength)), done = 0;
         foreach (var f in Folders)
         {
             var src = Path.Combine(from, f);
             if (!Directory.Exists(src)) continue;
-            foreach (var file in Files(src).ToList())
+            foreach (var file in DataFiles(src).ToList())
             {
                 ct.ThrowIfCancellationRequested();
                 var dest = Path.Combine(target, f, Path.GetRelativePath(src, file));
                 Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
-                CopyShared(file, dest);
+                try
+                {
+                    CopyShared(file, dest);
+                }
+                catch (IOException) when (File.Exists(file))
+                {
+                    // tomado en exclusiva por algo (otro programa, un antivirus): se copia al reiniciar, con la app cerrada
+                }
+
                 done += SafeLength(file);
                 progress?.Report((done, total));
             }
@@ -181,9 +202,15 @@ public static class DataLocation
         if (string.IsNullOrWhiteSpace(c.MoveFrom)) return null;
         try
         {
+            // al reiniciar, la instancia anterior puede seguir cerrándose con los archivos abiertos: se espera
+            AppLocation.WaitForOtherInstances();
             if (!Same(c.MoveFrom!, Root)) Complete(c.MoveFrom!, Root);
             Save(new Config { Folder = c.Folder });
             return null;
+        }
+        catch (OperationCanceledException)
+        {
+            return null; // sigue abierta otra Trading Hub: se termina la próxima vez
         }
         catch (Exception ex)
         {
@@ -199,7 +226,7 @@ public static class DataLocation
         {
             var src = Path.Combine(from, f);
             if (!Directory.Exists(src)) continue;
-            foreach (var file in Files(src).ToList())
+            foreach (var file in DataFiles(src).ToList())
             {
                 var dest = Path.Combine(to, f, Path.GetRelativePath(src, file));
                 var si = new FileInfo(file);
@@ -211,13 +238,50 @@ public static class DataLocation
                 }
             }
 
-            bool complete = Files(src).All(file =>
+            bool complete = DataFiles(src).All(file =>
             {
                 var di = new FileInfo(Path.Combine(to, f, Path.GetRelativePath(src, file)));
                 return di.Exists && di.Length == SafeLength(file);
             });
             if (!complete) throw new IOException($"La copia de {f} no quedó completa; la carpeta vieja queda como estaba.");
-            Directory.Delete(src, recursive: true);
+        }
+
+        // todo está del otro lado: lo viejo se borra lo que se pueda (si algo quedó tomado, queda ahí sin molestar: la
+        // mudanza ya está hecha y no se reintenta para siempre)
+        foreach (var f in Folders)
+        {
+            var src = Path.Combine(from, f);
+            if (!Directory.Exists(src)) continue;
+            try
+            {
+                Directory.Delete(src, recursive: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                foreach (var file in Files(src).ToList())
+                {
+                    try
+                    {
+                        File.Delete(file);
+                    }
+                    catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                    {
+                        // tomado: queda
+                    }
+                }
+
+                foreach (var dir in Directory.EnumerateDirectories(src, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length).Append(src))
+                {
+                    try
+                    {
+                        if (!Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir);
+                    }
+                    catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                    {
+                        // queda
+                    }
+                }
+            }
         }
     }
 }

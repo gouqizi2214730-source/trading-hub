@@ -47,6 +47,30 @@ public class DataLocationTests : IDisposable
     }
 
     [Fact]
+    public void Mudar_con_la_app_grabando_no_choca_con_el_candado_ni_los_archivos_abiertos()
+    {
+        var from = Path.Combine(_root, "viejo");
+        var to = Path.Combine(_root, "nuevo");
+        Write("viejo/Ticks/bybit-linear/BTCUSDT/2026-10-01.ticks", "dia viejo");
+        var today = Write("viejo/Ticks/bybit-linear/BTCUSDT/2026-11-02.ticks", "hoy");
+        // lo que tiene abierto la app mientras graba: el candado en exclusiva y el archivo del día para escribir
+        using (var lockFile = TradingHub.Data.TickFile.TryLock(Path.Combine(from, "Ticks"), "bybit-linear", "BTCUSDT"))
+        using (var writing = new FileStream(today, FileMode.Append, FileAccess.Write, FileShare.Read))
+        {
+            Assert.NotNull(lockFile);
+            DataLocation.CopyAll(from, to, null, CancellationToken.None); // antes: «está siendo usado por otro proceso»
+            writing.Write("+mas"u8);
+        }
+
+        Assert.False(File.Exists(Path.Combine(to, "Ticks", "bybit-linear", "BTCUSDT", ".grabando.lock")));
+        // al reiniciar (ya sin la app vieja): completa lo grabado mientras tanto y borra lo viejo
+        DataLocation.Complete(from, to);
+        Assert.Equal("hoy+mas", File.ReadAllText(Path.Combine(to, "Ticks", "bybit-linear", "BTCUSDT", "2026-11-02.ticks")));
+        Assert.Equal("dia viejo", File.ReadAllText(Path.Combine(to, "Ticks", "bybit-linear", "BTCUSDT", "2026-10-01.ticks")));
+        Assert.False(Directory.Exists(Path.Combine(from, "Ticks")));
+    }
+
+    [Fact]
     public void Mudar_la_carpeta_de_la_app_deja_los_datos_de_mercado_y_borra_solo_lo_copiado()
     {
         string from = Path.Combine(_root, "C"), to = Path.Combine(_root, "D", "Trading Hub");
