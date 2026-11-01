@@ -497,7 +497,7 @@ public sealed class ConnectionManager
         }
         catch (Exception ex)
         {
-            return (false, ex.Message);
+            return (false, NetworkProxy.Explain(ex));
         }
 
         return (false, "Tipo de conexión desconocido");

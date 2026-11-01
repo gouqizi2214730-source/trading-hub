@@ -157,6 +157,12 @@ public sealed class AppSettings
     /// </summary>
     public double TickHistoryHours { get; set; } = 72;
 
+    /// <summary>Proxy de red: "sistema" (el de Windows/macOS), "manual" (<see cref="ProxyAddress"/>) o "ninguno".</summary>
+    public string ProxyMode { get; set; } = NetworkProxy.System;
+
+    /// <summary>Dirección del proxy propio (127.0.0.1:7890, socks5://127.0.0.1:7891…).</summary>
+    public string ProxyAddress { get; set; } = "";
+
     /// <summary>Tramo (minutos) en que se resume la historia con ticks más vieja que la ventana: 1, 5, 15 o 60.</summary>
     public int CompactMinutes { get; set; } = 1;
 

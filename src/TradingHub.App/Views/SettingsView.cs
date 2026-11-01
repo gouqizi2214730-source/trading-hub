@@ -99,6 +99,7 @@ internal sealed class SettingsView : UserControl, IPage
         };
 
         var general = Section("General", MaterialIconKind.TuneVariant,
+            BuildProxy(),
             Setting("Idioma", "Español, inglés o chino. Claude también te contesta en ese idioma.", Ui.V(6, language, Ui.H(8, languageNote, restart))),
             Setting("Apariencia", "Negro o blanco en toda la plataforma (también con el botón de sol/luna arriba). Los colores propios de cada gráfico se mantienen.", appearance),
             Setting("Zona horaria de los gráficos", "Horas del eje de tiempo, la cinta y las sesiones.", tz),
@@ -265,6 +266,68 @@ internal sealed class SettingsView : UserControl, IPage
         _sleepState.Text = (g.Awake ? $"Ahora: despierta ({g.Reason})." : $"Ahora: puede dormir ({reason}).") +
                            (!SleepGuard.SupportsLidClosed ? "" : g.LidHelperRunning ? " Tapa cerrada: activo." : _svc.Settings.KeepAwakeLidClosed ? " Tapa cerrada: se activa cuando haya algo corriendo." : "") +
                            (g.LidError != null ? " " + g.LidError : "");
+    }
+
+    // ===================================================================== proxy de red
+
+    private Control BuildProxy()
+    {
+        var s = _svc.Settings;
+        var mode = new ComboBox { MinWidth = 220 };
+        foreach (var (value, label) in new[]
+                 {
+                     (NetworkProxy.System, "El del sistema (Windows)"),
+                     (NetworkProxy.Manual, "Uno propio para Trading Hub"),
+                     (NetworkProxy.None, "Sin proxy (conexión directa)"),
+                 })
+            mode.Items.Add(new ComboBoxItem { Content = label, Tag = value });
+        mode.SelectedItem = mode.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag! == s.ProxyMode) ?? mode.Items[0];
+        var address = new TextBox { Text = s.ProxyAddress, Watermark = "127.0.0.1:7890 o socks5://127.0.0.1:7891", MinWidth = 260 };
+        var state = new TextBlock { Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap };
+        var restart = Ui.Button("Reiniciar ahora", MaterialIconKind.Restart, Localization.Lang.Restart);
+        restart.IsVisible = false;
+        string Mode() => mode.SelectedItem is ComboBoxItem { Tag: string m } ? m : NetworkProxy.System;
+        void Sync() => address.IsVisible = Mode() == NetworkProxy.Manual;
+        Sync();
+        void Save()
+        {
+            s.ProxyMode = Mode();
+            s.ProxyAddress = (address.Text ?? "").Trim();
+            s.Save();
+            restart.IsVisible = true;
+            state.Text = "Guardado: se aplica al reiniciar Trading Hub.";
+        }
+
+        mode.SelectionChanged += (_, _) =>
+        {
+            Sync();
+            Save();
+        };
+        address.LostFocus += (_, _) => Save();
+        Button? test = null;
+        test = Ui.Button("Probar", MaterialIconKind.LanConnect, () => _ = Test());
+        async Task Test()
+        {
+            state.Text = "Probando…";
+            test!.IsEnabled = false;
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                state.Text = await NetworkProxy.TestAsync(Mode(), address.Text, cts.Token);
+            }
+            catch (Exception ex)
+            {
+                state.Text = NetworkProxy.Explain(ex);
+            }
+            finally
+            {
+                test.IsEnabled = true;
+            }
+        }
+
+        return Setting("Proxy de red",
+            "Por dónde se conecta Trading Hub a los exchanges (datos, descargas, órdenes). Si el navegador llega a Bybit o Binance pero Trading Hub no, elegí «Uno propio» y poné el puerto HTTP o SOCKS de tu programa de proxy (Clash suele usar 127.0.0.1:7890).",
+            Ui.V(6, Ui.H(8, mode, test), address, Ui.H(8, state, restart)));
     }
 
     // ===================================================================== carpetas de la app, indicadores y estrategias

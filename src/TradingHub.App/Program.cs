@@ -24,6 +24,17 @@ internal static class Program
         // una mudanza pendiente de la carpeta de la app (Ajustes → Datos) se termina antes de que nada la use
         Services.AppLocation.FinishPendingMove();
 
+        // el proxy de red elegido en Ajustes, antes de cualquier conexión
+        try
+        {
+            var net = Services.AppSettings.Load();
+            Services.NetworkProxy.Apply(net.ProxyMode, net.ProxyAddress);
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write(ex);
+        }
+
         // Windows: si ya hay una Trading Hub abierta con estos datos, se muestra esa y esta no arranca (en la Mac lo hace el sistema)
         if (!Services.SingleInstance.Claim(Services.AppPaths.Root)) return;
 
