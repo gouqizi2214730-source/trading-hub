@@ -24,6 +24,9 @@ public sealed class BybitFeed : IMarketDataFeed, ITickerStatsProvider, IKlineHis
     public bool SupportsHistory => true;
     public bool IsLive => true;
 
+    /// <summary>recent-trade da solo las últimas 1000 operaciones.</summary>
+    public bool RecentTradesOnly => true;
+
     private static decimal Dec(JsonElement e) => decimal.Parse(e.GetString() ?? "0", NumberStyles.Float, CultureInfo.InvariantCulture);
 
     public async Task<IReadOnlyList<Instrument>> GetInstrumentsAsync(CancellationToken ct)

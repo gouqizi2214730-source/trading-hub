@@ -31,6 +31,12 @@ public interface IMarketDataFeed : IDisposable
     /// <summary>Si los datos vienen de un mercado real (para avisar en la UI).</summary>
     bool IsLive { get; }
 
+    /// <summary>
+    /// La API solo da las últimas operaciones (Bybit: 1000): lo que pida la historia más atrás y no llegue (ni del archivo
+    /// público ni de lo grabado) se completa con velas, así no quedan horas sin velas.
+    /// </summary>
+    bool RecentTradesOnly => false;
+
     /// <summary>"Ahora" para este feed (el replay devuelve el reloj de la reproducción).</summary>
     DateTime Now => DateTime.UtcNow;
 

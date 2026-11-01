@@ -118,8 +118,10 @@ internal sealed class SettingsView : UserControl, IPage
             if (tickHistory.SelectedItem is not ComboBoxItem { Tag: double h }) return;
             s.TickHistoryHours = h;
             s.Save();
-            _svc.Hub.MaxTickWindow = TimeSpan.FromHours(h);
-            _status("Footprint: se aplica a los mercados que abras desde ahora (los ya abiertos, al volver a abrir Trading Hub)");
+            int n = _svc.Hub.ApplyTickWindow(TimeSpan.FromHours(h));
+            _status(n > 0
+                ? $"Footprint: trayendo las operaciones reales de {n} mercado(s) abierto(s); los gráficos se actualizan solos al terminar"
+                : "Footprint: listo, se aplica a la historia que cargues desde ahora");
         };
 
         var data = Section("Datos", MaterialIconKind.DatabaseOutline,

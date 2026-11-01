@@ -92,6 +92,11 @@ public class LongHistoryTests
         public DateTime Now => DateTime.UtcNow;
         public bool SupportsHistory => true;
         public bool IsLive => false;
+
+        /// <summary>Como Bybit: la API solo da los últimos minutos.</summary>
+        public bool RecentOnly { get; set; }
+
+        public bool RecentTradesOnly => RecentOnly;
         public void Dispose() { }
         public Task<IReadOnlyList<Instrument>> GetInstrumentsAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<Instrument>>(new[] { Inst });
         public IDisposable Subscribe(Instrument instrument, IMarketDataSink sink) => new Nothing();
@@ -103,7 +108,8 @@ public class LongHistoryTests
             if (fromUtc < EarliestTickRequested) EarliestTickRequested = fromUtc;
             var list = new List<Trade>();
             long id = 1_000_000 + (long)(fromUtc - DateTime.UnixEpoch).TotalSeconds;
-            for (var t = fromUtc; t < toUtc; t = t.AddSeconds(20)) list.Add(new Trade(id++, t, 100, 0.01m, TradeSide.Buy));
+            var start = RecentOnly && toUtc - fromUtc > TimeSpan.FromMinutes(10) ? toUtc.AddMinutes(-10) : fromUtc;
+            for (var t = start; t < toUtc; t = t.AddSeconds(20)) list.Add(new Trade(id++, t, 100, 0.01m, TradeSide.Buy));
             onBatch(list);
             return Task.CompletedTask;
         }
@@ -155,6 +161,68 @@ public class LongHistoryTests
 
         var series = new CandleSeries(Inst, ChartPeriod.H1);
         series.Rebuild(data.Trades);
+        Assert.True(series[0].IsSynthetic);
+        Assert.False(series[series.Count - 1].IsSynthetic);
+    }
+
+    private static void Wait(InstrumentData data, Func<bool> busy)
+    {
+        for (int i = 0; i < 1500 && busy(); i++)
+        {
+            data.Pump();
+            Thread.Sleep(10);
+        }
+    }
+
+    [Fact]
+    public void Agrandar_la_ventana_cambia_las_velas_por_ticks_sin_reabrir()
+    {
+        var feed = new FakeFeed();
+        var data = new InstrumentData(Inst, feed) { TickWindow = TimeSpan.FromHours(2) };
+        data.Start(feed.Now.AddHours(-1));
+        Wait(data, () => data.IsLoadingHistory);
+        Assert.True(data.ExtendHistory(feed.Now.AddDays(-3)));
+        Wait(data, () => data.IsExtending);
+        var before = new CandleSeries(Inst, ChartPeriod.H1);
+        before.Rebuild(data.Trades);
+        int synthBefore = Enumerable.Range(0, before.Count).Count(i => before[i].IsSynthetic);
+        Assert.True(synthBefore > 60);
+
+        // la ventana pasa a 2 días: lo de los últimos 2 días se vuelve a pedir con ticks
+        int loaded = 0;
+        data.HistoryLoaded += () => loaded++;
+        data.TickWindow = TimeSpan.FromDays(2);
+        Assert.True(data.UpgradeToTicks());
+        Wait(data, () => data.IsExtending);
+        Assert.Null(data.HistoryError);
+        Assert.Equal(1, loaded);
+        Assert.True(feed.EarliestTickRequested <= feed.Now.AddDays(-2).AddMinutes(5));
+
+        var after = new CandleSeries(Inst, ChartPeriod.H1);
+        after.Rebuild(data.Trades);
+        for (int i = 0; i < after.Count; i++)
+        {
+            bool old = after[i].Time < feed.Now.AddDays(-2).AddHours(-1);
+            if (!old) Assert.False(after[i].IsSynthetic, $"vela {after[i].Time:dd HH:mm} sigue en velas");
+        }
+
+        Assert.True(after.Count >= before.Count - 1); // no se perdieron velas
+        for (int i = 1; i < data.Trades.Count; i++) Assert.True(data.Trades.GetTime(i) >= data.Trades.GetTime(i - 1));
+        Assert.False(data.UpgradeToTicks()); // ya no queda nada para cambiar dentro de la ventana
+    }
+
+    [Fact]
+    public void Si_la_API_solo_da_lo_ultimo_el_resto_de_la_ventana_va_en_velas_y_no_queda_vacio()
+    {
+        var feed = new FakeFeed { RecentOnly = true };
+        var data = new InstrumentData(Inst, feed) { TickWindow = TimeSpan.FromHours(6) };
+        data.Start(feed.Now.AddHours(-5));
+        Wait(data, () => data.IsLoadingHistory);
+        var series = new CandleSeries(Inst, ChartPeriod.M15);
+        series.Rebuild(data.Trades);
+        Assert.True(data.Trades.FirstTime <= feed.Now.AddHours(-4.9), $"empieza en {data.Trades.FirstTime:HH:mm}");
+        // 5 horas de velas de 15 minutos, sin huecos
+        Assert.True(series.Count >= 19, $"velas: {series.Count}");
         Assert.True(series[0].IsSynthetic);
         Assert.False(series[series.Count - 1].IsSynthetic);
     }

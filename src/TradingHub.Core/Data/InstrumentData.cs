@@ -238,6 +238,20 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         }
 
         if (real.Count > 0) RealTicksFrom = real[0].Time < RealTicksFrom ? real[0].Time : RealTicksFrom;
+
+        // feeds que solo dan lo último por la API (Bybit): lo que los ticks no cubrieron (hoy antes de abrir, o un día sin
+        // archivo publicado todavía) va en velas en vez de quedar vacío
+        if (klineSource != null && Feed.RecentTradesOnly && tickGaps.Count > 0)
+        {
+            var missing = KlineHistory.Subtract(tickGaps.Select(g => (g.From, g.To)).ToList(), KlineHistory.Coverage(real))
+                .Where(m => m.To - m.From >= TimeSpan.FromMinutes(2)).ToList();
+            if (missing.Count > 0)
+            {
+                klineGaps.AddRange(missing);
+                klineGaps.Sort((a, b) => a.From.CompareTo(b.From));
+            }
+        }
+
         if (klineGaps.Count == 0 || klineSource == null) return real;
 
         // velas solo donde no hay ticks reales
@@ -382,6 +396,50 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         return true;
     }
 
+    private (DateTime From, DateTime To, List<Trade> Trades)? _upgradeToMerge;
+
+    /// <summary>
+    /// Después de agrandar <see cref="TickWindow"/>: vuelve a pedir con operaciones reales la parte de la historia que se
+    /// había cargado en velas y ahora entra en la ventana (así el footprint aparece sin volver a abrir la app).
+    /// Devuelve false si no hay nada que cambiar o ya se está cargando algo.
+    /// </summary>
+    public bool UpgradeToTicks()
+    {
+        if (!_historyMerged || IsLoadingHistory || IsExtending || Trades.Count == 0 || !Feed.SupportsHistory || Feed is not IKlineHistory) return false;
+        if (Trades.GetId(0) > 0) return false; // ya empieza con operaciones reales
+        int firstReal = -1;
+        for (int i = 0; i < Trades.Count; i++)
+        {
+            if (Trades.GetId(i) <= 0) continue;
+            firstReal = i;
+            break;
+        }
+
+        DateTime cut = (_anchor ?? Feed.Now) - TickWindow;
+        DateTime from = cut > Trades.FirstTime ? cut : Trades.FirstTime;
+        DateTime to = firstReal >= 0 ? Trades.GetTime(firstReal) : Trades.LastTime;
+        if (to - from < TimeSpan.FromMinutes(5)) return false;
+        var ct = _cts?.Token ?? CancellationToken.None;
+        IsExtending = true;
+        HistoryProgress = 0;
+        _ = Task.Run(async () =>
+        {
+            List<Trade> list;
+            try
+            {
+                list = await LoadRangeAsync(from, to, long.MaxValue, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                HistoryError = ex.Message;
+                list = new List<Trade>();
+            }
+
+            lock (_historyLock) _upgradeToMerge = (from, to, list);
+        }, ct);
+        return true;
+    }
+
     private long _lastDataAt;
     private int _tradedSinceAnchor;
 
@@ -502,6 +560,35 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
             {
                 older = _olderToMerge;
                 _olderToMerge = null;
+            }
+
+            (DateTime From, DateTime To, List<Trade> Trades)? upgrade;
+            lock (_historyLock)
+            {
+                upgrade = _upgradeToMerge;
+                _upgradeToMerge = null;
+            }
+
+            if (upgrade is { } u)
+            {
+                // cambia el tramo [From, To) por lo que llegó (operaciones reales y, donde no hubo, velas)
+                if (u.Trades.Count > 0)
+                {
+                    var current = new List<Trade>(Trades.Count);
+                    for (int i = 0; i < Trades.Count; i++) current.Add(Trades.Get(i));
+                    Trades.Clear();
+                    foreach (var t in current)
+                        if (t.Time < u.From) Trades.Add(t);
+                    foreach (var t in u.Trades)
+                        if (t.Time >= u.From && t.Time < u.To) Trades.Add(t);
+                    foreach (var t in current)
+                        if (t.Time >= u.To) Trades.Add(t);
+                }
+
+                IsExtending = false;
+                HistoryProgress = 1;
+                if (u.Trades.Count > 0) HistoryLoaded?.Invoke();
+                StatusChanged?.Invoke();
             }
 
             if (older != null)
@@ -645,6 +732,21 @@ public sealed class MarketDataHub : IDisposable
     /// Lo elige Ajustes → Datos.
     /// </summary>
     public TimeSpan MaxTickWindow { get; set; } = TimeSpan.FromDays(1);
+
+    /// <summary>Cambia la ventana de ticks también en los instrumentos abiertos y les trae lo que ahora entra en ella.</summary>
+    public int ApplyTickWindow(TimeSpan window)
+    {
+        MaxTickWindow = window < TimeSpan.FromHours(2) ? TimeSpan.FromHours(2) : window;
+        int upgrading = 0;
+        foreach (var d in _items.Values)
+        {
+            bool grew = MaxTickWindow > d.TickWindow;
+            d.TickWindow = MaxTickWindow;
+            if (grew && d.UpgradeToTicks()) upgrading++;
+        }
+
+        return upgrading;
+    }
 
     /// <summary>Si los instrumentos nuevos graban el vivo.</summary>
     public bool RecordLive { get; set; } = true;
