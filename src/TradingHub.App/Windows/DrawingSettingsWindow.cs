@@ -122,7 +122,7 @@ public sealed class DrawingSettingsWindow : Window
 
     private Control StyleSection()
     {
-        var width = new Slider { Minimum = 0.5, Maximum = 6, Value = _d.Width, TickFrequency = 0.5, IsSnapToTickEnabled = true, MinWidth = 160 };
+        var width = new Slider { Minimum = 0.5, Maximum = 10, Value = _d.Width, TickFrequency = 0.5, IsSnapToTickEnabled = true, MinWidth = 160 };
         var widthText = new TextBlock { Text = $"{_d.Width:0.#} px", VerticalAlignment = VerticalAlignment.Center, Width = 44, Classes = { "muted" } };
         width.PropertyChanged += (_, e) =>
         {

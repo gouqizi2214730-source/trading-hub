@@ -65,6 +65,7 @@ public sealed class FootprintEditorWindow : Window
             _layout.Name = c.Name;
             _layout.ShowTotals = c.ShowTotals;
             _layout.ShowPoc = c.ShowPoc;
+            _layout.PocBorderWidth = c.PocBorderWidth;
             _layout.ShowImbalances = c.ShowImbalances;
             _layout.ImbalanceRatio = c.ImbalanceRatio;
             _layout.StrongDeltaRatio = c.StrongDeltaRatio;

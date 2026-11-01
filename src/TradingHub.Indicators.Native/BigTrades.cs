@@ -123,6 +123,10 @@ public class BigTrades : Indicator
     [Display(Name = "Borde", GroupName = "Visualización", Order = 150)]
     public bool ShowBorder { get; set; } = true;
 
+    [Display(Name = "Grosor del borde", GroupName = "Visualización", Order = 160)]
+    [Range(1, 10)]
+    public int BorderWidth { get; set; } = 1;
+
     /// <summary>Umbral actual (para mostrar en la UI).</summary>
     [Browsable(false)]
     public decimal CurrentThreshold => _mode == ThresholdMode.Fixed ? _minVolume : _adaptiveThreshold;
@@ -301,7 +305,7 @@ public class BigTrades : Indicator
             var rect = new Rectangle(x - size / 2, y - size / 2, size, size);
             var col = b.Buy ? BuyColor : SellColor;
             context.FillEllipse(col, rect);
-            if (ShowBorder) context.DrawEllipse(new RenderPen(Color.FromArgb(220, col.R, col.G, col.B)), rect);
+            if (ShowBorder) context.DrawEllipse(new RenderPen(Color.FromArgb(220, col.R, col.G, col.B), Math.Clamp(BorderWidth, 1, 10)), rect);
             if (ShowVolume && size >= 22)
             {
                 string txt = VolumeFormat.Compact(b.Volume, ChartInfo.VolumeDecimals > 0 && b.Volume < 100 ? 1 : 0);

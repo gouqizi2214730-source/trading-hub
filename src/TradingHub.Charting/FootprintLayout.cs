@@ -157,6 +157,11 @@ public sealed class FootprintLayout
     [Display(Name = "Recuadro en el POC", Description = "En las columnas de celdas")]
     public bool ShowPoc { get; set; } = true;
 
+    /// <summary>Grosor del recuadro del POC en píxeles (0 = automático: 1,5 con filas altas, 1 con filas bajas).</summary>
+    [Display(Name = "Grosor del recuadro del POC", Description = "En píxeles; 0 = automático")]
+    [Range(0, 6)]
+    public decimal PocBorderWidth { get; set; }
+
     /// <summary>Resaltar desequilibrios en el texto de bid x ask.</summary>
     [Display(Name = "Marcar desequilibrios", Description = "En el texto de bid x ask (diagonal)")]
     public bool ShowImbalances { get; set; } = true;

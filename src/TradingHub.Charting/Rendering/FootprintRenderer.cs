@@ -336,8 +336,10 @@ internal sealed class FootprintRenderer
         {
             float yc = x.Main.Y(x.Center(x.PocRow));
             _stroke.Color = t.Poc;
-            _stroke.StrokeWidth = x.RowH >= 8 ? 1.5f : 1f;
-            canvas.DrawRect(new SKRect(left + 0.75f, (float)(yc - x.RowH / 2) + 0.75f, right - 0.75f, (float)(yc + x.RowH / 2) - 0.75f), _stroke);
+            float pw = x.L.PocBorderWidth > 0 ? (float)Math.Min(x.L.PocBorderWidth, 6m) : x.RowH >= 8 ? 1.5f : 1f;
+            _stroke.StrokeWidth = pw;
+            float inset = pw / 2;
+            canvas.DrawRect(new SKRect(left + inset, (float)(yc - x.RowH / 2) + inset, right - inset, (float)(yc + x.RowH / 2) - inset), _stroke);
         }
     }
 

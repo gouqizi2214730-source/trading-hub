@@ -137,6 +137,14 @@ internal static partial class Workspace
             series.Add(o);
         }
 
+        // niveles fijos (70/30 del RSI, el cero…): su color, grosor y estilo también se guardan
+        foreach (var ls in ind.LineSeries)
+            series.Add(new JObject
+            {
+                ["Level"] = ls.Id, ["Value"] = ls.Value, ["Color"] = ls.Color.ToArgb(), ["Width"] = ls.Width,
+                ["LineDashStyle"] = ls.LineDashStyle.ToString(), ["UseScale"] = ls.UseScale,
+            });
+
         return props;
     }
 
@@ -155,6 +163,18 @@ internal static partial class Workspace
         if (series == null) return;
         foreach (var o in series)
         {
+            if (o["Level"] is JValue levelId)
+            {
+                var ls = ind.LineSeries.FirstOrDefault(x => x.Id == (string?)levelId);
+                if (ls == null) continue;
+                if (o["Value"] is JValue lv) ls.Value = (decimal)lv;
+                if (o["Color"] is JValue lc) ls.Color = System.Drawing.Color.FromArgb((int)lc);
+                if (o["Width"] is JValue lw) ls.Width = (int)lw;
+                if (Enum.TryParse<LineDashStyle>((string?)o["LineDashStyle"], out var lds)) ls.LineDashStyle = lds;
+                if (o["UseScale"] is JValue lu) ls.UseScale = (bool)lu;
+                continue;
+            }
+
             var s = ind.DataSeries.FirstOrDefault(x => x.Id == (string?)o["Id"]);
             if (s == null) continue;
             if (o["Visible"] is JValue vis) s.Visible = (bool)vis;

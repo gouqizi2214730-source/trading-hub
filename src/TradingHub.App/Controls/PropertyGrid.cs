@@ -464,7 +464,7 @@ public sealed class PropertyGrid : UserControl
         {
             var inner = new StackPanel { Spacing = 2, Margin = new Thickness(8, 2, 0, 4) };
             foreach (var p in EditableProperties(ls.GetType())) AddRow(inner, ls, p, 1);
-            _root.Children.Add(new Expander { Header = "Nivel: " + ls.Name, Content = inner, HorizontalAlignment = HorizontalAlignment.Stretch });
+            _root.Children.Add(new Expander { Header = $"Nivel: {Localization.Lang.T(ls.Name)}", Content = inner, HorizontalAlignment = HorizontalAlignment.Stretch });
         }
     }
 }

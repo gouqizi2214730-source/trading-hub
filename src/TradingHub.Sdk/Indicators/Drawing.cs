@@ -53,6 +53,7 @@ namespace TradingHub.Indicators
         }
 
         [Display(Name = "Grosor", Order = 30)]
+        [Range(1, 20)]
         public int Width
         {
             get => _width;
