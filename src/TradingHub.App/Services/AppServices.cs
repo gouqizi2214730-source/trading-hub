@@ -19,7 +19,11 @@ public static class AppPaths
     public static string Root { get; } = Environment.GetEnvironmentVariable("TRADINGHUB_DATA_DIR") is { Length: > 0 } dir
         ? dir
         : TradingHub.Common.Product.AppData;
-    public static string Ticks => Path.Combine(Root, "Ticks");
+    /// <summary>Ticks grabados y bajados (en la carpeta de datos de mercado, que se puede llevar a otro disco).</summary>
+    public static string Ticks => Path.Combine(DataLocation.Root, "Ticks");
+
+    /// <summary>Caché de velas del exchange.</summary>
+    public static string Klines => Path.Combine(DataLocation.Root, "Klines");
     public static string WorkspaceFile => Path.Combine(Root, "workspace.json");
     public static string Drawings => Path.Combine(Root, "Drawings");
     public static string Backtests => Path.Combine(Root, "Backtests");
@@ -379,8 +383,10 @@ public sealed class AppServices
         Directory.CreateDirectory(AppPaths.Root);
         Directory.CreateDirectory(AppPaths.UserIndicators);
         Directory.CreateDirectory(AppPaths.Strategies);
+        // una mudanza de los datos de mercado a otra carpeta se termina antes de grabar nada
+        DataMoveError = DataLocation.FinishPendingMove();
         Hub.RecordingRoot = AppPaths.Ticks;
-        KlineHistory.CacheRoot = Path.Combine(AppPaths.Root, "Klines");
+        KlineHistory.CacheRoot = AppPaths.Klines;
         // TRADINGHUB_LIVE_DIR: cartera alternativa (pruebas)
         TradingHub.Strategies.LiveStore.Root = Environment.GetEnvironmentVariable("TRADINGHUB_LIVE_DIR") is { Length: > 0 } live ? live : Path.Combine(AppPaths.Root, "Live");
         // las que corrían al cerrar Trading Hub (enseguida el guardado periódico las marca detenidas): para reanudarlas al abrir
@@ -405,6 +411,9 @@ public sealed class AppServices
     public AppSettings Settings { get; } = AppSettings.Load();
     public ConnectionManager Connections { get; } = new();
     public MarketDataHub Hub { get; } = new();
+
+    /// <summary>Si al abrir no se pudo terminar de mudar los datos de mercado (la carpeta vieja quedó intacta).</summary>
+    public string? DataMoveError { get; }
 
     /// <summary>Condición de cada mercado (rango o tendencia y volatilidad), la misma medida que usan los filtros de contexto.</summary>
     internal MarketConditions Markets { get; }

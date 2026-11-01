@@ -107,6 +107,23 @@ public class SessionVolumeProfile : Indicator
     [Display(Name = "Mostrar VAH / VAL", GroupName = "Visualización", Order = 90)]
     public bool ShowValueAreaLines { get; set; } = true;
 
+    [Display(Name = "Grosor del POC", GroupName = "Líneas", Order = 100)]
+    [Range(1, 10)]
+    public int PocWidth { get; set; } = 1;
+
+    [Display(Name = "Estilo del POC", GroupName = "Líneas", Order = 105)]
+    public LineDashStyle PocStyle { get; set; } = LineDashStyle.Solid;
+
+    [Display(Name = "Grosor de VAH / VAL", GroupName = "Líneas", Order = 110)]
+    [Range(1, 10)]
+    public int ValueAreaLineWidth { get; set; } = 1;
+
+    [Display(Name = "Estilo de VAH / VAL", GroupName = "Líneas", Order = 115)]
+    public LineDashStyle ValueAreaLineStyle { get; set; } = LineDashStyle.Dash;
+
+    [Display(Name = "Color de VAH / VAL", GroupName = "Líneas", Order = 120)]
+    public Color ValueAreaLineColor { get; set; } = Color.FromArgb(110, 120, 160, 220);
+
     protected override void OnRecalculate() => _profiles.Clear();
 
     protected override void OnCalculate(int bar, decimal value)
@@ -280,10 +297,10 @@ public class SessionVolumeProfile : Indicator
                 }
             }
 
-            context.DrawLine(new RenderPen(PocColor, 1), x0, yPoc, Math.Max(x1, xEnd), yPoc);
+            context.DrawLine(new RenderPen(PocColor, Math.Clamp(PocWidth, 1, 10), Rendering.Settings.PenSettings.ToDash(PocStyle)), x0, yPoc, Math.Max(x1, xEnd), yPoc);
             if (ShowValueAreaLines)
             {
-                var pen = new RenderPen(ValueAreaColor, 1, System.Drawing.Drawing2D.DashStyle.Dash);
+                var pen = new RenderPen(ValueAreaLineColor, Math.Clamp(ValueAreaLineWidth, 1, 10), Rendering.Settings.PenSettings.ToDash(ValueAreaLineStyle));
                 int yVah = ChartInfo.GetYByPrice(p.Vah + top, true);
                 int yVal = ChartInfo.GetYByPrice(p.Val, true) + rowH;
                 context.DrawLine(pen, x0, yVah, x1, yVah);

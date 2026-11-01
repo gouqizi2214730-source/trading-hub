@@ -127,6 +127,7 @@ internal sealed class SettingsView : UserControl, IPage
         var data = Section("Datos", MaterialIconKind.DatabaseOutline,
             Setting("Grabar lo que llega en vivo", "Guarda cada operación recibida para reabrir gráficos al instante, hacer replay y backtests.", record),
             Setting("Footprint en la historia", "Cuánto hacia atrás la historia trae cada operación (footprint, perfil y delta completos en esas velas); lo más viejo llega en velas y se ve sin footprint. En Binance y Bybit los días cerrados salen de sus archivos públicos y se guardan; lo de hoy viene de la API y puede tardar unos minutos la primera vez.", tickHistory),
+            BuildMarketDataFolder(),
             Setting("Carpeta de datos", AppPaths.Root, Ui.Button("Abrir", MaterialIconKind.FolderOpenOutline, () => Shell.OpenFolder(AppPaths.Root))),
             Setting("Indicadores propios (C#)", AppPaths.UserIndicators, Ui.Button("Abrir", MaterialIconKind.FolderOpenOutline, () => Shell.OpenFolder(AppPaths.UserIndicators))),
             Setting("Estrategias (C#)", AppPaths.Strategies, Ui.Button("Abrir", MaterialIconKind.FolderOpenOutline, () => Shell.OpenFolder(AppPaths.Strategies))));
@@ -235,6 +236,103 @@ internal sealed class SettingsView : UserControl, IPage
         _sleepState.Text = (g.Awake ? $"Ahora: despierta ({g.Reason})." : $"Ahora: puede dormir ({reason}).") +
                            (!SleepGuard.SupportsLidClosed ? "" : g.LidHelperRunning ? " Tapa cerrada: activo." : _svc.Settings.KeepAwakeLidClosed ? " Tapa cerrada: se activa cuando haya algo corriendo." : "") +
                            (g.LidError != null ? " " + g.LidError : "");
+    }
+
+    // ===================================================================== carpeta de los datos de mercado
+
+    private readonly TextBlock _dataFolderState = new() { Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap, IsVisible = false };
+    private readonly ProgressBar _dataFolderProgress = new() { Minimum = 0, Maximum = 1, Height = 6, IsVisible = false };
+    private bool _movingData;
+
+    private Control BuildMarketDataFolder()
+    {
+        var change = Ui.Button("Cambiar…", MaterialIconKind.FolderMoveOutline, () => _ = ChangeDataFolder(null));
+        var open = Ui.Button("Abrir", MaterialIconKind.FolderOpenOutline, () => Shell.OpenFolder(DataLocation.Root));
+        var reset = Ui.Button("Volver a la predeterminada", MaterialIconKind.Restore, () => _ = ChangeDataFolder(AppPaths.Root), "ghost");
+        reset.IsVisible = DataLocation.Custom != null;
+        if (_svc.DataMoveError is { } err)
+        {
+            _dataFolderState.Text = $"La mudanza anterior no se pudo terminar ({err}). Los datos siguen completos en la carpeta vieja; se reintenta al volver a abrir.";
+            _dataFolderState.IsVisible = true;
+        }
+
+        return Ui.V(6,
+            Setting("Carpeta de los datos de mercado", $"{DataLocation.Root} · ticks grabados y bajados, y velas en caché (lo que más ocupa). Podés llevarla a otro disco.",
+                Ui.H(8, change, open)),
+            Ui.H(8, reset),
+            _dataFolderProgress,
+            _dataFolderState);
+    }
+
+    private static string Size(long bytes) => bytes >= 1L << 30 ? $"{bytes / (double)(1L << 30):0.0} GB" : $"{bytes / (double)(1L << 20):0} MB";
+
+    private async Task ChangeDataFolder(string? target)
+    {
+        if (_movingData || TopLevel.GetTopLevel(this) is not { } top) return;
+        if (target == null)
+        {
+            var picked = await top.StorageProvider.OpenFolderPickerAsync(new Avalonia.Platform.Storage.FolderPickerOpenOptions
+            {
+                Title = "Elegí dónde guardar los datos de mercado",
+                AllowMultiple = false,
+            });
+            target = picked.Count > 0 ? Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath(picked[0]) : null;
+            if (string.IsNullOrWhiteSpace(target)) return;
+        }
+
+        void Show(string text)
+        {
+            _dataFolderState.Text = text;
+            _dataFolderState.IsVisible = true;
+        }
+
+        if (DataLocation.Problem(target) is { } problem)
+        {
+            Show(problem);
+            return;
+        }
+
+        long size = await Task.Run(DataLocation.CurrentSize);
+        long free = DataLocation.FreeSpace(target);
+        if (free < size + (256L << 20))
+        {
+            Show($"No hay lugar en ese disco: los datos ocupan {Size(size)} y quedan {Size(free)} libres.");
+            return;
+        }
+
+        if (top is not Window owner) return;
+        bool ok = await ConfirmDialog.ShowAsync(owner, "Mover los datos de mercado",
+            $"Se copian {Size(size)} a:\n{target}\n\nTrading Hub sigue funcionando mientras copia. Al terminar se reinicia, completa lo que se grabó mientras tanto y recién ahí borra la carpeta vieja.",
+            "Mover y reiniciar");
+        if (!ok) return;
+
+        _movingData = true;
+        _dataFolderProgress.Value = 0;
+        _dataFolderProgress.IsVisible = true;
+        Show("Copiando…");
+        try
+        {
+            var progress = new Progress<(long Done, long Total)>(p =>
+            {
+                _dataFolderProgress.Value = p.Total > 0 ? (double)p.Done / p.Total : 1;
+                _dataFolderState.Text = $"Copiando… {Size(p.Done)} de {Size(p.Total)}";
+            });
+            await DataLocation.MoveAsync(target, progress, CancellationToken.None);
+            Show("Listo: reiniciando para terminar la mudanza…");
+            _status("Datos de mercado copiados: Trading Hub se reinicia para terminar");
+            await Task.Delay(800);
+            Localization.Lang.Restart();
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write(ex);
+            Show($"No se pudo copiar: {ex.Message}. Los datos siguen en la carpeta de siempre.");
+        }
+        finally
+        {
+            _movingData = false;
+            _dataFolderProgress.IsVisible = false;
+        }
     }
 
     // ===================================================================== actualizaciones

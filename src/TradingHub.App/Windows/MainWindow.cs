@@ -93,6 +93,7 @@ public sealed class MainWindow : Window
         Opened += async (_, _) =>
         {
             FitToScreen();
+            if (_svc.DataMoveError != null) SetStatus("No se pudo terminar de mover los datos de mercado: siguen completos en la carpeta vieja (Ajustes → Datos).");
             await Trading.RestoreOrDefaultAsync();
             // y las tuyas en vivo, si así está en Ajustes (unos segundos después: las conexiones ya arrancaron)
             _ = Task.Delay(TimeSpan.FromSeconds(8)).ContinueWith(_ => Dispatcher.UIThread.Post(async () =>

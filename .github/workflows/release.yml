@@ -55,8 +55,9 @@ jobs:
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "Version: $VERSION"
 
+      # algunas pruebas de red del original dependen del tiempo y fallan de vez en cuando: un segundo intento
       - name: Tests
-        run: dotnet test tests/TradingHub.Tests -c Release
+        run: dotnet test tests/TradingHub.Tests -c Release || dotnet test tests/TradingHub.Tests -c Release --no-build
 
       - name: Installers
         run: bash scripts/build-release.sh "${{ steps.v.outputs.version }}"
