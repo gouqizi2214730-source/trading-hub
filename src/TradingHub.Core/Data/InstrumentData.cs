@@ -264,6 +264,8 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         foreach (var (gFrom, gTo, fromId) in tickGaps)
         {
             int index = part++;
+            try
+            {
             // los días ya cerrados salen del archivo público del exchange (un día entero en segundos, en vez de miles de
             // pedidos a la API); lo de hoy y lo que el archivo todavía no tenga, de la API como siempre
             var rest = await LoadFromArchivesAsync(gFrom, gTo, fromId, fetched, from, to, maxIdExclusive,
@@ -279,6 +281,12 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
                         if (t.Id < maxIdExclusive && t.Time >= from && t.Time <= to) fetched.Add(t);
                     return !ct.IsCancellationRequested;
                 }, progress, ct).ConfigureAwait(false);
+            }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                // sin red hacia el exchange: lo de disco se muestra igual (antes se perdía todo)
+                NetworkProblem(ex);
             }
         }
 
@@ -315,10 +323,31 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         decimal endPrice = real.Count > 0 ? real[0].Price : Trades.Count > 0 ? Trades.GetPrice(0) : 0;
         int kIndex = part;
         var kProgress = new Progress<double>(p => HistoryProgress = (kIndex + Math.Clamp(p, 0, 1)) / parts);
-        var klines = await KlineHistory.LoadAsync(klineSource, Instrument, kFrom, kTo, minutes, endPrice, kProgress, ct).ConfigureAwait(false);
+        List<Kline> klines;
+        try
+        {
+            klines = await KlineHistory.LoadAsync(klineSource, Instrument, kFrom, kTo, minutes, endPrice, kProgress, ct, NetworkProblem).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            NetworkProblem(ex);
+            return Merged();
+        }
+
         var synthetic = new List<Trade>(klines.Count * 4);
         KlineHistory.Synthesize(klines, Instrument, minutes, windows, synthetic);
         return KlineHistory.MergeByTime(synthetic, Merged());
+    }
+
+    /// <summary>
+    /// Un pedido al exchange falló mientras se cargaba la historia: se anota (se muestra en la barra de estado) y se sigue
+    /// con lo que haya (lo de disco y lo que sí llegó).
+    /// </summary>
+    private void NetworkProblem(Exception ex)
+    {
+        var inner = ex;
+        while (inner.InnerException != null) inner = inner.InnerException;
+        HistoryError ??= inner != ex ? $"{ex.Message} ({inner.Message})" : ex.Message;
     }
 
     /// <summary>Raíz de la caché de días resumidos por hora (null = no se resume: lo que no entra va en velas).</summary>

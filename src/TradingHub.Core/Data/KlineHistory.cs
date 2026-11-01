@@ -33,7 +33,7 @@ public static class KlineHistory
 
     /// <summary>Velas entre dos instantes, usando la caché para los meses ya cerrados.</summary>
     public static async Task<List<Kline>> LoadAsync(IKlineHistory source, Instrument inst, DateTime fromUtc, DateTime toUtc, int minutes, decimal endPrice,
-        IProgress<double>? progress, CancellationToken ct)
+        IProgress<double>? progress, CancellationToken ct, Action<Exception>? onError = null)
     {
         var result = new List<Kline>();
         if (toUtc <= fromUtc) return result;
@@ -72,11 +72,22 @@ public static class KlineHistory
                 var to = closed ? monthEnd : (toUtc < monthEnd ? toUtc : monthEnd);
                 klines = new List<Kline>();
                 var target = klines;
-                await source.LoadKlinesAsync(inst, from, to, minutes, endPrice, batch =>
+                try
                 {
-                    target.AddRange(batch);
-                    return !ct.IsCancellationRequested;
-                }, sub, ct).ConfigureAwait(false);
+                    await source.LoadKlinesAsync(inst, from, to, minutes, endPrice, batch =>
+                    {
+                        target.AddRange(batch);
+                        return !ct.IsCancellationRequested;
+                    }, sub, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (onError != null && (ex is not OperationCanceledException || !ct.IsCancellationRequested))
+                {
+                    // un mes que no llegó no tira los demás (ni los guardados en caché)
+                    onError(ex);
+                    target.Clear();
+                    continue;
+                }
+
                 if (closed && klines.Count > 0) WriteCache(inst, monthStart, minutes, klines, source.CacheTag);
             }
 

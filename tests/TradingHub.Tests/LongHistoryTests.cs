@@ -99,6 +99,9 @@ public class LongHistoryTests
         public bool RecentOnly { get; set; }
 
         public bool RecentTradesOnly => RecentOnly;
+
+        /// <summary>Sin red hacia el exchange (como api.bybit.com bloqueado): todo pedido REST falla.</summary>
+        public bool Offline { get; set; }
         public void Dispose() { }
         public Task<IReadOnlyList<Instrument>> GetInstrumentsAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<Instrument>>(new[] { Inst });
         public IDisposable Subscribe(Instrument instrument, IMarketDataSink sink) => new Nothing();
@@ -107,6 +110,7 @@ public class LongHistoryTests
         public Task LoadTradesAsync(Instrument instrument, DateTime fromUtc, DateTime toUtc, long? fromId, Func<IReadOnlyList<Trade>, bool> onBatch, IProgress<double>? progress, CancellationToken ct)
         {
             TickRequests++;
+            if (Offline) throw new HttpRequestException("The SSL connection could not be established, see inner exception.");
             if (fromUtc < EarliestTickRequested) EarliestTickRequested = fromUtc;
             var list = new List<Trade>();
             long id = 1_000_000 + (long)(fromUtc - DateTime.UnixEpoch).TotalSeconds;
@@ -118,6 +122,7 @@ public class LongHistoryTests
 
         public Task LoadKlinesAsync(Instrument instrument, DateTime fromUtc, DateTime toUtc, int minutes, decimal endPrice, Func<IReadOnlyList<Kline>, bool> onBatch, IProgress<double>? progress, CancellationToken ct)
         {
+            if (Offline) throw new HttpRequestException("The SSL connection could not be established, see inner exception.");
             var list = new List<Kline>();
             long step = minutes * 60_000L;
             for (long t = Ms(fromUtc) / step * step; t < Ms(toUtc); t += step) list.Add(new Kline(t, 100, 101, 99, 100, 1, 0.6m, true));
@@ -336,6 +341,40 @@ public class LongHistoryTests
         }
         finally
         {
+            try { Directory.Delete(root, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void Si_el_exchange_no_responde_igual_se_muestra_lo_bajado()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "th-offline-" + Guid.NewGuid().ToString("N")[..8]);
+        var kroot = KlineHistory.CacheRoot;
+        try
+        {
+            KlineHistory.CacheRoot = Path.Combine(root, "klines");
+            var inst = new Instrument { Symbol = "TEST", FeedId = "test", TickSize = 0.5m, VolumeStep = 0.001m };
+            var now = DateTime.UtcNow;
+            long id = 1;
+            for (var day = DateOnly.FromDateTime(now.AddDays(-10)); day <= DateOnly.FromDateTime(now.AddDays(-1)); day = day.AddDays(1))
+            {
+                var start = day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+                var list = new List<Trade>();
+                for (var t = start; t < start.AddDays(1); t = t.AddMinutes(1)) list.Add(new Trade(id++, t, 100, 0.01m, TradeSide.Buy));
+                HistoricalData.WriteDay(root, inst, day, list);
+            }
+
+            var feed = new FakeFeed { Live = true, RecentOnly = true, Offline = true };
+            var data = new InstrumentData(inst, feed) { RecordingRoot = root, CompactRoot = Path.Combine(root, "compact"), RecordLive = false };
+            data.Start(now.AddDays(-400)); // «todo el historial»
+            Wait(data, () => data.IsLoadingHistory);
+            Assert.NotNull(data.HistoryError); // se avisa
+            Assert.True(data.Trades.Count > 0, "lo de disco no debería perderse por un error de red");
+            Assert.True(data.Trades.FirstTime <= now.AddDays(-9.9));
+        }
+        finally
+        {
+            KlineHistory.CacheRoot = kroot;
             try { Directory.Delete(root, true); } catch { }
         }
     }

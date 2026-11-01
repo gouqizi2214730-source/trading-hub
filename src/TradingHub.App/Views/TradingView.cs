@@ -1034,7 +1034,10 @@ public sealed partial class TradingView : UserControl
         if (!ReferenceEquals(chart.Model?.Data, data)) return;
         if (!data.ExtendHistory(from))
         {
-            if (!quiet) _status($"{chart.Symbol}: la historia pedida ({what}) ya está cargada.");
+            if (!quiet)
+                _status(data.HistoryError != null
+                    ? $"{chart.Symbol}: no se pudo traer toda la historia ({data.HistoryError})"
+                    : $"{chart.Symbol}: la historia pedida ({what}) ya está cargada.");
             return;
         }
 
