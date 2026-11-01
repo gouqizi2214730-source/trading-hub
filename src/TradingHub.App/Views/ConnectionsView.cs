@@ -199,7 +199,7 @@ internal sealed class ConnectionsView : UserControl, IPage
         var name = new TextBox { Text = p.Name, FontSize = 18, FontWeight = FontWeight.SemiBold, MinWidth = 170, MaxWidth = 300 };
         var enabled = new ToggleSwitch { IsChecked = p.Enabled, OnContent = "Activada", OffContent = "Desactivada" };
         var history = new ComboBox { MinWidth = 160 };
-        foreach (var (h, label) in new[] { (0.5, "30 minutos"), (1.0, "1 hora"), (1.5, "1,5 horas"), (3.0, "3 horas"), (6.0, "6 horas"), (12.0, "12 horas"), (24.0, "1 día"), (72.0, "3 días"), (168.0, "7 días") })
+        foreach (var (h, label) in new[] { (0.5, "30 minutos"), (1.0, "1 hora"), (1.5, "1,5 horas"), (3.0, "3 horas"), (6.0, "6 horas"), (12.0, "12 horas"), (24.0, "1 día"), (72.0, "3 días"), (168.0, "7 días"), (ChartToolbar.AllHistory, "Todo el historial") })
             history.Items.Add(new ComboBoxItem { Content = label, Tag = h });
         history.SelectedItem = history.Items.OfType<ComboBoxItem>().OrderBy(i => Math.Abs((double)i.Tag! - p.HistoryHours)).First();
 

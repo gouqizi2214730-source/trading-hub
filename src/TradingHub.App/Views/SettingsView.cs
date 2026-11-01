@@ -153,9 +153,13 @@ internal sealed class SettingsView : UserControl, IPage
                 compact),
             Setting("Footprint en la historia", "Cuánto hacia atrás la historia trae cada operación. Lo más viejo que tengas bajado en Datos se carga resumido (ver «Resumen de la historia más vieja»), con footprint y perfil en filas de ~1 punto básico; la primera vez arma un resumen por día y después abre al instante. Sin ticks bajados, lo viejo llega en velas y se ve sin footprint.", tickHistory),
             BuildMarketDataFolder(),
-            Setting("Carpeta de datos", AppPaths.Root, Ui.Button("Abrir", MaterialIconKind.FolderOpenOutline, () => Shell.OpenFolder(AppPaths.Root))),
-            Setting("Indicadores propios (C#)", AppPaths.UserIndicators, Ui.Button("Abrir", MaterialIconKind.FolderOpenOutline, () => Shell.OpenFolder(AppPaths.UserIndicators))),
-            Setting("Estrategias (C#)", AppPaths.Strategies, Ui.Button("Abrir", MaterialIconKind.FolderOpenOutline, () => Shell.OpenFolder(AppPaths.Strategies))));
+            FolderRow("Carpeta de datos", $"{AppPaths.Root} · ajustes, conexiones, espacio de trabajo, cuentas, backtests y estrategias en vivo",
+                AppPaths.Root, TradingHub.Common.Product.DefaultAppData, FolderKind.App),
+            FolderRow("Indicadores propios (C#)", AppPaths.UserIndicators, AppPaths.UserIndicators,
+                Path.Combine(TradingHub.Common.Product.Documents, "Indicadores"), FolderKind.Indicators),
+            FolderRow("Estrategias (C#)", AppPaths.Strategies, AppPaths.Strategies,
+                Path.Combine(TradingHub.Common.Product.Documents, "Estrategias"), FolderKind.Strategies),
+            _folderState);
 
         var sleep = BuildSleep();
         var liveStart = BuildLiveStart();
@@ -261,6 +265,97 @@ internal sealed class SettingsView : UserControl, IPage
         _sleepState.Text = (g.Awake ? $"Ahora: despierta ({g.Reason})." : $"Ahora: puede dormir ({reason}).") +
                            (!SleepGuard.SupportsLidClosed ? "" : g.LidHelperRunning ? " Tapa cerrada: activo." : _svc.Settings.KeepAwakeLidClosed ? " Tapa cerrada: se activa cuando haya algo corriendo." : "") +
                            (g.LidError != null ? " " + g.LidError : "");
+    }
+
+    // ===================================================================== carpetas de la app, indicadores y estrategias
+
+    private enum FolderKind
+    {
+        App,
+        Indicators,
+        Strategies,
+    }
+
+    private readonly TextBlock _folderState = new() { Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap, IsVisible = false };
+
+    private Control FolderRow(string title, string description, string current, string defaultPath, FolderKind kind)
+    {
+        var buttons = Ui.H(8,
+            Ui.Button("Cambiar…", MaterialIconKind.FolderMoveOutline, () => _ = ChangeFolder(kind, current, null)),
+            Ui.Button("Abrir", MaterialIconKind.FolderOpenOutline, () => Shell.OpenFolder(current)));
+        if (!AppLocation.Same(current, defaultPath))
+            buttons.Children.Add(Ui.Button("Volver a la predeterminada", MaterialIconKind.Restore, () => _ = ChangeFolder(kind, current, defaultPath), "ghost"));
+        if (kind == FolderKind.App && AppLocation.MoveError is { } err)
+        {
+            _folderState.Text = $"No se pudo mover la carpeta de datos ({err}); sigue completa en {AppPaths.Root}.";
+            _folderState.IsVisible = true;
+        }
+
+        return Setting(title, description, buttons);
+    }
+
+    private async Task ChangeFolder(FolderKind kind, string current, string? target)
+    {
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+        if (target == null)
+        {
+            var picked = await owner.StorageProvider.OpenFolderPickerAsync(new Avalonia.Platform.Storage.FolderPickerOpenOptions
+            {
+                Title = kind switch
+                {
+                    FolderKind.App => "Elegí dónde guardar los datos de Trading Hub",
+                    FolderKind.Indicators => "Elegí dónde guardar tus indicadores",
+                    _ => "Elegí dónde guardar tus estrategias",
+                },
+                AllowMultiple = false,
+            });
+            target = picked.Count > 0 ? Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath(picked[0]) : null;
+            if (string.IsNullOrWhiteSpace(target)) return;
+            // la carpeta de la app va en su propia subcarpeta (D:\ → D:\Trading Hub)
+            if (kind == FolderKind.App && !Path.GetFileName(target.TrimEnd('\\', '/')).Equals(TradingHub.Common.Product.Name, StringComparison.OrdinalIgnoreCase))
+                target = TradingHub.Common.Product.Folder(target);
+        }
+
+        if (AppLocation.Problem(current, target) is { } problem)
+        {
+            _folderState.Text = problem;
+            _folderState.IsVisible = true;
+            return;
+        }
+
+        string what = kind switch
+        {
+            FolderKind.App => "Se mueven los ajustes, las conexiones, el espacio de trabajo, las cuentas, los backtests y las estrategias en vivo. Los datos de mercado se quedan donde están (se mueven aparte, arriba). Trading Hub se reinicia y hace la mudanza al abrir; si algo falla, todo queda en la carpeta de siempre.",
+            FolderKind.Indicators => "Se mueven tus indicadores (.cs). Trading Hub se reinicia para usarlos desde ahí.",
+            _ => "Se mueven tus estrategias (.cs) y sus reportes. Trading Hub se reinicia para usarlas desde ahí.",
+        };
+        bool ok = await ConfirmDialog.ShowAsync(owner, "Cambiar carpeta", $"{Localization.Lang.T(what)}\n\nNueva carpeta:\n{target}", "Mover y reiniciar");
+        if (!ok) return;
+        try
+        {
+            switch (kind)
+            {
+                case FolderKind.App:
+                    AppLocation.RequestRootMove(target);
+                    break;
+                case FolderKind.Indicators:
+                    AppLocation.MoveScripts(indicators: true, target);
+                    break;
+                default:
+                    AppLocation.MoveScripts(indicators: false, target);
+                    break;
+            }
+
+            _status("Carpeta cambiada: Trading Hub se reinicia");
+            await Task.Delay(500);
+            Localization.Lang.Restart();
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write(ex);
+            _folderState.Text = $"No se pudo mover: {ex.Message}. Todo sigue en la carpeta de siempre.";
+            _folderState.IsVisible = true;
+        }
     }
 
     // ===================================================================== carpeta de los datos de mercado

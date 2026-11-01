@@ -7,7 +7,7 @@
 > - **成交量分布可调行数**：「交易时段成交量分布」指标新增「每行 Tick 数」和「行数」两种调法，POC、VAH、VAL 线可调粗细、线型和颜色。
 > - **用 Bybit 账户交易**：USDT 永续合约（统一账户 UTA），支持模拟盘 Demo Trading、测试网和实盘；市价、限价、止损单，改单不撤单，图表上一键平仓/反手。在 连接 → Bybit 里填 API Key。
 > - **安装时可选安装位置**（例如 D 盘），以后更新会自动装回同一个位置。
-> - **行情数据可以放到其他磁盘**：设置 → 数据 →「行情数据文件夹」→ 更改，会自动迁移已有数据。
+> - **所有文件夹都可以放到其他磁盘**：设置 → 数据 里的行情数据、数据文件夹（设置 / 连接 / 工作区 / 账户 / 回测）、自定义指标、策略，都能「更改…」并自动迁移已有文件。
 > - **更快启动**：ReadyToRun 预编译；修复 Rithmic 改单后价格短暂跳回旧价的问题。
 >
 > **下载 Windows 安装程序：[TradingHub-Setup-x64.exe](https://github.com/gouqizi2214730-source/trading-hub/releases/latest/download/TradingHub-Setup-x64.exe)**（ARM 电脑用 [arm64 版](https://github.com/gouqizi2214730-source/trading-hub/releases/latest/download/TradingHub-Setup-arm64.exe)）· [全部版本](https://github.com/gouqizi2214730-source/trading-hub/releases)

@@ -49,7 +49,18 @@ public class SessionVolumeProfile : Indicator
         public decimal Val;
         public decimal MaxVolume;
         public decimal Total;
+
+        /// <summary>Sesión cerrada y calculada (no se vuelve a tocar).</summary>
+        public bool Final;
     }
+
+    /// <summary>Lo calculado de una sesión cerrada (se reusa mientras sus velas no cambien).</summary>
+    private sealed record Done(string Fingerprint, SortedDictionary<decimal, (decimal Bid, decimal Ask)> Rows, decimal RowSize, decimal Poc, decimal Vah, decimal Val, decimal MaxVolume, decimal Total);
+
+    // compartido entre gráficos y recálculos (al cargar más historia, cambiar de pestaña…): las sesiones cerradas no se
+    // vuelven a calcular si sus velas son las mismas
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Done> DoneCache = new();
+    private const int MaxCached = 20_000;
 
     private readonly List<Profile> _profiles = new();
     private ProfilePeriod _period = ProfilePeriod.Session;
@@ -136,9 +147,17 @@ public class SessionVolumeProfile : Indicator
         };
 
         if (newProfile && (_profiles.Count == 0 || _profiles[^1].StartBar != bar))
+        {
+            // la sesión anterior se cerró: se calcula (o se toma de lo ya calculado) una sola vez
+            if (_profiles.Count > 0) Finalize(_profiles[^1]);
             _profiles.Add(new Profile { StartBar = bar, EndBar = bar, CommittedEnd = bar - 1 });
+        }
 
         var p = _profiles[^1];
+        p.EndBar = bar;
+        // en la historia solo se anota hasta dónde llega la sesión; el cálculo se hace al cerrarla o en la última vela
+        if (bar < CurrentBar - 1) return;
+
         // las barras cerradas se acumulan una sola vez; la barra actual se suma aparte en cada tick
         while (p.CommittedEnd < bar - 1)
         {
@@ -149,8 +168,55 @@ public class SessionVolumeProfile : Indicator
         var levels = new Dictionary<decimal, (decimal Bid, decimal Ask)>(p.Committed);
         AddTo(levels, bar);
         p.Levels = new SortedDictionary<decimal, (decimal Bid, decimal Ask)>(levels);
-        p.EndBar = bar;
         Finish(p);
+    }
+
+    /// <summary>Clave de lo que cambia el resultado de una sesión: el instrumento, los ajustes y sus velas.</summary>
+    private string Fingerprint(Profile p)
+    {
+        decimal vol = 0, delta = 0;
+        for (int b = p.StartBar; b <= p.EndBar; b++)
+        {
+            var c = GetCandle(b);
+            vol += c.Volume;
+            delta += c.Delta;
+        }
+
+        return string.Join("|", InstrumentInfo?.Instrument ?? "", Tick, _period, _rowSizing, _ticksPerRow, _rowCount, _valueArea,
+            GetCandle(p.StartBar).Time.Ticks, GetCandle(p.EndBar).Time.Ticks, p.EndBar - p.StartBar, vol, delta);
+    }
+
+    /// <summary>Calcula una sesión cerrada (o la toma de lo ya calculado si sus velas no cambiaron).</summary>
+    private void Finalize(Profile p)
+    {
+        if (p.Final) return;
+        string key = Fingerprint(p);
+        if (p.CommittedEnd < p.StartBar && DoneCache.TryGetValue(key, out var d))
+        {
+            p.Rows = d.Rows;
+            p.RowSize = d.RowSize;
+            p.Poc = d.Poc;
+            p.Vah = d.Vah;
+            p.Val = d.Val;
+            p.MaxVolume = d.MaxVolume;
+            p.Total = d.Total;
+            p.Final = true;
+            return;
+        }
+
+        while (p.CommittedEnd < p.EndBar)
+        {
+            p.CommittedEnd++;
+            AddTo(p.Committed, p.CommittedEnd);
+        }
+
+        p.Levels = new SortedDictionary<decimal, (decimal Bid, decimal Ask)>(p.Committed);
+        Finish(p);
+        p.Committed.Clear(); // ya no hace falta: libera memoria
+        p.Levels = new SortedDictionary<decimal, (decimal Bid, decimal Ask)>();
+        p.Final = true;
+        if (DoneCache.Count > MaxCached) DoneCache.Clear();
+        DoneCache[key] = new Done(key, p.Rows, p.RowSize, p.Poc, p.Vah, p.Val, p.MaxVolume, p.Total);
     }
 
     private void AddTo(Dictionary<decimal, (decimal Bid, decimal Ask)> dict, int bar)

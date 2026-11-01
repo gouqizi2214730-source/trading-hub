@@ -36,10 +36,10 @@ public static class AppPaths
     /// Carpeta visible para los indicadores propios (.cs) del usuario. TRADINGHUB_INDICATORS_DIR la cambia (pruebas); con
     /// TRADINGHUB_DATA_DIR y sin ella, una dentro de esa carpeta: una prueba nunca escribe en la carpeta real.
     /// </summary>
-    public static string UserIndicators { get; } = TestFolder("TRADINGHUB_INDICATORS_DIR", "Indicadores") ?? Path.Combine(TradingHub.Common.Product.Documents, "Indicadores");
+    public static string UserIndicators { get; } = TestFolder("TRADINGHUB_INDICATORS_DIR", "Indicadores") ?? AppLocation.Scripts.Indicators ?? Path.Combine(TradingHub.Common.Product.Documents, "Indicadores");
 
     /// <summary>Carpeta visible para las estrategias (.cs). TRADINGHUB_STRATEGIES_DIR la cambia (pruebas), igual que los indicadores.</summary>
-    public static string Strategies { get; } = TestFolder("TRADINGHUB_STRATEGIES_DIR", "Estrategias") ?? Path.Combine(TradingHub.Common.Product.Documents, "Estrategias");
+    public static string Strategies { get; } = TestFolder("TRADINGHUB_STRATEGIES_DIR", "Estrategias") ?? AppLocation.Scripts.Strategies ?? Path.Combine(TradingHub.Common.Product.Documents, "Estrategias");
 
     private static string? TestFolder(string variable, string name) =>
         Environment.GetEnvironmentVariable(variable) is { Length: > 0 } dir ? dir
@@ -488,7 +488,9 @@ public sealed class AppServices
     public void ApplySize(string key, decimal size) => Live.ApplySize(key, size);
 
     public TimeSpan HistoryFor(string profileId) =>
-        TimeSpan.FromHours(Math.Clamp(Connections.Find(profileId)?.HistoryHours ?? 1.5, 0.1, 24 * 60));
+        Connections.Find(profileId)?.HistoryHours is < 0
+            ? TimeSpan.FromHours(6) // «todo el historial»: arranca con lo reciente y el gráfico pide el resto
+            : TimeSpan.FromHours(Math.Clamp(Connections.Find(profileId)?.HistoryHours ?? 1.5, 0.1, 24 * 60));
 
     /// <summary>Abre (o reutiliza) los datos de un instrumento de una conexión.</summary>
     public InstrumentData Open(string profileId, Instrument instrument) =>

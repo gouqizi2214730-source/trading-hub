@@ -46,6 +46,31 @@ public class DataLocationTests : IDisposable
         Assert.True(File.Exists(Path.Combine(from, "settings.json")));
     }
 
+    [Fact]
+    public void Mudar_la_carpeta_de_la_app_deja_los_datos_de_mercado_y_borra_solo_lo_copiado()
+    {
+        string from = Path.Combine(_root, "C"), to = Path.Combine(_root, "D", "Trading Hub");
+        Write("C/settings.json", "{}");
+        Write("C/connections.json", "[]");
+        Write("C/Live/runners.json", "x");
+        Write("C/Ticks/bybit-linear/BTCUSDT/2026-10-30.vtk", "ticks");
+        Write("C/ubicacion.json", "puntero");
+        bool Include(string rel) => !rel.StartsWith("Ticks") && rel != "ubicacion.json";
+        AppLocation.CopyTree(from, to, Include);
+        AppLocation.VerifyAndDelete(from, to, Include);
+        Assert.True(File.Exists(Path.Combine(to, "settings.json")));
+        Assert.True(File.Exists(Path.Combine(to, "Live", "runners.json")));
+        Assert.False(File.Exists(Path.Combine(to, "Ticks", "bybit-linear", "BTCUSDT", "2026-10-30.vtk")));
+        Assert.False(File.Exists(Path.Combine(from, "settings.json")));
+        Assert.False(Directory.Exists(Path.Combine(from, "Live")));
+        Assert.True(File.Exists(Path.Combine(from, "Ticks", "bybit-linear", "BTCUSDT", "2026-10-30.vtk")));
+        Assert.True(File.Exists(Path.Combine(from, "ubicacion.json")));
+
+        Assert.NotNull(AppLocation.Problem(to, Path.Combine(to, "sub")));
+        Assert.NotNull(AppLocation.Problem(to, to));
+        Assert.Null(AppLocation.Problem(to, Path.Combine(_root, "E")));
+    }
+
     private sealed class SyncProgress : IProgress<(long, long)>
     {
         private readonly List<(long, long)> _list;

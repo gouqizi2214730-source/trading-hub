@@ -645,7 +645,9 @@ public sealed partial class TradingView : UserControl
             model.Brackets = _svc.BracketsFor(model.Account);
             tab.Trader?.Rebind();
             Workspace.LoadDrawings(tab);
-            if (tab.HistoryHours != 0) _ = LoadHistoryAsync(tab, tab.HistoryHours, quiet: true);
+            // la del gráfico (si se eligió) o, en un gráfico nuevo, «todo el historial» si así está la conexión
+            double wanted = tab.HistoryHours != 0 ? tab.HistoryHours : profile.HistoryHours == ChartToolbar.AllHistory ? ChartToolbar.AllHistory : 0;
+            if (wanted != 0) _ = LoadHistoryAsync(tab, wanted, quiet: true);
 
             if (oldIndicators != null)
             {

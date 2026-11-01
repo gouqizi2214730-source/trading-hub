@@ -297,6 +297,14 @@ public sealed class ConnectionManager
             return;
         }
 
+        // Binance, Bybit y el simulador: los datos de mercado no dependen de la cuenta (las claves solo sirven para operar).
+        // Descartar el feed dejaba los gráficos abiertos con uno cerrado («Cannot access a disposed object» al pedir historia)
+        if (p.Kind is ConnectionKind.Simulator or ConnectionKind.BinanceFutures or ConnectionKind.BinanceSpot or ConnectionKind.Bybit)
+        {
+            Reconfigured?.Invoke(p);
+            return;
+        }
+
         if (_feeds.Remove(p.Id, out var f))
         {
             try { f.Dispose(); }

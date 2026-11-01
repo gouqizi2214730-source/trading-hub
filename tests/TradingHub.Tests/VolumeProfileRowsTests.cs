@@ -77,4 +77,33 @@ public class VolumeProfileRowsTests
         Assert.InRange(rows, 19, 21);
         Assert.Equal(1200m, total);
     }
+
+    [Fact]
+    public void Cada_sesion_cerrada_se_calcula_una_vez_y_da_lo_mismo_al_recalcular()
+    {
+        var data = new InstrumentData(Btc, new SimulatedFeed());
+        long id = 1;
+        var start = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc);
+        // 4 días de velas de 1 hora, varias operaciones por hora
+        for (int h = 0; h < 96; h++)
+            for (int j = 0; j < 12; j++)
+                data.Trades.Add(new Trade(id++, start.AddHours(h).AddMinutes(j * 5), 100m + ((h * 7 + j * 3) % 80) * 0.1m, 1, j % 3 == 0 ? TradeSide.Sell : TradeSide.Buy));
+        var model = new ChartModel(data, ChartPeriod.H1, new ChartSettings { TimeZoneId = "UTC" });
+        var vp = new SessionVolumeProfile();
+        model.AddIndicator(vp);
+        for (int k = 0; k < 3; k++) model.Update();
+
+        var list = (IList)typeof(SessionVolumeProfile).GetField("_profiles", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(vp)!;
+        Assert.True(list.Count >= 4, $"sesiones: {list.Count}");
+        decimal Total(object p) => (decimal)p.GetType().GetField("Total")!.GetValue(p)!;
+        var first = Enumerable.Range(0, list.Count).Select(i => Total(list[i]!)).ToList();
+        Assert.Equal(96m * 12, first.Sum());
+        Assert.All(first, t => Assert.True(t > 0));
+
+        // recalcular (como al cargar más historia): mismos resultados, las cerradas salen de lo ya calculado
+        vp.RecalculateValues();
+        for (int k = 0; k < 3; k++) model.Update();
+        var again = Enumerable.Range(0, list.Count).Select(i => Total(list[i]!)).ToList();
+        Assert.Equal(first, again);
+    }
 }

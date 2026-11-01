@@ -51,6 +51,9 @@ public static class DataLocation
     /// <summary>Carpeta base de los datos de mercado (adentro van Ticks y Klines).</summary>
     public static string Root => Custom ?? AppPaths.Root;
 
+    /// <summary>Fija los datos de mercado en <paramref name="folder"/> (cuando la carpeta de la app se muda sin ellos).</summary>
+    public static void Pin(string folder) => Save(new Config { Folder = Norm(folder), MoveFrom = Current.MoveFrom });
+
     private static void Save(Config c)
     {
         Directory.CreateDirectory(AppPaths.Root);

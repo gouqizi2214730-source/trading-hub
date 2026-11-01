@@ -176,6 +176,23 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
             var compactDays = new List<DateOnly>();
             long count = 0;
             bool rawFull = false;
+            // los días de la ventana se leen en paralelo (cada uno tarda segundos con millones de operaciones)
+            var windowDays = EachDay(from, to).Where(d => d.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc).AddDays(1) > rawCut
+                                                          && File.Exists(TickFile.DayPath(RecordingRoot, Instrument.FeedId, Instrument.Symbol, d))).ToList();
+            var prefetched = new System.Collections.Concurrent.ConcurrentDictionary<DateOnly, List<Trade>>();
+            if (windowDays.Count > 1)
+                Parallel.ForEach(windowDays, new ParallelOptions { MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 2, 1, 6), CancellationToken = ct }, d =>
+                {
+                    try
+                    {
+                        prefetched[d] = TickFile.Read(TickFile.DayPath(RecordingRoot, Instrument.FeedId, Instrument.Symbol, d));
+                    }
+                    catch (IOException)
+                    {
+                        // se vuelve a intentar abajo
+                    }
+                });
+
             foreach (var day in EachDay(from, to).Reverse())
             {
                 var path = TickFile.DayPath(RecordingRoot, Instrument.FeedId, Instrument.Symbol, day);
@@ -184,7 +201,8 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
                 bool raw = !rawFull && (dayStart.AddDays(1) > rawCut || CompactRoot == null || !UseCompactHistory);
                 if (raw)
                 {
-                    var list = TickFile.Read(path).Where(t => t.Time >= from && t.Time < to && t.Id < maxIdExclusive).ToList();
+                    var read = prefetched.TryRemove(day, out var pre) ? pre : TickFile.Read(path);
+                    var list = read.Where(t => t.Time >= from && t.Time < to && t.Id < maxIdExclusive).ToList();
                     if (count > 0 && count + list.Count > MaxDiskTrades) rawFull = true;
                     else
                     {

@@ -21,6 +21,9 @@ internal static class Program
             e.SetObserved();
         };
 
+        // una mudanza pendiente de la carpeta de la app (Ajustes → Datos) se termina antes de que nada la use
+        Services.AppLocation.FinishPendingMove();
+
         // Windows: si ya hay una Trading Hub abierta con estos datos, se muestra esa y esta no arranca (en la Mac lo hace el sistema)
         if (!Services.SingleInstance.Claim(Services.AppPaths.Root)) return;
 
