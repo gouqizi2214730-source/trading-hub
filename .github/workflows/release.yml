@@ -59,6 +59,26 @@ jobs:
       - name: Tests
         run: dotnet test tests/TradingHub.Tests -c Release || dotnet test tests/TradingHub.Tests -c Release --no-build
 
+      # la app tiene que abrir de verdad (un error al arrancar no lo ve ninguna prueba unitaria): se abre 20 s con una
+      # pantalla virtual y una carpeta de datos vacía; si se cierra antes o deja crash.log, no se publica
+      - name: Startup check
+        run: |
+          set -u
+          sudo apt-get install -y -qq xvfb >/dev/null
+          dotnet build src/TradingHub.App -c Release -v q
+          H="$RUNNER_TEMP/th-home"; rm -rf "$H"; mkdir -p "$H/.config"
+          set +e
+          (cd "$H" && HOME="$H" XDG_CONFIG_HOME="$H/.config" timeout 20 xvfb-run -a -s "-screen 0 1600x1000x24" \
+            dotnet "$GITHUB_WORKSPACE/src/TradingHub.App/bin/Release/net10.0/TradingHub.dll" > "$H/out.txt" 2>&1)
+          code=$?
+          set -e
+          if [ "$code" != "124" ] || [ -f "$H/.config/Trading Hub/crash.log" ]; then
+            echo "::error::Trading Hub no arranca (salió con $code)"
+            tail -40 "$H/out.txt"; cat "$H/.config/Trading Hub/crash.log" 2>/dev/null || true
+            exit 1
+          fi
+          echo "Arranca bien"
+
       - name: Installers
         run: bash scripts/build-release.sh "${{ steps.v.outputs.version }}"
 

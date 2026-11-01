@@ -36,10 +36,12 @@ public static class AppPaths
     /// Carpeta visible para los indicadores propios (.cs) del usuario. TRADINGHUB_INDICATORS_DIR la cambia (pruebas); con
     /// TRADINGHUB_DATA_DIR y sin ella, una dentro de esa carpeta: una prueba nunca escribe en la carpeta real.
     /// </summary>
-    public static string UserIndicators { get; } = TestFolder("TRADINGHUB_INDICATORS_DIR", "Indicadores") ?? AppLocation.Scripts.Indicators ?? Path.Combine(TradingHub.Common.Product.Documents, "Indicadores");
+    public static string UserIndicators => _userIndicators ??= TestFolder("TRADINGHUB_INDICATORS_DIR", "Indicadores") ?? AppLocation.Scripts.Indicators ?? Path.Combine(TradingHub.Common.Product.Documents, "Indicadores");
+
+    private static string? _userIndicators, _strategies;
 
     /// <summary>Carpeta visible para las estrategias (.cs). TRADINGHUB_STRATEGIES_DIR la cambia (pruebas), igual que los indicadores.</summary>
-    public static string Strategies { get; } = TestFolder("TRADINGHUB_STRATEGIES_DIR", "Estrategias") ?? AppLocation.Scripts.Strategies ?? Path.Combine(TradingHub.Common.Product.Documents, "Estrategias");
+    public static string Strategies => _strategies ??= TestFolder("TRADINGHUB_STRATEGIES_DIR", "Estrategias") ?? AppLocation.Scripts.Strategies ?? Path.Combine(TradingHub.Common.Product.Documents, "Estrategias");
 
     private static string? TestFolder(string variable, string name) =>
         Environment.GetEnvironmentVariable(variable) is { Length: > 0 } dir ? dir

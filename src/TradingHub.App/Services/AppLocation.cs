@@ -64,7 +64,11 @@ public static class AppLocation
     // ===================================================================== indicadores y estrategias
 
     /// <summary>Carpetas elegidas para indicadores y estrategias (null = las de siempre).</summary>
-    public static ScriptFolders Scripts { get; } = LoadScripts();
+    public static ScriptFolders Scripts => _scripts ??= LoadScripts();
+
+    // se lee la primera vez que se pide (no al cargar la clase): AppPaths la usa y esta usa AppPaths; con inicializadores
+    // estáticos el orden de arranque dejaba una de las dos a medio hacer y la app se cerraba antes de abrir la ventana
+    private static ScriptFolders? _scripts;
 
     private static ScriptFolders LoadScripts()
     {
