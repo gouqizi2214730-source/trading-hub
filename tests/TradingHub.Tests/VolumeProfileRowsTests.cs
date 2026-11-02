@@ -5,6 +5,7 @@ using TradingHub.Charting;
 using TradingHub.Charting.Rendering;
 using TradingHub.Data;
 using TradingHub.Feeds;
+using TradingHub.Indicators;
 using TradingHub.Indicators.Native;
 using TradingHub.Market;
 using Xunit;
@@ -105,5 +106,47 @@ public class VolumeProfileRowsTests
         for (int k = 0; k < 3; k++) model.Update();
         var again = Enumerable.Range(0, list.Count).Select(i => Total(list[i]!)).ToList();
         Assert.Equal(first, again);
+    }
+
+    [Fact]
+    public void Las_sesiones_cerradas_se_guardan_en_disco_y_no_se_recalculan_al_reabrir()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "th-rc-" + Guid.NewGuid().ToString("N")[..8]);
+        var old = ResultCache.Root;
+        try
+        {
+            ResultCache.Root = root;
+            var data = new InstrumentData(Btc, new SimulatedFeed());
+            long id = 1;
+            var start = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc);
+            for (int h = 0; h < 72; h++)
+                for (int j = 0; j < 12; j++)
+                    data.Trades.Add(new Trade(id++, start.AddHours(h).AddMinutes(j * 5), 200m + ((h * 5 + j * 3) % 60) * 0.1m, 1, j % 3 == 0 ? TradeSide.Sell : TradeSide.Buy));
+
+            List<decimal> Run()
+            {
+                var model = new ChartModel(data, ChartPeriod.H1, new ChartSettings { TimeZoneId = "UTC" });
+                var vp = new SessionVolumeProfile();
+                model.AddIndicator(vp);
+                for (int k = 0; k < 3; k++) model.Update();
+                var list = (IList)typeof(SessionVolumeProfile).GetField("_profiles", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(vp)!;
+                return Enumerable.Range(0, list.Count).Select(i => (decimal)list[i]!.GetType().GetField("Poc")!.GetValue(list[i])!).ToList();
+            }
+
+            var first = Run();
+            Assert.True(Directory.EnumerateFiles(root, "*.cache").Any(), "se guardó en disco");
+            // «reabrir»: sin nada en memoria
+            var mem = (System.Collections.IDictionary)typeof(SessionVolumeProfile).GetField("DoneCache", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
+            mem.Clear();
+            ResultCache.ClearMemory();
+            Assert.Equal(first, Run());
+            Assert.True(mem.Count >= 2, "las cerradas salieron del disco");
+        }
+        finally
+        {
+            ResultCache.Root = old;
+            ResultCache.ClearMemory();
+            try { Directory.Delete(root, true); } catch { }
+        }
     }
 }

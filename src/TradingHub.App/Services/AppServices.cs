@@ -404,6 +404,8 @@ public sealed class AppServices
         Hub.CompactRoot = AppPaths.TicksCompact;
         Hub.CompactMinutes = TradingHub.Data.CompactHistory.Granularities.Contains(Settings.CompactMinutes) ? Settings.CompactMinutes : 1;
         KlineHistory.CacheRoot = AppPaths.Klines;
+        // resultados ya calculados de los indicadores (junto a los datos de mercado: sobreviven a actualizaciones)
+        TradingHub.Indicators.ResultCache.Root = Path.Combine(DataLocation.Root, "IndicatorCache");
         // TRADINGHUB_LIVE_DIR: cartera alternativa (pruebas)
         TradingHub.Strategies.LiveStore.Root = Environment.GetEnvironmentVariable("TRADINGHUB_LIVE_DIR") is { Length: > 0 } live ? live : Path.Combine(AppPaths.Root, "Live");
         // las que corrían al cerrar Trading Hub (enseguida el guardado periódico las marca detenidas): para reanudarlas al abrir

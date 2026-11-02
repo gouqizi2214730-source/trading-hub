@@ -32,13 +32,32 @@ ${UnStrStr}
   !define OUT "TradingHub-Setup-${ARCH}.exe"
 !endif
 
+!ifndef FILELIST
+  !error "Falta -DFILELIST=<lista de archivos del programa> (la arma scripts/build-release.sh)"
+!endif
+!include "${FILELIST}"
+
+; Borra solo lo que es del programa: los archivos de esta versión, las DLL/EXE/PDB sueltas de versiones anteriores y sus
+; subcarpetas de idiomas. Nunca la carpeta entera: si el usuario guardó datos de mercado, indicadores o ajustes adentro
+; (por ejemplo en D:\Trading Hub), quedan intactos.
+!macro RemoveProgram DIR
+  !insertmacro RemoveAppFiles "${DIR}"
+  Delete "${DIR}\*.dll"
+  Delete "${DIR}\*.exe"
+  Delete "${DIR}\*.pdb"
+  Delete "${DIR}\TradingHub.deps.json"
+  Delete "${DIR}\TradingHub.runtimeconfig.json"
+  Delete "${DIR}\Desinstalar Trading Hub.exe"
+  RMDir "${DIR}"
+!macroend
+
 !define NAME "Trading Hub"
 !define EXE "TradingHub.exe"
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\TradingHub"
 
 Name "${NAME}"
 OutFile "${OUT}"
-; siempre en su propia carpeta: así actualizar y desinstalar pueden reemplazarla entera sin tocar nada más
+; en su propia carpeta; actualizar y desinstalar borran solo los archivos del programa (ver RemoveProgram)
 InstallDir "$LOCALAPPDATA\Programs\Trading Hub"
 ; una actualización se instala donde ya estaba (la carpeta que se eligió la primera vez)
 InstallDirRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\TradingHub" "InstallLocation"
@@ -145,41 +164,27 @@ Function RemoveOldInstall
     Return
   ${EndIf}
   ${GetFileName} "$R0" $0
-  ${If} $0 == "Trading Hub"
-  ${AndIf} ${FileExists} "$R0\${EXE}"
-    RMDir /r "$R0"
-  ${ElseIf} ${FileExists} "$R0\${EXE}"
-    ; una carpeta con otro nombre: solo lo que dejó el instalador
-    Delete "$R0\Desinstalar Trading Hub.exe"
+  ${If} ${FileExists} "$R0\${EXE}"
+    !insertmacro RemoveProgram "$R0"
   ${EndIf}
 FunctionEnd
 
-; Borra la carpeta del programa solo si es la suya (se llama «Trading Hub» y tiene TradingHub.exe): aunque alguien la
-; instale con /D en otra carpeta, nunca borra otra cosa
+; Quita el programa de su carpeta (solo sus archivos: ver RemoveProgram)
 Function CleanInstallDir
-  ${GetFileName} "$INSTDIR" $0
-  ${If} $0 == "Trading Hub"
-  ${AndIf} ${FileExists} "$INSTDIR\${EXE}"
+  ${If} ${FileExists} "$INSTDIR\${EXE}"
     SetOutPath "$TEMP"
-    RMDir /r "$INSTDIR"
+    !insertmacro RemoveProgram "$INSTDIR"
   ${EndIf}
 FunctionEnd
 
 Function un.CleanInstallDir
-  ${GetFileName} "$INSTDIR" $0
-  ${If} $0 == "Trading Hub"
-  ${AndIf} ${FileExists} "$INSTDIR\${EXE}"
-    SetOutPath "$TEMP"
-    RMDir /r "$INSTDIR"
-  ${Else}
-    ; otra carpeta: solo lo que es suyo
-    Delete "$INSTDIR\Desinstalar Trading Hub.exe"
-  ${EndIf}
+  SetOutPath "$TEMP"
+  !insertmacro RemoveProgram "$INSTDIR"
 FunctionEnd
 
 Section "Trading Hub" SecMain
   Call WaitClosed
-  ; una actualización reemplaza el programa entero (en su carpeta propia, nunca otra)
+  ; una actualización reemplaza los archivos del programa; lo demás que haya en la carpeta queda
   Call RemoveOldInstall
   Call CleanInstallDir
   SetOutPath "$INSTDIR"

@@ -191,7 +191,7 @@ public class SessionVolumeProfile : Indicator
     {
         if (p.Final) return;
         string key = Fingerprint(p);
-        if (p.CommittedEnd < p.StartBar && DoneCache.TryGetValue(key, out var d))
+        if (p.CommittedEnd < p.StartBar && (DoneCache.TryGetValue(key, out var d) || (d = FromDisk(key)) != null))
         {
             p.Rows = d.Rows;
             p.RowSize = d.RowSize;
@@ -216,7 +216,56 @@ public class SessionVolumeProfile : Indicator
         p.Levels = new SortedDictionary<decimal, (decimal Bid, decimal Ask)>();
         p.Final = true;
         if (DoneCache.Count > MaxCached) DoneCache.Clear();
-        DoneCache[key] = new Done(key, p.Rows, p.RowSize, p.Poc, p.Vah, p.Val, p.MaxVolume, p.Total);
+        var done = new Done(key, p.Rows, p.RowSize, p.Poc, p.Vah, p.Val, p.MaxVolume, p.Total);
+        DoneCache[key] = done;
+        ToDisk(done);
+    }
+
+    // en disco (ResultCache): al volver a abrir Trading Hub, o después de actualizarla, las sesiones cerradas no se
+    // recalculan
+    private string DiskBucket => string.Join("|", "svp1", InstrumentInfo?.Instrument ?? "", Tick, _period, _rowSizing, _ticksPerRow, _rowCount, _valueArea);
+
+    private Done? FromDisk(string key)
+    {
+        if (!ResultCache.TryGet(DiskBucket, key, out var bytes)) return null;
+        try
+        {
+            using var r = new BinaryReader(new MemoryStream(bytes));
+            decimal rowSize = r.ReadDecimal(), poc = r.ReadDecimal(), vah = r.ReadDecimal(), val = r.ReadDecimal(), max = r.ReadDecimal(), total = r.ReadDecimal();
+            int n = r.ReadInt32();
+            var rows = new SortedDictionary<decimal, (decimal Bid, decimal Ask)>();
+            for (int i = 0; i < n; i++) rows[r.ReadDecimal()] = (r.ReadDecimal(), r.ReadDecimal());
+            var d = new Done(key, rows, rowSize, poc, vah, val, max, total);
+            DoneCache[key] = d;
+            return d;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void ToDisk(Done d)
+    {
+        var ms = new MemoryStream();
+        using (var w = new BinaryWriter(ms))
+        {
+            w.Write(d.RowSize);
+            w.Write(d.Poc);
+            w.Write(d.Vah);
+            w.Write(d.Val);
+            w.Write(d.MaxVolume);
+            w.Write(d.Total);
+            w.Write(d.Rows.Count);
+            foreach (var (price, (bid, ask)) in d.Rows)
+            {
+                w.Write(price);
+                w.Write(bid);
+                w.Write(ask);
+            }
+        }
+
+        ResultCache.Put(DiskBucket, d.Fingerprint, ms.ToArray());
     }
 
     private void AddTo(Dictionary<decimal, (decimal Bid, decimal Ask)> dict, int bar)

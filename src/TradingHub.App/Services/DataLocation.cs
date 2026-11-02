@@ -13,7 +13,7 @@ namespace TradingHub.App.Services;
 public static class DataLocation
 {
     private const string FileName = "carpeta-datos.json";
-    private static readonly string[] Folders = { "Ticks", "Klines", "TicksCompact" };
+    private static readonly string[] Folders = { "Ticks", "Klines", "TicksCompact", "IndicatorCache" };
 
     private sealed class Config
     {

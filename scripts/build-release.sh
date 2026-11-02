@@ -40,7 +40,17 @@ for ARCH in $ARCHES; do
   dotnet publish src/TradingHub.App/TradingHub.App.csproj -c Release -r "win-$ARCH" --self-contained true -o "$OUT" -v q \
     -p:Version="$VERSION" -p:PublishReadyToRun="$R2R"
   SETUP="dist/TradingHub-Setup-$ARCH.exe"
-  "$MAKENSIS" -V2 -DVERSION="$VERSION" -DVIVERSION="$VIVERSION" -DARCH="$ARCH" -DSRC="$PWD/$OUT" -DOUT="$PWD/$SETUP" installer/TradingHub.nsi
+  # lo que es del programa (para borrar solo eso al actualizar o desinstalar: nunca la carpeta entera, por si el usuario
+  # guardó datos adentro)
+  FILES="dist/files-$ARCH.nsh"
+  {
+    echo '!macro RemoveAppFiles DIR'
+    (cd "$OUT" && find . -type f | sed 's|^\./||' | sort) | while IFS= read -r f; do printf '  Delete "${DIR}\\%s"\n' "${f//\//\\}"; done
+    (cd "$OUT" && find . -mindepth 1 -maxdepth 1 -type d | sed 's|^\./||' | sort) | while IFS= read -r d; do printf '  RMDir /r "${DIR}\\%s"\n' "$d"; done
+    echo '!macroend'
+  } >"$FILES"
+  "$MAKENSIS" -V2 -DVERSION="$VERSION" -DVIVERSION="$VIVERSION" -DARCH="$ARCH" -DSRC="$PWD/$OUT" -DOUT="$PWD/$SETUP" \
+    -DFILELIST="$PWD/$FILES" installer/TradingHub.nsi
   (cd dist && sha256sum "$(basename "$SETUP")" >"$(basename "$SETUP").sha256")
   echo "OK: $SETUP ($(du -h "$SETUP" | cut -f1))"
 done
