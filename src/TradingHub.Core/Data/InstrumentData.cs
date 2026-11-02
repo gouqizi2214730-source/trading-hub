@@ -152,11 +152,27 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
     /// </summary>
     public TimeSpan TickWindow { get; set; } = TimeSpan.FromHours(2);
 
+    /// <summary>
+    /// Operaciones que tiene un archivo de un día, estimadas por su tamaño (cada operación ocupa al menos 5 bytes: nunca se
+    /// subestima, así no se pasa de memoria).
+    /// </summary>
+    private static long EstimatedTrades(string path)
+    {
+        try
+        {
+            return new FileInfo(path).Length / 5 + 1;
+        }
+        catch
+        {
+            return 1;
+        }
+    }
+
     /// <summary>Hasta cuánto atrás se piden ticks al exchange al abrir un gráfico (lo más viejo, de lo bajado en Datos).</summary>
     public static TimeSpan MaxFetchWindow { get; set; } = TimeSpan.FromDays(30);
 
     /// <summary>Máximo de operaciones reales que se leen de disco por carga (lo que no entra se completa con velas).</summary>
-    public static long MaxDiskTrades { get; set; } = MemoryBudget(0.12, 30_000_000, 200_000_000);
+    public static long MaxDiskTrades { get; set; } = MemoryBudget(0.08, 30_000_000, 200_000_000);
 
     /// <summary>Desde cuándo hay ticks reales (antes, la historia viene de velas del exchange).</summary>
     public DateTime RealTicksFrom { get; private set; } = DateTime.MaxValue;
@@ -180,8 +196,20 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
             long count = 0;
             bool rawFull = false;
             // los días de la ventana se leen en paralelo (cada uno tarda segundos con millones de operaciones)
-            var windowDays = EachDay(from, to).Where(d => d.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc).AddDays(1) > rawCut
-                                                          && File.Exists(TickFile.DayPath(RecordingRoot, Instrument.FeedId, Instrument.Symbol, d))).ToList();
+            // solo los días más nuevos que entran en el tope de memoria: con una ventana de meses o años se leían TODOS los
+            // días de la ventana a la vez (miles de millones de operaciones) y se agotaba la memoria antes de aplicar el tope
+            var windowDays = new List<DateOnly>();
+            long estimate = 0;
+            foreach (var d in EachDay(from, to).Reverse())
+            {
+                if (d.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc).AddDays(1) <= rawCut) break;
+                var p = TickFile.DayPath(RecordingRoot, Instrument.FeedId, Instrument.Symbol, d);
+                if (!File.Exists(p)) continue;
+                estimate += EstimatedTrades(p);
+                if (windowDays.Count > 0 && estimate > MaxDiskTrades) break;
+                windowDays.Add(d);
+            }
+
             var prefetched = new System.Collections.Concurrent.ConcurrentDictionary<DateOnly, List<Trade>>();
             if (windowDays.Count > 1)
                 Parallel.ForEach(windowDays, new ParallelOptions { MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 2, 1, 6), CancellationToken = ct }, d =>
@@ -202,11 +230,36 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
                 if (!File.Exists(path)) continue;
                 var dayStart = day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
                 bool raw = !rawFull && (dayStart.AddDays(1) > rawCut || CompactRoot == null || !UseCompactHistory);
+                if (raw && CompactRoot != null && UseCompactHistory && !prefetched.ContainsKey(day) && count > 0 && count + EstimatedTrades(path) > MaxDiskTrades * 1.2)
+                {
+                    raw = false;
+                    rawFull = true;
+                }
+
                 if (raw)
                 {
-                    var read = prefetched.TryRemove(day, out var pre) ? pre : TickFile.Read(path);
+                    List<Trade> read;
+                    try
+                    {
+                        read = prefetched.TryRemove(day, out var pre) ? pre : TickFile.Read(path);
+                    }
+                    catch (OutOfMemoryException) when (count > 0)
+                    {
+                        // no entra: lo que falta va resumido
+                        prefetched.Clear();
+                        GC.Collect();
+                        rawFull = true;
+                        if (CompactRoot == null || !UseCompactHistory) break;
+                        compactDays.Add(day);
+                        continue;
+                    }
+
                     var list = read.Where(t => t.Time >= from && t.Time < to && t.Id < maxIdExclusive).ToList();
-                    if (count > 0 && count + list.Count > MaxDiskTrades) rawFull = true;
+                    if (count > 0 && count + list.Count > MaxDiskTrades)
+                    {
+                        rawFull = true;
+                        prefetched.Clear(); // lo leído de más se suelta enseguida
+                    }
                     else
                     {
                         chunks.Add(list);
@@ -368,7 +421,7 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
     /// Tope de operaciones resumidas en memoria (de lo más nuevo a lo más viejo): ~25 % de la memoria a ~100 bytes por
     /// operación mientras se carga (64 GB → ~170 millones), entre 20 y 400 millones.
     /// </summary>
-    public static long MaxCompactTrades { get; set; } = MemoryBudget(0.25, 20_000_000, 400_000_000);
+    public static long MaxCompactTrades { get; set; } = MemoryBudget(0.20, 20_000_000, 400_000_000);
 
     /// <summary>Operaciones que entran en una parte de la memoria de la computadora.</summary>
     public static long MemoryBudget(double share, long min, long max)

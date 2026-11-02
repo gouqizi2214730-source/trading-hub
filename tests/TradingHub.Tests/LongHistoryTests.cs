@@ -378,4 +378,50 @@ public class LongHistoryTests
             try { Directory.Delete(root, true); } catch { }
         }
     }
+
+    [Fact]
+    public void Una_ventana_de_anios_no_lee_todos_los_dias_enteros_a_la_vez()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "th-bigwin-" + Guid.NewGuid().ToString("N")[..8]);
+        long oldCap = InstrumentData.MaxDiskTrades;
+        try
+        {
+            var inst = new Instrument { Symbol = "TEST", FeedId = "test", TickSize = 0.5m, VolumeStep = 0.001m };
+            var now = DateTime.UtcNow;
+            long id = 1;
+            for (var day = DateOnly.FromDateTime(now.AddDays(-20)); day <= DateOnly.FromDateTime(now.AddDays(-1)); day = day.AddDays(1))
+            {
+                var start = day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+                var list = new List<Trade>();
+                for (var t = start; t < start.AddDays(1); t = t.AddSeconds(30)) list.Add(new Trade(id++, t, 100 + (id % 7) * 0.5m, 0.01m, TradeSide.Buy));
+                HistoricalData.WriteDay(root, inst, day, list);
+            }
+
+            InstrumentData.MaxDiskTrades = 3 * 2880; // entran ~3 días enteros
+            var feed = new FakeFeed { Live = true };
+            var data = new InstrumentData(inst, feed)
+            {
+                RecordingRoot = root, CompactRoot = Path.Combine(root, "compact"), CompactMinutes = 60, RecordLive = false, TickWindow = TimeSpan.FromDays(730),
+            };
+            data.Start(now.AddDays(-25));
+            Wait(data, () => data.IsLoadingHistory);
+            Assert.Null(data.HistoryError);
+            int real = 0, compact = 0;
+            for (int i = 0; i < data.Trades.Count; i++)
+            {
+                long tid = data.Trades.GetId(i);
+                if (CompactHistory.IsCompressed(tid)) compact++;
+                else if (tid > 0 && tid < 1_000_000) real++;
+            }
+
+            Assert.InRange(real, 2880, 5 * 2880); // los más nuevos enteros, hasta el tope
+            Assert.True(compact > 0, "lo que no entra va resumido");
+            Assert.True(data.Trades.FirstTime <= now.AddDays(-19.9));
+        }
+        finally
+        {
+            InstrumentData.MaxDiskTrades = oldCap;
+            try { Directory.Delete(root, true); } catch { }
+        }
+    }
 }
