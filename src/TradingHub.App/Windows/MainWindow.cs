@@ -401,6 +401,7 @@ public sealed class MainWindow : Window
         var chart = new NativeMenuItem("Gráfico") { Menu = new NativeMenu() };
         chart.Menu.Add(Item("Indicadores…", Trading.OpenIndicators, new KeyGesture(Key.I, Keys.Command)));
         chart.Menu.Add(Item("Editar footprint…", Trading.OpenFootprintEditor, new KeyGesture(Key.F, Keys.Command | KeyModifiers.Shift)));
+        chart.Menu.Add(Item("Restablecer vista", () => Trading.ActiveTab?.Model?.ResetView(), new KeyGesture(Key.R, KeyModifiers.Alt)));
         chart.Menu.Add(Item("Escala automática", () =>
         {
             if (Trading.ActiveTab?.Model is { } m)

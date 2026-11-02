@@ -188,6 +188,15 @@ public sealed class ChartView : SkiaView
     {
         base.OnKeyDown(e);
         if (_controller == null) return;
+        // Alt+R: restablecer la vista, como en TradingView
+        if (e.Key == Key.R && e.KeyModifiers == KeyModifiers.Alt && _model != null)
+        {
+            _model.ResetView();
+            e.Handled = true;
+            InvalidateVisual();
+            return;
+        }
+
         if (_controller.ForwardKey(e) || _controller.KeyDown(e.Key.ToString(), Mods(e.KeyModifiers)))
         {
             e.Handled = true;

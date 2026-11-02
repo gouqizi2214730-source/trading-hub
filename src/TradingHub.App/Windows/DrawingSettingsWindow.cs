@@ -309,10 +309,12 @@ public sealed class DrawingSettingsWindow : Window
         }
 
         UpdateRr();
+        Action? onPrices = null;
         var entry = PriceBox(_d.Points[0].Price, v =>
         {
             _d.Points[0] = new ChartPoint(_d.Points[0].Time, v);
             UpdateRr();
+            onPrices?.Invoke();
         });
         var target = PriceBox(_d.Points[1].Price, v =>
         {
@@ -323,6 +325,7 @@ public sealed class DrawingSettingsWindow : Window
         {
             _d.Points[2] = new ChartPoint(_d.Points[2].Time, v);
             UpdateRr();
+            onPrices?.Invoke();
         });
         var qty = new NumericUpDown { Value = _d.Quantity, Minimum = 0, Increment = _instrument.VolumeStep > 0 ? _instrument.VolumeStep : 1, FormatString = "0.########", MinWidth = 160, NumberFormat = CultureInfo.InvariantCulture.NumberFormat };
         qty.ValueChanged += (_, _) =>
@@ -330,13 +333,43 @@ public sealed class DrawingSettingsWindow : Window
             _d.Quantity = qty.Value ?? 0;
             Changed();
         };
+        // como en TradingView: tamaño de la cuenta + riesgo en % → la cantidad sale sola (riesgo ÷ distancia al stop)
+        var sized = new TextBlock { Classes = { "muted" } };
+        void UpdateSized()
+        {
+            decimal q = _d.EffectiveQuantity(_instrument.VolumeStep);
+            sized.Text = _d.AccountSize > 0 && _d.RiskPercent > 0
+                ? $"Cantidad por riesgo: {q.ToString("0.########", CultureInfo.InvariantCulture)} (arriesga {(_d.AccountSize * _d.RiskPercent / 100m).ToString("0.##", CultureInfo.InvariantCulture)})"
+                : "";
+            qty.IsEnabled = !(_d.AccountSize > 0 && _d.RiskPercent > 0);
+        }
+
+        var account = new NumericUpDown { Value = _d.AccountSize, Minimum = 0, Increment = 100, FormatString = "0.##", MinWidth = 160, NumberFormat = CultureInfo.InvariantCulture.NumberFormat };
+        account.ValueChanged += (_, _) =>
+        {
+            _d.AccountSize = account.Value ?? 0;
+            UpdateSized();
+            Changed();
+        };
+        var riskPct = new NumericUpDown { Value = _d.RiskPercent, Minimum = 0, Maximum = 100, Increment = 0.5m, FormatString = "0.##", MinWidth = 160, NumberFormat = CultureInfo.InvariantCulture.NumberFormat };
+        riskPct.ValueChanged += (_, _) =>
+        {
+            _d.RiskPercent = riskPct.Value ?? 0;
+            UpdateSized();
+            Changed();
+        };
+        UpdateSized();
+        onPrices = UpdateSized;
         return Section("Precios",
             Labeled("Entrada", entry),
             Labeled("Objetivo", target),
             Labeled("Stop", stop),
+            Labeled("Cuenta", account),
+            Labeled("Riesgo (%)", riskPct),
+            sized,
             Labeled("Cantidad", qty),
             rr,
-            Note("Con cantidad muestra cuánto ganarías o perderías. Si las velas tocan el objetivo o el stop, lo marca."));
+            Note("Con cuenta y riesgo, la cantidad sale sola (como en TradingView); si no, escribila. Desde la entrada hasta donde terminó se sombrea el recorrido con su resultado: cerrada si tocó el objetivo o el stop, abierta al último precio si no."));
     }
 
     private Control PricesSection()

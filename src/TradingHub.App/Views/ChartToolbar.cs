@@ -427,7 +427,9 @@ internal sealed class DrawingToolStrip : UserControl
             new DrawingKind?[] { DrawingKind.HorizontalLine, DrawingKind.HorizontalRay, DrawingKind.VerticalLine, DrawingKind.TrendLine, DrawingKind.Ray, DrawingKind.ExtendedLine },
             new DrawingKind?[] { DrawingKind.Rectangle },
             new DrawingKind?[] { DrawingKind.FibRetracement },
-            new DrawingKind?[] { DrawingKind.LongPosition, DrawingKind.ShortPosition },
+            // a la vista, como en TradingView (antes compartían un botón y la corta quedaba escondida en el menú)
+            new DrawingKind?[] { DrawingKind.LongPosition },
+            new DrawingKind?[] { DrawingKind.ShortPosition },
             new DrawingKind?[] { DrawingKind.Ruler },
             new DrawingKind?[] { DrawingKind.Text },
         };

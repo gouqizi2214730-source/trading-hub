@@ -1090,6 +1090,7 @@ public sealed partial class TradingView
             Workspace.Save(this);
         };
         items.Add(marks);
+        items.Add(Item("Restablecer vista (Alt+R)", MaterialIconKind.Restore, () => model.ResetView()));
         items.Add(Item("Escala automática", MaterialIconKind.ArrowExpandVertical, () => { model.Viewport.AutoScale = true; model.Invalidate(); }));
         items.Add(Item("Ir al último precio", MaterialIconKind.PageLast, () => { model.Viewport.ScrollBars = 0; model.Invalidate(); }));
         if (model.FocusTrade != null) items.Add(Item("Quitar el resaltado de la operación", MaterialIconKind.SelectionRemove, () => ClearFocusTrade(tab)));

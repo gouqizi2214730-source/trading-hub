@@ -102,6 +102,24 @@ public sealed class ChartDrawing
     /// <summary>Posición larga/corta: cantidad para calcular ganancia y riesgo (0 = sin montos).</summary>
     public decimal Quantity { get; set; }
 
+    /// <summary>
+    /// Posición larga/corta, como en TradingView: tamaño de la cuenta y riesgo en % de ella. Con los dos, la cantidad sale
+    /// sola (riesgo ÷ distancia al stop) y tiene prioridad sobre <see cref="Quantity"/>.
+    /// </summary>
+    public decimal AccountSize { get; set; }
+
+    public decimal RiskPercent { get; set; } = 1;
+
+    /// <summary>Cantidad que usa la posición: la que sale del riesgo (si hay cuenta) o la escrita.</summary>
+    public decimal EffectiveQuantity(decimal volumeStep = 0)
+    {
+        if (!IsPosition || Points.Count < 3 || AccountSize <= 0 || RiskPercent <= 0) return Quantity;
+        decimal dist = (decimal)Math.Abs(Points[0].Price - Points[2].Price);
+        if (dist <= 0) return Quantity;
+        decimal q = AccountSize * RiskPercent / 100m / dist;
+        return volumeStep > 0 ? Math.Floor(q / volumeStep) * volumeStep : Math.Round(q, 6);
+    }
+
     [System.Text.Json.Serialization.JsonIgnore]
     public bool Selected { get; set; }
 
@@ -180,6 +198,8 @@ public sealed class ChartDrawing
         TextArgb = src.TextArgb;
         Levels = src.Levels?.Select(l => l.Clone()).ToList();
         Quantity = src.Quantity;
+        AccountSize = src.AccountSize;
+        RiskPercent = src.RiskPercent;
     }
 
     // ------------------------------------------------------------------ posición larga/corta
@@ -222,24 +242,37 @@ public sealed class ChartDrawing
     /// <summary>Resultado de la posición sobre las velas: si tocó el objetivo o el stop primero.</summary>
     public (string Status, int Outcome) PositionOutcome(CandleSeries series)
     {
-        if (!IsPosition || Points.Count < 3 || series.Count == 0) return ("", 0);
+        var r = PositionResult(series);
+        return (r.Status, r.Outcome);
+    }
+
+    /// <summary>
+    /// Recorrido de la posición, como en TradingView: dónde terminó (vela y precio; si no tocó nada, la última vela o la del
+    /// final de la caja y su cierre) y si fue objetivo (1), stop (-1) o sigue abierta (0).
+    /// </summary>
+    public (string Status, int Outcome, int ExitBar, double ExitPrice) PositionResult(CandleSeries series)
+    {
+        if (!IsPosition || Points.Count < 3 || series.Count == 0) return ("", 0, -1, 0);
         bool isLong = Kind == DrawingKind.LongPosition;
         double target = Points[1].Price, stop = Points[2].Price;
         var end = Points[1].Time > Points[0].Time ? Points[1].Time : DateTime.MaxValue;
         // desde la vela siguiente a la entrada (la vela de la entrada ya tenía su rango antes de entrar)
-        int first = series.FindBar(Points[0].Time) + 1;
-        if (first < 1) first = 1;
+        int entryBar = series.FindBar(Points[0].Time);
+        if (entryBar < 0 || series[entryBar].Time > Points[0].Time) return ("", 0, -1, 0); // la entrada está en el futuro
+        int first = Math.Max(1, entryBar + 1);
+        int lastBar = entryBar;
         for (int i = first; i < series.Count && series[i].Time <= end; i++)
         {
             var c = series[i];
+            lastBar = i;
             double hi = (double)series.TicksToPrice(c.HighTicks), lo = (double)series.TicksToPrice(c.LowTicks);
             bool hitStop = isLong ? lo <= stop : hi >= stop;
             bool hitTarget = isLong ? hi >= target : lo <= target;
-            if (hitStop) return ("Stop tocado", -1); // si toca los dos en la misma vela, se toma el peor caso
-            if (hitTarget) return ("Objetivo tocado", 1);
+            if (hitStop) return ("Stop tocado", -1, i, stop); // si toca los dos en la misma vela, se toma el peor caso
+            if (hitTarget) return ("Objetivo tocado", 1, i, target);
         }
 
-        return ("", 0);
+        return ("", 0, lastBar, (double)series.TicksToPrice(series[lastBar].CloseTicks));
     }
 
     // ------------------------------------------------------------------ coordenadas
@@ -462,7 +495,8 @@ public sealed class ChartDrawing
         float yE = main.Y(entry), yT = main.Y(target), yS = main.Y(stop);
         var profit = new SKRect(x0, Math.Min(yE, yT), x1, Math.Max(yE, yT));
         var risk = new SKRect(x0, Math.Min(yE, yS), x1, Math.Max(yE, yS));
-        var (status, outcome) = PositionOutcome(series);
+        var (status, outcome, exitBar, exitPrice) = PositionResult(series);
+        decimal qty = EffectiveQuantity(series.Instrument.VolumeStep);
         using var fill = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
         fill.Color = theme.UpCandle.WithAlpha(outcome == 1 ? (byte)70 : (byte)38);
         canvas.DrawRect(profit, fill);
@@ -476,6 +510,21 @@ public sealed class ChartDrawing
         line.Color = new SKColor(200, 205, 215);
         canvas.DrawLine(x0, yE, x1, yE, line);
 
+        // recorrido (como en TradingView): de la entrada hasta donde terminó, o hasta la última vela si sigue abierta
+        double pnlPoints = 0;
+        if (exitBar >= 0)
+        {
+            float xe = Math.Clamp(layout.CenterX(exitBar), x0, Math.Max(x0, x1));
+            float yX = main.Y(exitPrice);
+            pnlPoints = isLong ? exitPrice - entry : entry - exitPrice;
+            var trail = new SKRect(x0, Math.Min(yE, yX), xe, Math.Max(yE, yX));
+            fill.Color = (pnlPoints >= 0 ? theme.UpCandle : theme.DownCandle).WithAlpha(60);
+            canvas.DrawRect(trail, fill);
+            using var dash = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.2f, Color = new SKColor(200, 205, 215, 200),
+                PathEffect = SKPathEffect.CreateDash(new[] { 5f, 4f }, 0) };
+            canvas.DrawLine(x0, yE, xe, yX, dash);
+        }
+
         var inst = series.Instrument;
         double tick = inst.TickSize > 0 ? (double)inst.TickSize : 0;
         double reward = Math.Abs(target - entry), riskAmt = Math.Abs(entry - stop);
@@ -483,7 +532,7 @@ public sealed class ChartDrawing
         var ic = CultureInfo.InvariantCulture;
         string Ticks(double d) => tick > 0 ? $" · {Math.Round(d / tick).ToString("0", ic)} ticks" : "";
         string Pct(double d) => entry != 0 ? $" · {(d / entry * 100).ToString("0.00", ic)}%" : "";
-        string Money(double d) => Quantity > 0 ? $" · {((double)Quantity * d).ToString("0.00", ic)}" : "";
+        string Money(double d) => qty > 0 ? $" · {((double)qty * d).ToString("0.00", ic)}" : "";
         // las etiquetas se centran en la parte visible de la caja
         var plotRect = main.Rect;
         float vx0 = Math.Max(x0, plotRect.Left), vx1 = Math.Min(x1, plotRect.Right);
@@ -494,9 +543,16 @@ public sealed class ChartDrawing
         // la etiqueta del objetivo va del lado de afuera (arriba en la larga, abajo en la corta)
         DrawBox(canvas, font, cx, isLong ? yT - boxH - 4 : yT + 4, theme.UpCandle, tl);
         DrawBox(canvas, font, cx, isLong ? yS + 4 : yS - boxH - 4, theme.DownCandle, sl);
-        string mid = $"{(isLong ? "Larga" : "Corta")} {Format(entry, decimals)} · R:R {rr.ToString("0.00", ic)}" + (Quantity > 0 ? $" · Cant {Quantity.ToString(ic)}" : "") + (status.Length > 0 ? $" · {status}" : "");
+        string mid = $"{(isLong ? "Larga" : "Corta")} {Format(entry, decimals)} · R:R {rr.ToString("0.00", ic)}" + (qty > 0 ? $" · Cant {qty.ToString("0.########", ic)}" : "") + (status.Length > 0 ? $" · {status}" : "");
         var midCol = outcome == 1 ? theme.UpCandle : outcome == -1 ? theme.DownCandle : SKColors.White;
-        DrawBox(canvas, font, cx, yE - boxH / 2, midCol, mid);
+        if (exitBar >= 0)
+        {
+            // resultado: cerrada (tocó algo) o abierta (al último precio)
+            string pl = (pnlPoints >= 0 ? "+" : "−") + Format(Math.Abs(pnlPoints), decimals) + Pct(Math.Abs(pnlPoints)).Replace(" · ", " (") + (entry != 0 ? ")" : "")
+                        + (qty > 0 ? $" = {(pnlPoints >= 0 ? "+" : "−")}{((double)qty * Math.Abs(pnlPoints)).ToString("0.00", ic)}" : "");
+            DrawBox(canvas, font, cx, yE - boxH / 2, midCol, mid, outcome == 0 ? $"P/G abierta {pl}" : $"P/G cerrada {pl}");
+        }
+        else DrawBox(canvas, font, cx, yE - boxH / 2, midCol, mid);
     }
 
     /// <summary>Cajita oscura con una o más líneas de texto, centrada en <paramref name="cx"/>.</summary>

@@ -211,6 +211,19 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
         Invalidate();
     }
 
+    /// <summary>
+    /// Restablecer la vista (como Alt+R en TradingView): ancho de vela por defecto, pegado al último precio y escala de
+    /// precios automática.
+    /// </summary>
+    public void ResetView()
+    {
+        var vp = Viewport;
+        vp.BarWidth = Settings.Style == ChartStyle.Footprint ? 110 : 8;
+        vp.ScrollBars = 0;
+        vp.AutoScale = true;
+        Invalidate();
+    }
+
     /// <summary>Stop loss / objetivos de la cuenta (para dibujarlos y arrastrarlos desde la posición).</summary>
     public BracketManager? Brackets { get; set; }
 
