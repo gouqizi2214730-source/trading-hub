@@ -270,7 +270,8 @@ public class SessionVolumeProfile : Indicator
 
     private void AddTo(Dictionary<decimal, (decimal Bid, decimal Ask)> dict, int bar)
     {
-        foreach (var lvl in GetCandle(bar).GetAllPriceLevels())
+        // al tick, no en las filas del gráfico: el perfil da lo mismo en cualquier período y con cualquier paso de precio
+        foreach (var lvl in GetTickLevels(bar))
         {
             dict.TryGetValue(lvl.Price, out var v);
             dict[lvl.Price] = (v.Bid + lvl.Bid, v.Ask + lvl.Ask);

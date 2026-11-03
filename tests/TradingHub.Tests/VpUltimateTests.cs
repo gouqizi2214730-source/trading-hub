@@ -49,6 +49,8 @@ public class VpUltimateTests
         new VpSessionProfiles { ShowAsia = true, ShowDeveloping = true },
         new VpRollingVwap { Band2 = true, Fill = true },
         new VpDoubleInside { MotherMultiple = 0 },
+        new VpNakedPoc(),
+        new TradingHub.Indicators.Native.Cvd { View = TradingHub.Indicators.Native.Cvd.CvdView.Area, MaPeriod = 20 },
     };
 
     [Theory]
@@ -157,5 +159,57 @@ public class VpUltimateTests
         using var img = surface.Snapshot();
         using var png = img.Encode(SKEncodedImageFormat.Png, 90);
         File.WriteAllBytes(Path.Combine(dir, "position.png"), png.ToArray());
+    }
+
+    [Fact]
+    public void Los_POC_virgenes_salen_en_cualquier_periodo_y_se_apagan_al_tocarlos()
+    {
+        var old = ResultCache.Root;
+        ResultCache.Root = null;
+        try
+        {
+            var data = Market(10);
+            // en 15 minutos: diarios y semanales
+            var m15 = new ChartModel(data, ChartPeriod.Parse("M15"), new ChartSettings { TimeZoneId = "UTC" });
+            var npoc = new VpNakedPoc();
+            m15.AddIndicator(npoc);
+            for (int k = 0; k < 3; k++) m15.Update();
+            var engine = (NakedPocEngine)typeof(VpNakedPoc).GetField("_engine", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(npoc)!;
+            int days = engine.Levels.Count(l => l.Period == VpPeriod.Day), weeks = engine.Levels.Count(l => l.Period == VpPeriod.Week);
+            Assert.True(days >= 8, $"diarios: {days}");
+            Assert.True(weeks >= 1, $"semanales: {weeks}");
+            Assert.True(engine.Naked.Count < engine.Levels.Count, "alguno ya fue tocado");
+            // cada POC vigente no fue atravesado por ninguna vela cerrada posterior
+            foreach (var lv in engine.Naked)
+                for (int b = lv.EndBar + 1; b < m15.Series.Count - 1; b++)
+                {
+                    var c = m15.Series[b];
+                    Assert.False(m15.Series.TicksToPrice(c.LowTicks) <= lv.Price && m15.Series.TicksToPrice(c.HighTicks) >= lv.Price, $"{lv.Period} {lv.Start:dd/MM} tocado en {b}");
+                }
+
+            // en diario: los diarios coinciden en precio con los de 15 minutos
+            var d1 = new ChartModel(data, ChartPeriod.Parse("D1"), new ChartSettings { TimeZoneId = "UTC" });
+            var npocD = new VpNakedPoc();
+            d1.AddIndicator(npocD);
+            for (int k = 0; k < 3; k++) d1.Update();
+            var engineD = (NakedPocEngine)typeof(VpNakedPoc).GetField("_engine", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(npocD)!;
+            var dailyD = engineD.Levels.Where(l => l.Period == VpPeriod.Day).Select(l => l.Price).ToList();
+            var daily15 = engine.Levels.Where(l => l.Period == VpPeriod.Day).Select(l => l.Price).Take(dailyD.Count).ToList();
+            Assert.Equal(dailyD, daily15);
+        }
+        finally
+        {
+            ResultCache.Root = old;
+        }
+    }
+
+    [Fact]
+    public void El_delta_estimado_por_la_forma_de_la_vela()
+    {
+        var k = new Kline(0, 100, 110, 90, 105, 20, 0, false); // cierra en el 75 % del rango
+        Assert.Equal(15m, KlineHistory.EstimateBuyVolume(k));
+        KlineHistory.EstimateDeltaFromShape = false;
+        Assert.Equal(10m, KlineHistory.EstimateBuyVolume(k));
+        KlineHistory.EstimateDeltaFromShape = true;
     }
 }

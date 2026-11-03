@@ -265,7 +265,7 @@ public class VpSessionProfiles : VpSessionBase
             lo = Math.Min(lo, c.Low);
             hi = Math.Max(hi, c.High);
             if (_mode == VpVolumeMode.Cap)
-                foreach (var l in c.GetAllPriceLevels()) sample.Add(l.Volume);
+                foreach (var l in GetTickLevels(b)) sample.Add(l.Volume);
         }
 
         if (lo > hi) return null;
@@ -278,7 +278,7 @@ public class VpSessionProfiles : VpSessionBase
         {
             var c = GetCandle(b);
             if (_excludeAuction && Vp.IsAuction(c.Time)) continue;
-            foreach (var l in c.GetAllPriceLevels())
+            foreach (var l in GetTickLevels(b))
             {
                 if (l.Volume <= 0) continue;
                 double v = (double)Math.Min(l.Volume, cap);

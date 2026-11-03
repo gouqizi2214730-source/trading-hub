@@ -166,6 +166,20 @@ public static class KlineHistory
     /// cierre), con el volumen comprador y vendedor exacto. Solo usa las velas que caen enteras dentro de
     /// alguna de las ventanas (los huecos sin ticks reales).
     /// </summary>
+    /// <summary>
+    /// Sin compras / ventas del exchange (Bybit, acciones…): repartir el volumen por la forma de la vela
+    /// (comprador = volumen × (cierre − mínimo) / (máximo − mínimo)); apagado, mitad y mitad (delta cero).
+    /// </summary>
+    public static bool EstimateDeltaFromShape { get; set; } = true;
+
+    public static decimal EstimateBuyVolume(Kline k)
+    {
+        if (!EstimateDeltaFromShape) return k.Volume / 2;
+        decimal range = k.High - k.Low;
+        if (range <= 0) return k.Volume / 2;
+        return Math.Clamp(k.Volume * (k.Close - k.Low) / range, 0, k.Volume);
+    }
+
     public static void Synthesize(IReadOnlyList<Kline> klines, Instrument inst, int minutes, IReadOnlyList<(DateTime From, DateTime To)> windows, List<Trade> output)
     {
         long step = minutes * 60_000L;
@@ -182,7 +196,7 @@ public static class KlineHistory
             if (w >= windows.Count) break;
             if (open < windows[w].From || close > windows[w].To) continue;
 
-            decimal buy = k.HasBuyVolume ? Math.Clamp(k.BuyVolume, 0, k.Volume) : k.Volume / 2;
+            decimal buy = k.HasBuyVolume ? Math.Clamp(k.BuyVolume, 0, k.Volume) : EstimateBuyVolume(k);
             decimal sell = k.Volume - buy;
             bool up = k.Close >= k.Open;
             decimal o = inst.RoundPrice(k.Open), h = inst.RoundPrice(k.High), l = inst.RoundPrice(k.Low), c = inst.RoundPrice(k.Close);

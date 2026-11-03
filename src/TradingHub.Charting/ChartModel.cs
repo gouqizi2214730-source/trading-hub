@@ -699,6 +699,29 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
 
     public IndicatorCandle GetCandle(int bar) => _wrappers[Math.Clamp(bar, 0, _wrappers.Count - 1)];
 
+    /// <summary>Niveles al tick de una vela: con las filas del gráfico en 1 tick son los de la vela; si no, se arman de las operaciones.</summary>
+    public IEnumerable<PriceVolumeInfo> GetTickLevels(int bar)
+    {
+        if (bar < 0 || bar >= Series.Count) return Array.Empty<PriceVolumeInfo>();
+        if (Series.PriceStep <= 1) return GetCandle(bar).GetAllPriceLevels();
+        var c = Series[bar];
+        if (c.FirstTradeIndex < 0 || c.LastTradeIndex < c.FirstTradeIndex) return GetCandle(bar).GetAllPriceLevels();
+        var store = Data.Trades;
+        var acc = new SortedDictionary<long, (decimal Bid, decimal Ask)>();
+        int last = Math.Min(c.LastTradeIndex, store.Count - 1);
+        for (int i = c.FirstTradeIndex; i <= last; i++)
+        {
+            long p = store.GetPriceTicks(i);
+            acc.TryGetValue(p, out var v);
+            acc[p] = store.GetSide(i) == TradeSide.Buy ? (v.Bid, v.Ask + store.GetVolume(i)) : (v.Bid + store.GetVolume(i), v.Ask);
+        }
+
+        var list = new List<PriceVolumeInfo>(acc.Count);
+        foreach (var (p, v) in acc)
+            list.Add(new PriceVolumeInfo(Instrument.FromTicks(p)) { Bid = v.Bid, Ask = v.Ask, Volume = v.Bid + v.Ask });
+        return list;
+    }
+
     public InstrumentInfo InstrumentInfo => _instrumentInfo;
     public ChartInfo ChartInfo => _chartInfo;
     public MarketDepthInfo MarketDepthInfo => _depthInfo;

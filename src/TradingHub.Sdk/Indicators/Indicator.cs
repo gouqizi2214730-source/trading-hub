@@ -46,6 +46,12 @@ namespace TradingHub.Indicators
         void RequestFixedProfile(Indicator indicator, FixedProfileRequest request)
         {
         }
+
+        /// <summary>
+        /// Niveles de una vela al tick (no agrupados en las filas del gráfico): comprador y vendedor por precio. Para
+        /// perfiles y POC que tienen que dar lo mismo en cualquier período y con cualquier paso de precio.
+        /// </summary>
+        IEnumerable<PriceVolumeInfo> GetTickLevels(int bar) => GetCandle(bar).GetAllPriceLevels();
     }
 
     /// <summary>Argumento de RedrawChart.</summary>
@@ -407,6 +413,9 @@ namespace TradingHub.Indicators
         public virtual StdCursor GetCursor(RenderControlMouseEventArgs e) => StdCursor.None;
 
         // ================================================================ servicios para los indicadores
+
+        /// <summary>Niveles de la vela al tick (ver <see cref="IIndicatorHost.GetTickLevels"/>).</summary>
+        public IEnumerable<PriceVolumeInfo> GetTickLevels(int bar) => Host?.GetTickLevels(bar) ?? Array.Empty<PriceVolumeInfo>();
 
         public IndicatorCandle GetCandle(int bar)
         {

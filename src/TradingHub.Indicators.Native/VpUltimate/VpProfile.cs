@@ -36,6 +36,7 @@ public class VpProfile : VpIndicator
         public bool PocDead, PocUpDead, PocDnDead;
     }
 
+    private readonly NakedPocEngine _naked;
     private readonly List<Result> _done = new();
     private readonly List<Result> _live = new(); // con algún POC todavía sin tocar
     private Result? _developing;
@@ -53,6 +54,8 @@ public class VpProfile : VpIndicator
 
     public VpProfile()
     {
+        _naked = new NakedPocEngine(this);
+        for (int i = 0; i < 4; i++) _naked.Enabled[i] = false;
         EnableCustomDrawing = true;
         SubscribeToDrawingEvents(DrawingLayouts.Final);
         DrawAbovePrice = false;
@@ -179,10 +182,37 @@ public class VpProfile : VpIndicator
     [Display(Name = "Color: concentrado", GroupName = "Área exterior y colas", Order = 380)]
     public Color ThinColor { get; set; } = Color.FromArgb(255, 0, 184, 212);
 
+    // ------------------------------------------------------------------ POC vírgenes de otros períodos
+
+    [Display(Name = "POC vírgenes diarios", GroupName = "POC vírgenes (naked POC)", Order = 400)]
+    public bool NakedDaily { get => _naked.Enabled[0]; set { _naked.Enabled[0] = value; RecalculateValues(); } }
+
+    [Display(Name = "POC vírgenes semanales", GroupName = "POC vírgenes (naked POC)", Order = 410)]
+    public bool NakedWeekly { get => _naked.Enabled[1]; set { _naked.Enabled[1] = value; RecalculateValues(); } }
+
+    [Display(Name = "POC vírgenes mensuales", GroupName = "POC vírgenes (naked POC)", Order = 420)]
+    public bool NakedMonthly { get => _naked.Enabled[2]; set { _naked.Enabled[2] = value; RecalculateValues(); } }
+
+    [Display(Name = "POC vírgenes anuales", GroupName = "POC vírgenes (naked POC)", Order = 430)]
+    public bool NakedYearly { get => _naked.Enabled[3]; set { _naked.Enabled[3] = value; RecalculateValues(); } }
+
+    [Display(Name = "Color diario", GroupName = "POC vírgenes (naked POC)", Order = 440)] public Color NakedDailyColor { get; set; } = Color.FromArgb(255, 255, 235, 59);
+    [Display(Name = "Color semanal", GroupName = "POC vírgenes (naked POC)", Order = 441)] public Color NakedWeeklyColor { get; set; } = Color.FromArgb(255, 255, 152, 0);
+    [Display(Name = "Color mensual", GroupName = "POC vírgenes (naked POC)", Order = 442)] public Color NakedMonthlyColor { get; set; } = Color.FromArgb(255, 0, 230, 118);
+    [Display(Name = "Color anual", GroupName = "POC vírgenes (naked POC)", Order = 443)] public Color NakedYearlyColor { get; set; } = Color.FromArgb(255, 244, 67, 54);
+
+    [Display(Name = "Mostrar también los ya tocados", GroupName = "POC vírgenes (naked POC)", Order = 450)]
+    public bool NakedShowTouched { get; set; }
+
+    [Display(Name = "Grosor de los POC vírgenes", GroupName = "POC vírgenes (naked POC)", Order = 460)]
+    [Range(1, 6)]
+    public int NakedWidth { get; set; } = 1;
+
     // ------------------------------------------------------------------ cálculo
 
     protected override void Reset()
     {
+        _naked.Reset();
         _done.Clear();
         _live.Clear();
         _developing = null;
@@ -191,6 +221,7 @@ public class VpProfile : VpIndicator
 
     protected override void Commit(int bar)
     {
+        if (_naked.Enabled.Any(e => e)) _naked.Commit(bar, NewPeriod, GetCandle, BarLength);
         if (bar > 0 && NewPeriod(bar, _period))
         {
             if (Build(_periodStart, bar - 1, true) is { } r)
@@ -280,7 +311,7 @@ public class VpProfile : VpIndicator
             {
                 var c = GetCandle(b);
                 if (_excludeAuction && Vp.IsAuction(c.Time)) continue;
-                foreach (var l in c.GetAllPriceLevels()) sample.Add(l.Volume);
+                foreach (var l in GetTickLevels(b)) sample.Add(l.Volume);
             }
 
             if (sample.Count > 0) cap = Vp.Median(sample) * _capMult;
@@ -290,7 +321,7 @@ public class VpProfile : VpIndicator
         {
             var c = GetCandle(b);
             if (_excludeAuction && Vp.IsAuction(c.Time)) continue;
-            foreach (var l in c.GetAllPriceLevels())
+            foreach (var l in GetTickLevels(b))
             {
                 if (l.Volume <= 0) continue;
                 double v = (double)Math.Min(l.Volume, cap);
@@ -401,6 +432,8 @@ public class VpProfile : VpIndicator
         int tailFrom = Math.Max(0, _done.Count - TailKeep);
         for (int i = 0; i < _done.Count; i++) Draw(context, _done[i], first, last, true, i >= pocFrom, i >= tailFrom, tailRef);
         if (_showDeveloping && _developing != null) Draw(context, _developing, first, last, false, true, false, tailRef);
+        if (_naked.Enabled.Any(e => e))
+            VpNakedPoc.Render(this, context, _naked, new[] { NakedDailyColor, NakedWeeklyColor, NakedMonthlyColor, NakedYearlyColor }, NakedShowTouched, NakedWidth, LineDashStyle.Solid, true, 50);
     }
 
     private void Draw(RenderContext ctx, Result r, int first, int last, bool final, bool withPoc, bool withTail, double tailRef)

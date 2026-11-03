@@ -4,6 +4,9 @@
     <Nullable>annotations</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="TradingHub.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\TradingHub.Sdk\TradingHub.Sdk.csproj" />
   </ItemGroup>
 </Project>
