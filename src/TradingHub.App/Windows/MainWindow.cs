@@ -60,6 +60,7 @@ public sealed class MainWindow : Window
         _pages["trading"] = Trading;
         svc.Live.Trading = () => Trading;
         svc.Live.Notice += text => Dispatcher.UIThread.Post(() => SetStatus(text));
+        svc.Klines.Start();
         svc.Alerts.Raised += ev =>
         {
             SetStatus("🔔 " + (ev.Instrument.Length > 0 ? ev.Instrument + " · " : "") + (ev.Source.Length > 0 ? ev.Source + ": " : "") + ev.Message);

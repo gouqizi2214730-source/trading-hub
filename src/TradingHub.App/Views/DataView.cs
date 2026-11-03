@@ -118,7 +118,7 @@ internal sealed class DataView : UserControl, IPage
         grid.Children.Add(daysCard);
 
         // a la derecha: bajar (exchanges y Rithmic) e importar archivos (CFDs, forex…)
-        var right = new ScrollViewer { Content = Ui.V(16, Ui.Card(BuildDownloadPanel(), 16), Ui.Card(BuildDatabentoPanel(), 16), Ui.Card(BuildImportPanel(), 16)) };
+        var right = new ScrollViewer { Content = Ui.V(16, Ui.Card(BuildDownloadPanel(), 16), Ui.Card(BuildKlinesPanel(), 16), Ui.Card(BuildDatabentoPanel(), 16), Ui.Card(BuildImportPanel(), 16)) };
         Grid.SetColumn(right, 4);
         grid.Children.Add(right);
 
@@ -196,6 +196,97 @@ internal sealed class DataView : UserControl, IPage
             _dlStatus,
             Ui.Divider(),
             Note(MaterialIconKind.RecordCircleOutline, "Todo lo que mirás en vivo se graba solo, también Rithmic. Los días ya bajados no se vuelven a bajar: si cancelás, la próxima vez sigue donde quedó."));
+    }
+
+
+    // ===================================================================== velas automáticas
+
+    private readonly StackPanel _klineList = new() { Spacing = 4 };
+    private readonly TextBlock _klineStatus = new() { Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap };
+
+    /// <summary>Velas automáticas: historia en velas de los instrumentos elegidos, bajada y al día en segundo plano.</summary>
+    private Control BuildKlinesPanel()
+    {
+        var s = _svc.Settings;
+        var enabled = new ToggleSwitch { IsChecked = s.KlineKeepEnabled, OnContent = "Activadas", OffContent = "Apagadas" };
+        var auto = new CheckBox { Content = "Agregar solo los instrumentos que abro en gráficos", IsChecked = s.KlineKeepAuto };
+        var years = new NumericUpDown { Value = s.KlineKeepYears, Minimum = 1, Maximum = 10, Increment = 1, FormatString = "0", Width = 110 };
+        enabled.IsCheckedChanged += (_, _) =>
+        {
+            s.KlineKeepEnabled = enabled.IsChecked == true;
+            s.Save();
+            if (s.KlineKeepEnabled) _ = _svc.Klines.RunAsync(CancellationToken.None);
+        };
+        auto.IsCheckedChanged += (_, _) =>
+        {
+            s.KlineKeepAuto = auto.IsChecked == true;
+            s.Save();
+        };
+        years.ValueChanged += (_, _) =>
+        {
+            s.KlineKeepYears = (int)(years.Value ?? 2);
+            s.Save();
+        };
+        var addPicker = new InstrumentPicker(_svc) { HorizontalAlignment = HorizontalAlignment.Stretch };
+        addPicker.Picked += (profileId, inst, _ignored) =>
+        {
+            string key = KlineKeeper.Key(profileId, inst.Symbol);
+            if (!s.KlineKeepInstruments.Contains(key))
+            {
+                if (s.KlineKeepInstruments.Count >= KlineKeeper.MaxInstruments)
+                {
+                    _klineStatus.Text = $"Como máximo {KlineKeeper.MaxInstruments} instrumentos.";
+                    return;
+                }
+
+                s.KlineKeepInstruments.Add(key);
+                s.Save();
+                FillKlineList();
+                if (s.KlineKeepEnabled) _svc.Klines.RunAsync(CancellationToken.None).ContinueWith(_ => { });
+            }
+        };
+        var update = Ui.Button("Actualizar ahora", MaterialIconKind.CloudSyncOutline, () => { _ = _svc.Klines.RunAsync(CancellationToken.None); });
+        _svc.Klines.Changed += () => Dispatcher.UIThread.Post(() =>
+        {
+            _klineStatus.Text = _svc.Klines.Status;
+            update.IsEnabled = !_svc.Klines.IsRunning;
+            FillKlineList();
+        });
+        FillKlineList();
+        return Ui.V(14,
+            Ui.H2("Velas automáticas"),
+            new TextBlock { Text = "La historia en velas (1, 5 y 15 minutos) de estos instrumentos se baja una vez y después solo lo nuevo, cada media hora. Cambiar de período (1 h ↔ 4 h) o abrir años de historia ya no espera a la red, y funciona sin conexión.", Classes = { "muted" }, TextWrapping = TextWrapping.Wrap },
+            Ui.H(12, enabled, Ui.Field("Años hacia atrás", years)),
+            auto,
+            Ui.Field("Agregar instrumento", addPicker),
+            _klineList,
+            Ui.H(10, update),
+            _klineStatus);
+    }
+
+    private void FillKlineList()
+    {
+        _klineList.Children.Clear();
+        var s = _svc.Settings;
+        foreach (var key in s.KlineKeepInstruments.ToList())
+        {
+            var parts = key.Split('|', 2);
+            string name = parts.Length == 2 ? $"{parts[1]} · {_svc.Connections.Find(parts[0])?.Name ?? parts[0]}" : key;
+            var remove = Ui.IconButton(MaterialIconKind.Close, "Quitar", () =>
+            {
+                s.KlineKeepInstruments.Remove(key);
+                s.Save();
+                FillKlineList();
+            });
+            var status = new TextBlock { Text = _svc.Klines.ItemStatus.TryGetValue(key, out var st) ? st : "", Classes = { "faint", "small" }, TextWrapping = TextWrapping.Wrap };
+            var row = new DockPanel();
+            DockPanel.SetDock(remove, Dock.Right);
+            row.Children.Add(remove);
+            row.Children.Add(Ui.V(0, new TextBlock { Text = name, FontWeight = FontWeight.SemiBold }, status));
+            _klineList.Children.Add(row);
+        }
+
+        if (s.KlineKeepInstruments.Count == 0) _klineList.Children.Add(new TextBlock { Text = "Ninguno todavía: agregá uno o abrí un gráfico con el agregado automático activado.", Classes = { "faint", "small" }, TextWrapping = TextWrapping.Wrap });
     }
 
     // ===================================================================== importar

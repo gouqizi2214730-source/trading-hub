@@ -622,6 +622,7 @@ public sealed partial class TradingView : UserControl
             var oldIndicators = copyIndicatorsFrom?.Model?.Indicators.Select(s => s.Indicator).ToList();
             tab.Model?.Dispose();
             var data = _svc.Open(profile.Id, inst);
+            _svc.Klines.Track(profile.Id, inst);
             var model = new ChartModel(data, period, settings ?? new ChartSettings())
             {
                 Trading = _svc.SimBrokerFor(data),

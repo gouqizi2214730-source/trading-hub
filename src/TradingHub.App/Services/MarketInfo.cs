@@ -50,7 +50,7 @@ public static class MarketInfo
         return list.FirstOrDefault(m => Split(m).Symbol.Equals(sym, StringComparison.OrdinalIgnoreCase));
     }
 
-    public static bool IsCrypto(string feed) => feed is "binance-futures" or "binance-spot" or "bybit-linear";
+    public static bool IsCrypto(string feed) => feed is "binance-futures" or "binance-spot" or "bybit-linear" or TradingHub.Feeds.AggregateFeed.FeedId;
 
     /// <summary>
     /// Futuros de CME (Rithmic o Tradovate: mismos contratos, misma historia continua; también la historia de Databento y
@@ -61,7 +61,7 @@ public static class MarketInfo
     /// <summary>CFDs (archivos importados, OANDA o un broker de cTrader): sin operaciones reales, el spread va como deslizamiento.</summary>
     public static bool IsCfd(string feed) => feed == CsvImport.FeedId || feed == TradingHub.Feeds.Oanda.OandaFeed.FeedId || feed.StartsWith(TradingHub.Feeds.CTrader.CTraderFeed.FeedId, StringComparison.Ordinal);
 
-    public static bool IsStocks(string feed) => feed == TradingHub.Feeds.Alpaca.AlpacaFeed.FeedId;
+    public static bool IsStocks(string feed) => feed is TradingHub.Feeds.Alpaca.AlpacaFeed.FeedId or TradingHub.Feeds.Longbridge.LongbridgeFeed.FeedId;
 
     /// <summary>Raíz de un símbolo de CFD para buscar su futuro (NAS100_USD → NAS100, US100.cash → US100).</summary>
     private static string CfdRoot(string symbol) => symbol.Split('_', '.', '-', ' ')[0].ToUpperInvariant();
@@ -75,7 +75,14 @@ public static class MarketInfo
         if (feed == CsvImport.FeedId) return "CFD importado de archivos (velas de 1 minuto convertidas en operaciones: sin volumen ni lado agresor reales, no sirve para flujo de órdenes)";
         if (feed == TradingHub.Feeds.Oanda.OandaFeed.FeedId) return "CFD/forex de OANDA (velas de 5 segundos convertidas en operaciones: sin volumen ni lado agresor reales, no sirve para flujo de órdenes)";
         if (feed.StartsWith(TradingHub.Feeds.CTrader.CTraderFeed.FeedId, StringComparison.Ordinal)) return "CFD/forex de un broker de cTrader (ticks bid: sin volumen ni lado agresor reales, no sirve para flujo de órdenes)";
+        if (feed == TradingHub.Feeds.Longbridge.LongbridgeFeed.FeedId) return TradingHub.Feeds.Longbridge.LongbridgeFeed.Market(sym) switch
+        {
+            "US" => "acción/ETF de EE.UU. por 长桥 (tape del día con lado real; historia en velas con delta estimado; horario 9:30-16:00 de Nueva York más pre y post)",
+            "HK" => "acción/ETF de Hong Kong por 长桥 (tape del día con lado real; historia en velas con delta estimado; horario 9:30-12:00 y 13:00-16:00 de Hong Kong)",
+            _ => "acción de China continental por 长桥 (tape del día con lado real; historia en velas con delta estimado; horario 9:30-11:30 y 13:00-15:00 de Shanghái)",
+        };
         if (IsStocks(feed)) return "acción/ETF de EE.UU. por Alpaca (operaciones reales de todas las bolsas, lado por regla del tick; horario 9:30-16:00 de Nueva York más pre y post)";
+        if (feed == TradingHub.Feeds.AggregateFeed.FeedId) return "cripto agregado (Binance + Bybit sumados: volumen y delta de los dos mercados), 24/7";
         return feed;
     }
 
@@ -153,7 +160,10 @@ public static class MarketInfo
         if (IsCrypto(feed)) return new MarketCosts(0.04m, 0, 1, null, 0);
         if (IsFutures(feed)) return new MarketCosts(0, Commission(symbol).PerSide, 1, "America/New_York", 18);
         // acciones: sin comisión en Alpaca, un centavo de deslizamiento y la sesión de Nueva York desde el pre-mercado
+        if (feed == TradingHub.Feeds.Longbridge.LongbridgeFeed.FeedId)
+            return TradingHub.Feeds.Longbridge.LongbridgeFeed.Market(symbol) == "US" ? new MarketCosts(0, 0, 1, "America/New_York", 4) : new MarketCosts(0.03m, 0, 1, "Asia/Hong_Kong", 9);
         if (IsStocks(feed)) return new MarketCosts(0, 0, 1, "America/New_York", 4);
+        if (feed == TradingHub.Feeds.AggregateFeed.FeedId) return new MarketCosts(0.04m, 0, 1, null, 0);
         // CFD: el spread se paga como deslizamiento (alrededor de un punto en índices); los de índices de EE.UU. con la
         // sesión de Nueva York, igual que su futuro (así una estrategia de horario corre igual en la simulada)
         decimal tick = TickSize(feed, symbol);

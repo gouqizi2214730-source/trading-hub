@@ -9,6 +9,8 @@ using Material.Icons;
 using TradingHub.App.Controls;
 using TradingHub.App.Services;
 using TradingHub.App.Windows;
+using TradingHub.Feeds.Binance;
+using TradingHub.Feeds.Bybit;
 using TradingHub.Feeds.Rithmic;
 
 namespace TradingHub.App.Views;
@@ -55,6 +57,8 @@ internal sealed class ConnectionsView : UserControl, IPage
         ConnectionKind.Oanda => MaterialIconKind.Earth,
         ConnectionKind.Alpaca => MaterialIconKind.Finance,
         ConnectionKind.Databento => MaterialIconKind.DatabaseArrowDownOutline,
+        ConnectionKind.Longbridge => MaterialIconKind.Bridge,
+        ConnectionKind.Aggregate => MaterialIconKind.Layers,
         _ => MaterialIconKind.Bank,
     };
 
@@ -75,6 +79,8 @@ internal sealed class ConnectionsView : UserControl, IPage
                 ConnectionKind.Oanda => "CFDs de índices, oro y forex (práctica gratis)",
                 ConnectionKind.Alpaca => "acciones y ETFs de EE.UU. (SPY, QQQ) gratis",
                 ConnectionKind.Databento => "historia de futuros de CME desde 2010",
+                ConnectionKind.Longbridge => "acciones de Hong Kong, EE.UU. y China (entrás con tu cuenta)",
+                ConnectionKind.Aggregate => "Binance + Bybit sumados (volumen y delta agregados)",
                 _ => null,
             };
             object itemHeader = hint == null ? Ui.EnumName(kind) : Ui.V(1, new TextBlock { Text = Ui.EnumName(kind) }, new TextBlock { Text = hint, Classes = { "faint", "small" } });
@@ -156,6 +162,8 @@ internal sealed class ConnectionsView : UserControl, IPage
             ConnectionKind.Oanda => (p.Testnet ? "práctica" : "real") + (string.IsNullOrWhiteSpace(p.OandaAccount) ? "" : " · " + p.OandaAccount),
             ConnectionKind.Alpaca => string.IsNullOrWhiteSpace(p.ApiKey) ? "sin claves" : $"historia SIP · en vivo {p.AlpacaLiveFeed.ToUpperInvariant()}",
             ConnectionKind.Databento => "historia de futuros de CME (pago por uso)",
+            ConnectionKind.Longbridge => string.IsNullOrWhiteSpace(_svc.Connections.GetSecret(p, "token")) ? "sin autorizar (entrá con tu cuenta)" : $"{(p.LongbridgeRegion == "cn" ? "China continental" : "global")} · {p.LongbridgeSymbols.Count} símbolos",
+            ConnectionKind.Aggregate => string.Join(" + ", p.AggregateSources.Select(AggregateSourceName)),
             _ => $"{p.IbHost}:{p.IbPort}",
         };
         return prefix + detail;
@@ -168,9 +176,11 @@ internal sealed class ConnectionsView : UserControl, IPage
         if (kind is ConnectionKind.CTrader) p.Name = n > 1 ? $"cTrader {n}" : "cTrader";
         if (kind is ConnectionKind.Alpaca) p.Name = n > 1 ? $"Alpaca {n}" : "Alpaca";
         if (kind is ConnectionKind.Databento) p.Name = "Databento";
+        if (kind is ConnectionKind.Longbridge) p.Name = n > 1 ? $"长桥 {n}" : "长桥";
+        if (kind is ConnectionKind.Aggregate) p.Name = n > 1 ? $"Cripto agregado {n}" : "Cripto agregado";
         // el primero de cada tipo usa el id de sus datos (así los archivos de ticks quedan con un nombre claro)
         string defaultId = ConnectionProfile.DefaultId(kind);
-        if (kind is ConnectionKind.Tradovate or ConnectionKind.CTrader or ConnectionKind.Oanda or ConnectionKind.Alpaca or ConnectionKind.Databento
+        if (kind is ConnectionKind.Tradovate or ConnectionKind.CTrader or ConnectionKind.Oanda or ConnectionKind.Alpaca or ConnectionKind.Databento or ConnectionKind.Longbridge or ConnectionKind.Aggregate
             && _svc.Connections.Profiles.All(x => x.Id != defaultId))
             p.Id = defaultId;
         if (kind == ConnectionKind.Simulator) p.HistoryHours = 6;
@@ -264,6 +274,13 @@ internal sealed class ConnectionsView : UserControl, IPage
                 dataSection.IsVisible = false;
                 sections.Children.Add(Ui.Card(DatabentoSection(p, apply)));
                 break;
+            case ConnectionKind.Longbridge:
+                dataSection.Children.Add(Note(MaterialIconKind.InformationOutline, "长桥 da el tape del día (con el lado de cada operación) y velas de años. Lo que no tiene ticks se arma con las velas, repartiendo el volumen por la forma de cada vela (delta estimado)."));
+                sections.Children.Add(Ui.Card(LongbridgeSection(p, apply)));
+                break;
+            case ConnectionKind.Aggregate:
+                sections.Children.Add(Ui.Card(AggregateSection(p, apply)));
+                break;
         }
 
         // ---- encabezado y acciones
@@ -271,7 +288,7 @@ internal sealed class ConnectionsView : UserControl, IPage
         var save = Ui.Button("Guardar", MaterialIconKind.ContentSaveOutline, () => { }, "primary");
         var delete = Ui.Button("Eliminar", MaterialIconKind.DeleteOutline, () => { }, "ghost");
         delete.IsVisible = _svc.Connections.Profiles.Count(x => x.Kind == p.Kind) > 1 || p.Kind is ConnectionKind.InteractiveBrokers or ConnectionKind.AmpFutures
-            or ConnectionKind.Tradovate or ConnectionKind.CTrader or ConnectionKind.Oanda or ConnectionKind.Alpaca or ConnectionKind.Databento;
+            or ConnectionKind.Tradovate or ConnectionKind.CTrader or ConnectionKind.Oanda or ConnectionKind.Alpaca or ConnectionKind.Databento or ConnectionKind.Longbridge or ConnectionKind.Aggregate;
 
         void Save()
         {
@@ -844,6 +861,114 @@ internal sealed class ConnectionsView : UserControl, IPage
         if (code == null) throw new InvalidOperationException(error ?? "cTrader no mandó el código");
         var (access, refresh, _) = await TradingHub.Feeds.CTrader.CTraderAuth.ExchangeAsync(clientId, secret, code, redirect, CancellationToken.None);
         return (access, refresh);
+    }
+
+
+    private static string AggregateSourceName(string id) => id switch
+    {
+        BinanceFeed.FuturesId => "Binance Futures",
+        BinanceFeed.SpotId => "Binance Spot",
+        BybitFeed.LinearId => "Bybit",
+        _ => id,
+    };
+
+    /// <summary>Cripto agregado: qué mercados se suman.</summary>
+    private Control AggregateSection(ConnectionProfile p, List<Action> apply)
+    {
+        var options = new[] { BinanceFeed.FuturesId, BybitFeed.LinearId, BinanceFeed.SpotId };
+        var checks = options.Select(id => new CheckBox { Content = AggregateSourceName(id), IsChecked = p.AggregateSources.Contains(id), Tag = id }).ToList();
+        apply.Add(() =>
+        {
+            var chosen = checks.Where(c => c.IsChecked == true).Select(c => (string)c.Tag!).ToList();
+            if (chosen.Count == 0) chosen.Add(BinanceFeed.FuturesId);
+            p.AggregateSources = chosen;
+        });
+        var list = new StackPanel { Spacing = 6 };
+        foreach (var c in checks) list.Children.Add(c);
+        return Ui.V(14,
+            Ui.H2("Mercados que se suman"),
+            Note(MaterialIconKind.InformationOutline, "Las operaciones y las velas de todos los mercados elegidos se suman en un solo instrumento (BTCUSDT = Binance + Bybit), como en aggr.trade: volumen, delta y footprint agregados. El precio y el DOM son los del primero. Solo entran los símbolos que existen en al menos dos mercados."),
+            list,
+            Note(MaterialIconKind.ShieldCheckOutline, "Datos públicos: no hace falta cuenta ni claves. Para operar, usá la conexión de cada mercado."));
+    }
+
+    /// <summary>长桥 (Longbridge): entrar con OAuth 2.0 desde el navegador; región y símbolos del buscador.</summary>
+    private Control LongbridgeSection(ConnectionProfile p, List<Action> apply)
+    {
+        var region = new ComboBox { MinWidth = 260 };
+        region.Items.Add(new ComboBoxItem { Content = "Global (openapi.longbridge.com)", Tag = "global" });
+        region.Items.Add(new ComboBoxItem { Content = "China continental (openapi.longbridge.cn)", Tag = "cn" });
+        region.SelectedItem = region.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag! == p.LongbridgeRegion) ?? region.Items[0];
+        var symbols = new TextBox
+        {
+            Text = string.Join(", ", p.LongbridgeSymbols),
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            MinHeight = 80,
+            Watermark = "700.HK, AAPL.US, 600519.SH…",
+        };
+        bool authorized = !string.IsNullOrWhiteSpace(_svc.Connections.GetSecret(p, "token"));
+        var oauthStatus = new TextBlock { Classes = { "faint", "small" }, TextWrapping = TextWrapping.Wrap, Text = authorized ? $"Autorizado (tokens guardados en {Os.SecretStoreShort}). Se renuevan solos." : "Todavía no entraste con tu cuenta." };
+        var connect = Ui.Button(authorized ? "Volver a entrar con 长桥" : "Conectar con 长桥", MaterialIconKind.Login, () => { }, "primary");
+        var logout = Ui.Button("Salir", MaterialIconKind.Logout, () =>
+        {
+            _svc.Connections.SetSecret(p, "token", null);
+            _svc.Connections.SetSecret(p, "refresh", null);
+            p.LongbridgeExpiresAt = 0;
+            _svc.Connections.Save();
+            _svc.Connections.Invalidate(p);
+            oauthStatus.Text = "Sesión cerrada. Para volver a usar 长桥, tocá «Conectar con 长桥».";
+        }, "ghost");
+        logout.IsVisible = authorized;
+        connect.Click += async (_, _) =>
+        {
+            string reg = (string)((ComboBoxItem)region.SelectedItem!).Tag!;
+            string baseUrl = reg == "cn" ? TradingHub.Feeds.Longbridge.LongbridgeOAuth.BaseUrlCn : TradingHub.Feeds.Longbridge.LongbridgeOAuth.BaseUrlGlobal;
+            // el cliente OAuth es de un servidor: si cambió la región, se registra otro
+            string? clientId = p.LongbridgeRegion == reg ? p.LongbridgeClientId : null;
+            connect.IsEnabled = false;
+            oauthStatus.Text = "Se abrió el navegador: entrá con tu cuenta de 长桥 y autorizá a " + TradingHub.Common.Product.Name + ". Esperando…";
+            try
+            {
+                var (token, id) = await TradingHub.Feeds.Longbridge.LongbridgeOAuth.LoginAsync(baseUrl, clientId, TradingHub.Common.Product.Name, Shell.Open, CancellationToken.None);
+                p.LongbridgeRegion = reg;
+                p.LongbridgeClientId = id;
+                p.LongbridgeExpiresAt = token.ExpiresAt;
+                _svc.Connections.SetSecret(p, "token", token.Access);
+                _svc.Connections.SetSecret(p, "refresh", token.Refresh);
+                _svc.Connections.Save();
+                _svc.Connections.Invalidate(p);
+                InstrumentPicker.ClearCache(p.Id);
+                logout.IsVisible = true;
+                oauthStatus.Text = $"Listo: {TradingHub.Common.Product.Name} quedó autorizado en 长桥 (tokens en {Os.SecretStoreShort}). Tocá «Probar conexión».";
+            }
+            catch (Exception ex)
+            {
+                oauthStatus.Text = "No se pudo autorizar: " + NetworkProxy.Explain(ex);
+            }
+            finally
+            {
+                connect.IsEnabled = true;
+            }
+        };
+        apply.Add(() =>
+        {
+            p.LongbridgeRegion = (string)((ComboBoxItem)region.SelectedItem!).Tag!;
+            p.LongbridgeSymbols = (symbols.Text ?? "").Split(new[] { ',', ';', '\n', '\r', ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(s => s.ToUpperInvariant()).Where(s => s.Contains('.')).Distinct().ToList();
+            if (p.LongbridgeSymbols.Count == 0) p.LongbridgeSymbols = new List<string>(TradingHub.Feeds.Longbridge.LongbridgeOAuth.DefaultSymbols);
+        });
+        return Ui.V(14,
+            Ui.H2("长桥 OpenAPI (Longbridge)"),
+            Note(MaterialIconKind.InformationOutline, "Acciones y ETFs de Hong Kong (700.HK), EE.UU. (AAPL.US), Shanghái/Shenzhen (600519.SH, 300750.SZ) y Singapur con tu cuenta de 长桥: cotizaciones en vivo con el lado de cada operación, profundidad y velas de años. HK y EE.UU. nivel 1 vienen incluidos; otros niveles según tu suscripción en 长桥."),
+            Ui.H3("1 · Entrar con tu cuenta (OAuth 2.0)"),
+            Note(MaterialIconKind.ShieldKeyOutline, "Sin App Key ni Secret: se abre el navegador, entrás en 长桥 y autorizás la app. Los tokens se guardan en " + Os.SecretStore + " y se renuevan solos. Solo datos de mercado (no se piden permisos de cuenta ni de operar)."),
+            Ui.Field("Servidor", region, "China continental usa openapi.longbridge.cn; cuentas de EE.UU. tienen que usar el global."),
+            Ui.H(10, connect, logout),
+            oauthStatus,
+            Ui.H3("2 · Símbolos del buscador"),
+            Ui.Field("Símbolos (código.mercado, separados por coma)", symbols, "Podés agregar los que quieras; el buscador muestra estos con su nombre y último precio."),
+            Ui.H(16, Link("Abrir open.longbridge.com", "https://open.longbridge.com"), Link("Documentación de la API", "https://open.longbridge.com/docs")));
     }
 
     /// <summary>OANDA: token personal y cuenta de práctica (gratis) o real.</summary>

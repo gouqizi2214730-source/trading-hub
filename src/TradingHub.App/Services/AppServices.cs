@@ -180,6 +180,12 @@ public sealed class AppSettings
     /// <summary>Sin compras / ventas del exchange, el delta de las velas de historia se estima por la forma de la vela.</summary>
     public bool EstimateDeltaFromShape { get; set; } = true;
 
+    // velas automáticas: historia en velas bajada y al día en segundo plano (ver KlineKeeper)
+    public bool KlineKeepEnabled { get; set; }
+    public bool KlineKeepAuto { get; set; } = true;
+    public int KlineKeepYears { get; set; } = 2;
+    public List<string> KlineKeepInstruments { get; set; } = new();
+
     /// <summary>Proxy de red: "sistema" (el de Windows/macOS), "manual" (<see cref="ProxyAddress"/>) o "ninguno".</summary>
     public string ProxyMode { get; set; } = NetworkProxy.System;
 
@@ -457,6 +463,11 @@ public sealed class AppServices
 
     /// <summary>Todas las alertas (aviso en la app, registro y salidas externas).</summary>
     public AlertCenter Alerts => _alerts ??= new AlertCenter(Settings).Also(a => a.LoadRecent());
+
+    private KlineKeeper? _klines;
+
+    /// <summary>Velas automáticas (historia en velas al día en segundo plano).</summary>
+    public KlineKeeper Klines => _klines ??= new KlineKeeper(this);
     public ConnectionManager Connections { get; } = new();
     public MarketDataHub Hub { get; } = new();
 
@@ -685,6 +696,7 @@ public sealed class AppServices
             foreach (var b in _realBrokers.Values) (b as IDisposable)?.Dispose();
             foreach (var rs in _rithmicSessions.Values) rs.Dispose();
             foreach (var ts in _tradovateSessions.Values) ts.Dispose();
+            _klines?.Dispose();
             Hub.Dispose();
             Connections.DisposeAll();
         }

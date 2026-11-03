@@ -108,6 +108,8 @@ public enum ConnectionKind
     [Display(Name = "OANDA")] Oanda,
     [Display(Name = "Alpaca")] Alpaca,
     [Display(Name = "Databento")] Databento,
+    [Display(Name = "长桥 Longbridge")] Longbridge,
+    [Display(Name = "Cripto agregado")] Aggregate,
 }
 
 /// <summary>Una conexión configurada (los secretos van al llavero, no a este archivo).</summary>
@@ -162,6 +164,15 @@ public sealed class ConnectionProfile
     // Alpaca: datos en vivo iex (gratis) o sip (pago)
     public string AlpacaLiveFeed { get; set; } = "iex";
 
+    // 长桥 (Longbridge): cliente OAuth registrado por la app, región y símbolos del buscador (los tokens van al Llavero)
+    public string LongbridgeClientId { get; set; } = "";
+    public string LongbridgeRegion { get; set; } = "global";
+    public long LongbridgeExpiresAt { get; set; }
+    public List<string> LongbridgeSymbols { get; set; } = new(TradingHub.Feeds.Longbridge.LongbridgeOAuth.DefaultSymbols);
+
+    // Cripto agregado: qué mercados se suman (ids de datos de mercado)
+    public List<string> AggregateSources { get; set; } = new() { BinanceFeed.FuturesId, BybitFeed.LinearId };
+
     // Interactive Brokers
     public string IbHost { get; set; } = "127.0.0.1";
     public int IbPort { get; set; } = 7497;
@@ -187,6 +198,8 @@ public sealed class ConnectionProfile
         ConnectionKind.Oanda => TradingHub.Feeds.Oanda.OandaFeed.FeedId,
         ConnectionKind.Alpaca => TradingHub.Feeds.Alpaca.AlpacaFeed.FeedId,
         ConnectionKind.Databento => "databento",
+        ConnectionKind.Longbridge => TradingHub.Feeds.Longbridge.LongbridgeFeed.FeedId,
+        ConnectionKind.Aggregate => AggregateFeed.FeedId,
         _ => "ib",
     };
 
@@ -201,6 +214,8 @@ public sealed class ConnectionProfile
         ConnectionKind.Oanda => TradingHub.Feeds.Oanda.OandaFeed.FeedId,
         ConnectionKind.Alpaca => TradingHub.Feeds.Alpaca.AlpacaFeed.FeedId,
         ConnectionKind.Databento => "databento",
+        ConnectionKind.Longbridge => TradingHub.Feeds.Longbridge.LongbridgeFeed.FeedId,
+        ConnectionKind.Aggregate => AggregateFeed.FeedId,
         _ => Guid.NewGuid().ToString("N")[..8],
     };
 
@@ -330,6 +345,8 @@ public sealed class ConnectionManager
             ConnectionKind.Oanda => new TradingHub.Feeds.Oanda.OandaFeed(OandaSettingsOf(p)),
             ConnectionKind.Alpaca => new TradingHub.Feeds.Alpaca.AlpacaFeed(AlpacaSettingsOf(p)),
             ConnectionKind.Databento => throw new NotSupportedException("Databento no da datos en vivo: se usa desde Datos para bajar historia de futuros."),
+            ConnectionKind.Longbridge => LongbridgeFeedOf(p),
+            ConnectionKind.Aggregate => AggregateFeedOf(p),
             _ => throw new NotSupportedException("Interactive Brokers todavía no da datos en Trading Hub (solo prueba de conexión)."),
         };
         _feeds[p.Id] = f;
@@ -416,6 +433,54 @@ public sealed class ConnectionManager
         StreamUrl = Environment.GetEnvironmentVariable("TRADINGHUB_ALPACA_STREAM") is { Length: > 0 } st ? st : null,
     };
 
+    public TradingHub.Feeds.Longbridge.LongbridgeSettings LongbridgeSettingsOf(ConnectionProfile p) => new()
+    {
+        ClientId = p.LongbridgeClientId,
+        Region = p.LongbridgeRegion == "cn" ? "cn" : "global",
+        AccessToken = GetSecret(p, "token"),
+        RefreshToken = GetSecret(p, "refresh"),
+        ExpiresAt = p.LongbridgeExpiresAt,
+        Symbols = p.LongbridgeSymbols.Count > 0 ? new List<string>(p.LongbridgeSymbols) : new List<string>(TradingHub.Feeds.Longbridge.LongbridgeOAuth.DefaultSymbols),
+        BaseUrl = Environment.GetEnvironmentVariable("TRADINGHUB_LONGBRIDGE_URL") is { Length: > 0 } u ? u : null,
+        QuoteWsUrl = Environment.GetEnvironmentVariable("TRADINGHUB_LONGBRIDGE_WS") is { Length: > 0 } w ? w : null,
+    };
+
+    private TradingHub.Feeds.Longbridge.LongbridgeFeed LongbridgeFeedOf(ConnectionProfile p)
+    {
+        var settings = LongbridgeSettingsOf(p);
+        // los tokens se renuevan solos: el nuevo va al Llavero y el vencimiento al perfil
+        settings.TokensRefreshed = s =>
+        {
+            SetSecret(p, "token", s.AccessToken);
+            SetSecret(p, "refresh", s.RefreshToken);
+            p.LongbridgeExpiresAt = s.ExpiresAt;
+            Save();
+        };
+        return new TradingHub.Feeds.Longbridge.LongbridgeFeed(settings);
+    }
+
+    /// <summary>Cripto agregado: suma las operaciones y velas de los mercados elegidos (Binance Futures + Bybit por defecto).</summary>
+    private AggregateFeed AggregateFeedOf(ConnectionProfile p)
+    {
+        var sources = new List<IMarketDataFeed>();
+        foreach (var id in p.AggregateSources)
+        {
+            var src = Profiles.FirstOrDefault(x => x.MarketDataId == id && x.Kind is ConnectionKind.BinanceFutures or ConnectionKind.BinanceSpot or ConnectionKind.Bybit);
+            if (src != null)
+            {
+                sources.Add(GetFeed(src.Id));
+                continue;
+            }
+
+            // sin perfil: los mercados públicos se crean igual (no necesitan cuenta)
+            IMarketDataFeed? f = id == BinanceFeed.FuturesId ? new BinanceFeed(futures: true) : id == BinanceFeed.SpotId ? new BinanceFeed(futures: false) : id == BybitFeed.LinearId ? new BybitFeed() : null;
+            if (f != null) sources.Add(f);
+        }
+
+        if (sources.Count == 0) sources.Add(new BinanceFeed(futures: true));
+        return new AggregateFeed(sources);
+    }
+
     /// <summary>Cliente de Databento con la API key de la conexión (TRADINGHUB_DATABENTO_URL lo apunta a otro servidor).</summary>
     public TradingHub.Feeds.Databento.DatabentoClient DatabentoOf(ConnectionProfile p) =>
         new(GetSecret(p), Environment.GetEnvironmentVariable("TRADINGHUB_DATABENTO_URL") is { Length: > 0 } u ? u : null);
@@ -482,6 +547,13 @@ public sealed class ConnectionManager
                     return await ((TradingHub.Feeds.Oanda.OandaFeed)GetFeed(p.Id)).TestAsync(ct);
                 case ConnectionKind.Alpaca:
                     return await ((TradingHub.Feeds.Alpaca.AlpacaFeed)GetFeed(p.Id)).TestAsync(ct);
+                case ConnectionKind.Longbridge:
+                    return await ((TradingHub.Feeds.Longbridge.LongbridgeFeed)GetFeed(p.Id)).TestAsync(ct);
+                case ConnectionKind.Aggregate:
+                {
+                    var inst = await GetFeed(p.Id).GetInstrumentsAsync(ct);
+                    return (true, $"{inst.Count} instrumentos en común entre los mercados elegidos (datos públicos, sin cuenta).");
+                }
                 case ConnectionKind.Databento:
                 {
                     if (string.IsNullOrWhiteSpace(GetSecret(p))) return (false, "Falta la API key de Databento.");

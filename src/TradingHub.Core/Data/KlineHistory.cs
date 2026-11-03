@@ -57,38 +57,56 @@ public static class KlineHistory
             ct.ThrowIfCancellationRequested();
             var monthStart = months[i];
             var monthEnd = monthStart.AddMonths(1);
-            // un mes se da por cerrado (y se guarda) dos días después de terminar
+            // un mes se da por cerrado (y se guarda entero) dos días después de terminar
             bool closed = monthEnd <= DateTime.UtcNow.AddDays(-2);
             int index = i;
             var sub = new Progress<double>(p => progress?.Report((index + Math.Clamp(p, 0, 1)) / months.Count));
             List<Kline> klines;
-            if (closed && ReadCache(inst, monthStart, minutes, source.CacheTag) is { } cached)
+            if (closed && ReadCache(inst, monthStart, minutes, source.CacheTag, partial: false) is { } cached)
             {
                 klines = cached;
             }
             else
             {
+                // el mes en curso (o uno que se guardó a medias) se completa desde lo último guardado: así actualizar es
+                // bajar solo las velas nuevas, no el mes entero
+                var part = ReadCache(inst, monthStart, minutes, source.CacheTag, partial: true);
                 var from = closed ? monthStart : (fromUtc > monthStart ? fromUtc : monthStart);
                 var to = closed ? monthEnd : (toUtc < monthEnd ? toUtc : monthEnd);
+                bool extend = part != null || from <= monthStart; // lo guardado cubre desde el principio del mes
+                if (part is { Count: > 0 })
+                {
+                    // se sigue desde la última vela guardada (que pudo estar formándose: se vuelve a pedir), así lo
+                    // guardado queda sin huecos aunque el gráfico pida solo los últimos días
+                    from = FromMs(part[^1].OpenTimeMs);
+                }
+
                 klines = new List<Kline>();
                 var target = klines;
                 try
                 {
-                    await source.LoadKlinesAsync(inst, from, to, minutes, endPrice, batch =>
-                    {
-                        target.AddRange(batch);
-                        return !ct.IsCancellationRequested;
-                    }, sub, ct).ConfigureAwait(false);
+                    if (to > from)
+                        await source.LoadKlinesAsync(inst, from, to, minutes, endPrice, batch =>
+                        {
+                            target.AddRange(batch);
+                            return !ct.IsCancellationRequested;
+                        }, sub, ct).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (onError != null && (ex is not OperationCanceledException || !ct.IsCancellationRequested))
                 {
                     // un mes que no llegó no tira los demás (ni los guardados en caché)
                     onError(ex);
                     target.Clear();
-                    continue;
+                    if (part == null) continue;
+                    extend = false;
                 }
 
-                if (closed && klines.Count > 0) WriteCache(inst, monthStart, minutes, klines, source.CacheTag);
+                if (part != null) klines = Combine(part, klines);
+                if (extend && klines.Count > 0)
+                {
+                    if (closed) WriteCache(inst, monthStart, minutes, klines, source.CacheTag, partial: false);
+                    else WriteCache(inst, monthStart, minutes, klines, source.CacheTag, partial: true);
+                }
             }
 
             foreach (var k in klines)
@@ -99,17 +117,43 @@ public static class KlineHistory
         return result;
     }
 
-    private static string CachePath(Instrument inst, DateTime month, int minutes, string tag)
+    /// <summary>Lo guardado más lo nuevo: las velas nuevas reemplazan a las del mismo minuto.</summary>
+    private static List<Kline> Combine(List<Kline> saved, List<Kline> fresh)
     {
-        static string Clean(string s) => string.Concat(s.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
-        return Path.Combine(CacheRoot!, Clean(inst.FeedId), Clean(inst.Symbol), $"{month:yyyy-MM}.{minutes}m{(tag.Length > 0 ? "." + tag : "")}.bin");
+        if (fresh.Count == 0) return saved;
+        long firstNew = fresh[0].OpenTimeMs;
+        var res = new List<Kline>(saved.Count + fresh.Count);
+        foreach (var k in saved)
+            if (k.OpenTimeMs < firstNew) res.Add(k);
+        res.AddRange(fresh);
+        return res;
     }
 
-    private static List<Kline>? ReadCache(Instrument inst, DateTime month, int minutes, string tag)
+    /// <summary>Hasta cuándo hay velas guardadas de un instrumento (del mes en curso o del último mes), o null.</summary>
+    public static DateTime? CachedUntil(IKlineHistory source, Instrument inst, int minutes)
+    {
+        if (CacheRoot == null) return null;
+        var month = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        for (int i = 0; i < 3; i++, month = month.AddMonths(-1))
+        {
+            var part = ReadCache(inst, month, minutes, source.CacheTag, partial: true) ?? ReadCache(inst, month, minutes, source.CacheTag, partial: false);
+            if (part is { Count: > 0 }) return FromMs(part[^1].OpenTimeMs).AddMinutes(minutes);
+        }
+
+        return null;
+    }
+
+    private static string CachePath(Instrument inst, DateTime month, int minutes, string tag, bool partial = false)
+    {
+        static string Clean(string s) => string.Concat(s.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
+        return Path.Combine(CacheRoot!, Clean(inst.FeedId), Clean(inst.Symbol), $"{month:yyyy-MM}.{minutes}m{(tag.Length > 0 ? "." + tag : "")}{(partial ? ".parcial" : "")}.bin");
+    }
+
+    private static List<Kline>? ReadCache(Instrument inst, DateTime month, int minutes, string tag, bool partial = false)
     {
         try
         {
-            var path = CachePath(inst, month, minutes, tag);
+            var path = CachePath(inst, month, minutes, tag, partial);
             if (!File.Exists(path)) return null;
             using var r = new BinaryReader(File.OpenRead(path));
             int n = r.ReadInt32();
@@ -130,11 +174,11 @@ public static class KlineHistory
         }
     }
 
-    private static void WriteCache(Instrument inst, DateTime month, int minutes, List<Kline> klines, string tag)
+    private static void WriteCache(Instrument inst, DateTime month, int minutes, List<Kline> klines, string tag, bool partial = false)
     {
         try
         {
-            var path = CachePath(inst, month, minutes, tag);
+            var path = CachePath(inst, month, minutes, tag, partial);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             var tmp = path + ".tmp";
             using (var w = new BinaryWriter(File.Create(tmp)))
@@ -154,6 +198,8 @@ public static class KlineHistory
             }
 
             File.Move(tmp, path, overwrite: true);
+            // el mes entero reemplaza al parcial
+            if (!partial) File.Delete(CachePath(inst, month, minutes, tag, partial: true));
         }
         catch
         {
