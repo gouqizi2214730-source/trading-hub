@@ -33,6 +33,7 @@ public sealed class ChartView : SkiaView
             if (_controller != null) _controller.IndicatorSettingsRequested += slot => IndicatorSettingsRequested?.Invoke(slot);
             if (_controller != null) _controller.StrategySettingsRequested += st => StrategySettingsRequested?.Invoke(st);
             if (_controller != null) _controller.StrategyRemoveRequested += st => StrategyRemoveRequested?.Invoke(st);
+            if (_controller != null) _controller.TimeZoneRequested += () => TimeZoneRequested?.Invoke();
             InvalidateVisual();
         }
     }
@@ -59,6 +60,9 @@ public sealed class ChartView : SkiaView
 
     /// <summary>Se ocultó, mostró o quitó un indicador desde la leyenda.</summary>
     public event Action? IndicatorsChanged;
+
+    /// <summary>Clic en la hora de la esquina del eje de tiempo.</summary>
+    public event Action? TimeZoneRequested;
 
     /// <summary>Ajustes de un indicador pedidos desde la leyenda.</summary>
     public event Action<IndicatorSlot>? IndicatorSettingsRequested;

@@ -80,6 +80,9 @@ public sealed class ChartController
     public event Action<ChartDrawing>? DrawingDoubleClicked;
     public event Action? DrawingsChanged;
 
+    /// <summary>Clic en la hora de la esquina del eje de tiempo: elegir la zona horaria del gráfico.</summary>
+    public event Action? TimeZoneRequested;
+
     /// <summary>Se ocultó, mostró o quitó un indicador desde la leyenda del gráfico.</summary>
     public event Action? IndicatorsChanged;
 
@@ -170,6 +173,13 @@ public sealed class ChartController
             _drag = DragMode.PriceScale;
             _startTop = l.Main.Top;
             _startBottom = l.Main.Bottom;
+            return;
+        }
+
+        // hora y zona horaria (esquina del eje de tiempo): elegir la zona
+        if (_state.TimeZoneButton is { } tzb && tzb.Contains(x, y))
+        {
+            TimeZoneRequested?.Invoke();
             return;
         }
 

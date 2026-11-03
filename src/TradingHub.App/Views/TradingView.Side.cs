@@ -1113,6 +1113,66 @@ public sealed partial class TradingView
         new ContextMenu { ItemsSource = items }.Open(tab.View);
     }
 
+    /// <summary>Zona horaria del gráfico (clic en la hora de la esquina): este gráfico o todos.</summary>
+    private void ShowTimeZoneMenu(ChartTab tab)
+    {
+        var model = tab.Model;
+        if (model == null) return;
+        var menu = new ContextMenu();
+        var items = new List<Control>();
+        items.Add(new MenuItem { Header = "Zona horaria del gráfico", IsEnabled = false });
+        foreach (var mi in TimeZoneItems(model.Settings.TimeZoneId, id => ApplyTimeZone(tab, id, all: false))) items.Add(mi);
+        items.Add(new Separator());
+        var all = new MenuItem { Header = "Aplicar a todos los gráficos", Icon = Ui.Icon(MaterialIconKind.ViewGridOutline, 16) };
+        foreach (var mi in TimeZoneItems(model.Settings.TimeZoneId, id => ApplyTimeZone(tab, id, all: true))) all.Items.Add(mi);
+        items.Add(all);
+        items.Add(Item("Más zonas horarias (Ajustes)…", MaterialIconKind.CogOutline, () => (TopLevel.GetTopLevel(this) as MainWindow)?.Navigate("settings")));
+        menu.ItemsSource = items;
+        menu.Open(tab.View);
+    }
+
+    private static readonly (string Id, string Name)[] CommonTimeZones =
+    {
+        ("", "Hora de esta computadora"), ("UTC", "UTC"), ("Asia/Shanghai", "Shanghái / Pekín (UTC+8)"), ("Asia/Hong_Kong", "Hong Kong (UTC+8)"),
+        ("Asia/Singapore", "Singapur (UTC+8)"), ("Asia/Tokyo", "Tokio (UTC+9)"), ("Europe/London", "Londres"), ("Europe/Berlin", "Berlín / Madrid"),
+        ("America/New_York", "Nueva York"), ("America/Chicago", "Chicago"), ("America/Argentina/Buenos_Aires", "Buenos Aires (UTC-3)"),
+    };
+
+    private static IEnumerable<MenuItem> TimeZoneItems(string? current, Action<string?> pick)
+    {
+        foreach (var (id, name) in CommonTimeZones)
+        {
+            if (id != "" && !TimeZoneInfo.TryFindSystemTimeZoneById(id, out _)) continue;
+            bool on = (current ?? "") == id;
+            var mi = new MenuItem { Header = name, Icon = on ? Ui.Icon(MaterialIconKind.Check, 15, Ui.Accent) : null };
+            string? chosen = id == "" ? null : id;
+            mi.Click += (_, _) => pick(chosen);
+            yield return mi;
+        }
+    }
+
+    private void ApplyTimeZone(ChartTab tab, string? id, bool all)
+    {
+        if (all)
+        {
+            _svc.Settings.TimeZoneId = id;
+            _svc.Settings.Save();
+            foreach (var t in Tabs)
+            {
+                if (t.Model == null) continue;
+                t.Model.Settings.TimeZoneId = id;
+                t.Model.Invalidate();
+            }
+        }
+        else if (tab.Model != null)
+        {
+            tab.Model.Settings.TimeZoneId = id;
+            tab.Model.Invalidate();
+        }
+
+        Workspace.Save(this);
+    }
+
     private static MenuItem Item(string header, MaterialIconKind? icon, Action onClick)
     {
         var mi = new MenuItem { Header = header };

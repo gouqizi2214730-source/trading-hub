@@ -48,6 +48,9 @@ public sealed class ChartRenderState
 
     /// <summary>Rectángulo de zoom (Ctrl + arrastre): se amplía a lo que encierra al soltar.</summary>
     public SKRect? ZoomBox { get; set; }
+
+    /// <summary>Hora y zona horaria en la esquina del eje de tiempo (clic: elegir la zona horaria, como en TradingView).</summary>
+    public SKRect? TimeZoneButton { get; set; }
 }
 
 public enum LegendAction
@@ -126,7 +129,7 @@ public sealed class ChartRenderer
         if (model.Settings.ShowTradeMarks) DrawTradeMarks(canvas, model, layout);
         if (model.FocusTrade != null) DrawFocusTrade(canvas, model, layout, state);
         DrawTrading(canvas, model, layout, state);
-        DrawTimeAxis(canvas, model, layout, timeTicks);
+        DrawTimeAxis(canvas, model, layout, timeTicks, state);
         DrawPanelTitles(canvas, model, layout, state);
         if (model.Settings.ShowInfoPanel) DrawInfo(canvas, model, layout, state);
         if (state.Crosshair) DrawCrosshair(canvas, model, layout, state);
@@ -1209,7 +1212,7 @@ public sealed class ChartRenderer
         return res;
     }
 
-    private void DrawTimeAxis(SKCanvas canvas, ChartModel model, ChartLayout layout, List<(float X, string Text, bool Major)> ticks)
+    private void DrawTimeAxis(SKCanvas canvas, ChartModel model, ChartLayout layout, List<(float X, string Text, bool Major)> ticks, ChartRenderState state)
     {
         var t = model.Theme;
         var ax = layout.TimeAxis;
@@ -1226,6 +1229,22 @@ public sealed class ChartRenderer
             _text.Color = major ? t.Text : t.AxisText;
             canvas.DrawUiText(text, x - w / 2, ax.Top + 16, f, _text);
         }
+
+        // esquina: hora actual y zona horaria del gráfico (clic para cambiarla), como en TradingView
+        var tz = model.Settings.TimeZone;
+        var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz);
+        var off = tz.GetUtcOffset(DateTime.UtcNow);
+        string offText = off == TimeSpan.Zero ? "UTC" : $"UTC{(off < TimeSpan.Zero ? "-" : "+")}{(int)Math.Abs(off.TotalHours)}{(off.Minutes != 0 ? ":" + Math.Abs(off.Minutes).ToString("00") : "")}";
+        string label = $"{now:HH:mm} ({offText})";
+        float lw = RenderContext.MeasureWidth(font, label);
+        var corner = new SKRect(ax.Right + 4, ax.Top + 2, layout.Bounds.Right - 4, ax.Bottom - 2);
+        _text.Color = t.AxisText;
+        if (corner.Width >= lw + 6)
+        {
+            canvas.DrawUiText(label, corner.Right - lw - 3, ax.Top + 16, font, _text);
+            state.TimeZoneButton = new SKRect(corner.Right - lw - 6, corner.Top, corner.Right, corner.Bottom);
+        }
+        else state.TimeZoneButton = null;
     }
 
     // =================================================================== títulos, info y cursor

@@ -544,6 +544,7 @@ public sealed partial class TradingView : UserControl
             if (ov.Tag is ChartStrategy cs) RemoveStrategy(chart, cs);
         };
         view.IndicatorsChanged += () => Workspace.Save(this);
+        view.TimeZoneRequested += () => ShowTimeZoneMenu(chart);
         view.DrawingDoubleClicked += d => EditDrawing(chart, d);
         view.OrderDragged += (o, price) => _ = MoveOrderAsync(chart, o, price);
         view.BracketDropped += (d, price) => _ = OnBracketDroppedAsync(chart, d, price);
