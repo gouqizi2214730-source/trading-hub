@@ -15,3 +15,6 @@ build.local.env
 # indicadores de ATAS portados en tu copia (son de ATAS: no se suben)
 third_party/
 src/TradingHub.Indicators.Technical/Atas/
+
+# datos de la app creados por una corrida local (comprobación de arranque)
+/KVP/
