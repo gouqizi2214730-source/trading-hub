@@ -5,7 +5,36 @@ namespace TradingHub.Common;
 /// <summary>El nombre de la app y sus carpetas.</summary>
 public static class Product
 {
-    public const string Name = "Trading Hub";
+    /// <summary>Nombre de esta edición (la copia KVP del proyecto Trading Hub).</summary>
+    public const string Name = "KVP";
+
+    /// <summary>Nombre del proyecto original: los textos del código lo nombran y se cambian por <see cref="Name"/> al mostrarlos.</summary>
+    public const string UpstreamName = "Trading Hub";
+
+    /// <summary>El texto con el nombre de esta edición en lugar del original («Abrir Trading Hub» → «Abrir KVP»).</summary>
+    public static string Brand(string text) => text.Contains(UpstreamName, StringComparison.Ordinal) ? text.Replace(UpstreamName, Name, StringComparison.Ordinal) : text;
+
+    /// <summary>
+    /// Las carpetas de la edición anterior (%APPDATA%\Trading Hub, Documentos\Trading Hub) pasan a llamarse como esta
+    /// (una sola vez, al abrir, antes de usarlas): ajustes, conexiones, datos e indicadores siguen donde estaban.
+    /// </summary>
+    public static void MigrateFolders()
+    {
+        if (Name == UpstreamName) return;
+        foreach (var baseDir in new[] { Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) })
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(baseDir)) continue;
+                string old = Path.Combine(baseDir, UpstreamName), now = Path.Combine(baseDir, Name);
+                if (Directory.Exists(old) && !Directory.Exists(now)) Directory.Move(old, now);
+            }
+            catch
+            {
+                // sin permisos o en uso: se sigue con lo que haya (la carpeta nueva se crea vacía)
+            }
+        }
+    }
 
     /// <summary>La carpeta de la app dentro de <paramref name="baseDir"/>.</summary>
     public static string Folder(string baseDir) => Path.Combine(baseDir, Name);

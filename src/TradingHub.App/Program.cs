@@ -10,6 +10,7 @@ internal static class Program
         // modo laboratorio: Trading Hub como servidor MCP para Claude Code (sin ventanas)
         if (args.Contains("--mcp"))
         {
+            TradingHub.Common.Product.MigrateFolders();
             Environment.ExitCode = Lab.LabServer.RunAsync().GetAwaiter().GetResult();
             return;
         }
@@ -21,6 +22,8 @@ internal static class Program
             e.SetObserved();
         };
 
+        // las carpetas de la edición anterior (Trading Hub) pasan a llamarse KVP, antes de que nada las use
+        TradingHub.Common.Product.MigrateFolders();
         // una mudanza pendiente de la carpeta de la app (Ajustes → Datos) se termina antes de que nada la use
         Services.AppLocation.FinishPendingMove();
 

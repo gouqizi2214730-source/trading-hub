@@ -69,12 +69,12 @@ jobs:
           H="$RUNNER_TEMP/th-home"; rm -rf "$H"; mkdir -p "$H/.config"
           set +e
           (cd "$H" && HOME="$H" XDG_CONFIG_HOME="$H/.config" timeout 20 xvfb-run -a -s "-screen 0 1600x1000x24" \
-            dotnet "$GITHUB_WORKSPACE/src/TradingHub.App/bin/Release/net10.0/TradingHub.dll" > "$H/out.txt" 2>&1)
+            dotnet "$GITHUB_WORKSPACE/src/TradingHub.App/bin/Release/net10.0/KVP.dll" > "$H/out.txt" 2>&1)
           code=$?
           set -e
-          if [ "$code" != "124" ] || [ -f "$H/.config/Trading Hub/crash.log" ]; then
-            echo "::error::Trading Hub no arranca (salió con $code)"
-            tail -40 "$H/out.txt"; cat "$H/.config/Trading Hub/crash.log" 2>/dev/null || true
+          if [ "$code" != "124" ] || [ -f "$H/.config/KVP/crash.log" ]; then
+            echo "::error::KVP no arranca (salió con $code)"
+            tail -40 "$H/out.txt"; cat "$H/.config/KVP/crash.log" 2>/dev/null || true
             exit 1
           fi
           echo "Arranca bien"
@@ -90,17 +90,18 @@ jobs:
           V="${{ steps.v.outputs.version }}"
           UP=$(git rev-parse --short "${{ steps.v.outputs.sha }}")
           cat > notes.md <<EOF
-          Trading Hub $V para Windows (basada en la ${{ steps.v.outputs.base }} de [ralphtradesz/trading-hub](https://github.com/ralphtradesz/trading-hub), commit $UP).
+          KVP $V para Windows (basada en la ${{ steps.v.outputs.base }} de [ralphtradesz/trading-hub](https://github.com/ralphtradesz/trading-hub), commit $UP).
 
-          - **TradingHub-Setup-x64.exe**: PC con Intel o AMD (la mayoría).
-          - **TradingHub-Setup-arm64.exe**: Windows en ARM.
+          - **KVP-Setup-x64.exe**: PC con Intel o AMD (la mayoría).
+          - **KVP-Setup-arm64.exe**: Windows en ARM.
+          - Los `TradingHub-Setup-*.exe` son el mismo instalador con el nombre anterior (para que las Trading Hub ya instaladas se actualicen a KVP).
 
-          Si ya la tenés, Trading Hub te avisa sola (Ajustes → Actualizaciones) y se actualiza sin tocar tus datos.
+          Si ya la tenés, KVP te avisa sola (Ajustes → Actualizaciones) y se actualiza sin tocar tus datos.
           EOF
           sed -i 's/^          //' notes.md
           if gh release view "v$V" >/dev/null 2>&1; then
             gh release upload "v$V" dist/*.exe dist/*.sha256 --clobber
           else
             gh release create "v$V" dist/*.exe dist/*.sha256 --target "${{ steps.v.outputs.sha }}" \
-              --title "Trading Hub $V" --notes-file notes.md --latest
+              --title "KVP $V" --notes-file notes.md --latest
           fi

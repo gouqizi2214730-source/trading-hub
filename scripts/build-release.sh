@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the Windows installers of this fork (x64 and ARM64) from Linux, macOS or Git Bash on Windows.
+# Builds the Windows installers of KVP (x64 and ARM64) from Linux, macOS or Git Bash on Windows.
 #
 #   scripts/build-release.sh [VERSION] [ARCHES]
 #
@@ -39,7 +39,7 @@ for ARCH in $ARCHES; do
   echo "== publish win-$ARCH $VERSION (ReadyToRun=$R2R)"
   dotnet publish src/TradingHub.App/TradingHub.App.csproj -c Release -r "win-$ARCH" --self-contained true -o "$OUT" -v q \
     -p:Version="$VERSION" -p:PublishReadyToRun="$R2R"
-  SETUP="dist/TradingHub-Setup-$ARCH.exe"
+  SETUP="dist/KVP-Setup-$ARCH.exe"
   # lo que es del programa (para borrar solo eso al actualizar o desinstalar: nunca la carpeta entera, por si el usuario
   # guardó datos adentro)
   FILES="dist/files-$ARCH.nsh"
@@ -52,5 +52,8 @@ for ARCH in $ARCHES; do
   "$MAKENSIS" -V2 -DVERSION="$VERSION" -DVIVERSION="$VIVERSION" -DARCH="$ARCH" -DSRC="$PWD/$OUT" -DOUT="$PWD/$SETUP" \
     -DFILELIST="$PWD/$FILES" installer/TradingHub.nsi
   (cd dist && sha256sum "$(basename "$SETUP")" >"$(basename "$SETUP").sha256")
+  # con el nombre de la edición anterior: las Trading Hub ya instaladas buscan ese archivo para actualizarse a KVP
+  cp "$SETUP" "dist/TradingHub-Setup-$ARCH.exe"
+  (cd dist && sha256sum "TradingHub-Setup-$ARCH.exe" >"TradingHub-Setup-$ARCH.exe.sha256")
   echo "OK: $SETUP ($(du -h "$SETUP" | cut -f1))"
 done

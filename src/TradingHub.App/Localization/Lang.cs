@@ -118,7 +118,7 @@ public static class Lang
             Loose.Sort((a, b) => b.Literal.CompareTo(a.Literal));
         }
 
-        TradingHub.Rendering.UiText.Translate = Current == Spanish ? null : Translate;
+        TradingHub.Rendering.UiText.Translate = Current == Spanish && !Branding ? null : Translate;
         TradingHub.Common.UiCulture.Current = TradingHub.Common.UiCulture.For(Current);
     }
 
@@ -163,14 +163,30 @@ public static class Lang
     /// <summary>El texto en el idioma elegido (el mismo si está en español o no tiene traducción).</summary>
     public static string T(string text) => Translate(text) ?? text;
 
-    /// <summary>La traducción de un texto en español, o null si no tiene (o si el idioma es español).</summary>
+    /// <summary>Esta edición tiene otro nombre que el proyecto original: se cambia en todo lo que se muestra.</summary>
+    private static bool Branding => TradingHub.Common.Product.Name != TradingHub.Common.Product.UpstreamName;
+
+    /// <summary>La traducción de un texto en español (con el nombre de esta edición), o null si queda igual.</summary>
     public static string? Translate(string? text)
     {
-        if (Current == Spanish || string.IsNullOrEmpty(text) || Available.Any(a => a.Name == text)) return null;
+        if (string.IsNullOrEmpty(text) || Available.Any(a => a.Name == text)) return null;
+        if (Current == Spanish)
+        {
+            if (!Branding) return null;
+            var branded = TradingHub.Common.Product.Brand(text);
+            return ReferenceEquals(branded, text) ? null : branded;
+        }
+
         lock (Gate)
         {
             if (Cache.TryGetValue(text, out var cached)) return cached;
             var result = Find(text);
+            if (Branding)
+            {
+                var branded = TradingHub.Common.Product.Brand(result ?? text);
+                if (result != null || !ReferenceEquals(branded, text)) result = branded;
+            }
+
             // los textos con datos cambian siempre (precios, horas): el recuerdo no crece sin fin
             if (Cache.Count > 20_000) Cache.Clear();
             Cache[text] = result;
@@ -325,7 +341,7 @@ public static class Lang
     /// </summary>
     public static void Install()
     {
-        if (Current == Spanish) return;
+        if (Current == Spanish && !Branding) return;
         Hook<TextBlock>(TextBlock.TextProperty);
         Hook<Run>(Run.TextProperty);
         Hook<ContentControl>(ContentControl.ContentProperty);

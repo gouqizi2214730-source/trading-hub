@@ -88,8 +88,8 @@ public static class UpdateChecker
 
     /// <summary>El nombre del instalador para esta computadora.</summary>
     public static string InstallerAssetName => System.Runtime.InteropServices.RuntimeInformation.OSArchitecture == System.Runtime.InteropServices.Architecture.Arm64
-        ? "TradingHub-Setup-arm64.exe"
-        : "TradingHub-Setup-x64.exe";
+        ? "KVP-Setup-arm64.exe"
+        : "KVP-Setup-x64.exe";
 
     /// <summary>Busca en las dos fuentes. No tira excepciones: los problemas de red quedan en <see cref="Result.Error"/>.</summary>
     public static async Task<Result> CheckAsync(CancellationToken ct = default)

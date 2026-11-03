@@ -1,4 +1,4 @@
-﻿; Instalador de Trading Hub para Windows: por usuario (no pide permisos de administrador), con accesos en el menú
+﻿; Instalador de KVP (edición de Trading Hub) para Windows: por usuario (no pide permisos de administrador), con accesos en el menú
 ; Inicio y el escritorio, desinstalador en «Aplicaciones instaladas» y la opción de abrirla al terminar. Habla el idioma
 ; de Windows si es español o chino; si no, inglés (la app hace lo mismo la primera vez que se abre).
 ;
@@ -29,7 +29,7 @@ ${UnStrStr}
   !error "Falta -DSRC=<carpeta con TradingHub.exe publicado>"
 !endif
 !ifndef OUT
-  !define OUT "TradingHub-Setup-${ARCH}.exe"
+  !define OUT "KVP-Setup-${ARCH}.exe"
 !endif
 
 !ifndef FILELIST
@@ -47,24 +47,29 @@ ${UnStrStr}
   Delete "${DIR}\*.pdb"
   Delete "${DIR}\TradingHub.deps.json"
   Delete "${DIR}\TradingHub.runtimeconfig.json"
+  Delete "${DIR}\KVP.deps.json"
+  Delete "${DIR}\KVP.runtimeconfig.json"
   Delete "${DIR}\Desinstalar Trading Hub.exe"
+  Delete "${DIR}\Desinstalar KVP.exe"
   RMDir "${DIR}"
 !macroend
 
-!define NAME "Trading Hub"
-!define EXE "TradingHub.exe"
+!define NAME "KVP"
+!define EXE "KVP.exe"
+; la edición anterior se llamaba así: también se espera a que cierre y se borra
+!define OLDEXE "TradingHub.exe"
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\TradingHub"
 
 Name "${NAME}"
 OutFile "${OUT}"
 ; en su propia carpeta; actualizar y desinstalar borran solo los archivos del programa (ver RemoveProgram)
-InstallDir "$LOCALAPPDATA\Programs\Trading Hub"
+InstallDir "$LOCALAPPDATA\Programs\KVP"
 ; una actualización se instala donde ya estaba (la carpeta que se eligió la primera vez)
 InstallDirRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\TradingHub" "InstallLocation"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 ManifestDPIAware true
-BrandingText "Trading Hub ${VERSION}"
+BrandingText "KVP ${VERSION}"
 VIProductVersion "${VIVERSION}"
 VIAddVersionKey "ProductName" "${NAME}"
 VIAddVersionKey "FileDescription" "${NAME} Setup"
@@ -92,21 +97,21 @@ VIAddVersionKey "LegalCopyright" "MIT License with Commons Clause"
 !insertmacro MUI_LANGUAGE "Spanish"
 !insertmacro MUI_LANGUAGE "SimpChinese"
 
-LangString WelcomeText ${LANG_ENGLISH} "This installs Trading Hub ${VERSION} on your PC.$\r$\n$\r$\nIf you already have it, it gets updated: your connections, charts, strategies and indicators stay as they are.$\r$\n$\r$\nClick Install to continue."
-LangString WelcomeText ${LANG_SPANISH} "Esto instala Trading Hub ${VERSION} en tu PC.$\r$\n$\r$\nSi ya la tenés, se actualiza: tus conexiones, gráficos, estrategias e indicadores quedan como están.$\r$\n$\r$\nTocá Instalar para seguir."
-LangString WelcomeText ${LANG_SIMPCHINESE} "这将在你的电脑上安装 Trading Hub ${VERSION}。$\r$\n$\r$\n如果已经安装，会直接更新：你的连接、图表、策略和指标都保持不变。$\r$\n$\r$\n点击“安装”继续。"
+LangString WelcomeText ${LANG_ENGLISH} "This installs KVP ${VERSION} on your PC.$\r$\n$\r$\nIf you already have it, it gets updated: your connections, charts, strategies and indicators stay as they are.$\r$\n$\r$\nClick Install to continue."
+LangString WelcomeText ${LANG_SPANISH} "Esto instala KVP ${VERSION} en tu PC.$\r$\n$\r$\nSi ya la tenés, se actualiza: tus conexiones, gráficos, estrategias e indicadores quedan como están.$\r$\n$\r$\nTocá Instalar para seguir."
+LangString WelcomeText ${LANG_SIMPCHINESE} "这将在你的电脑上安装 KVP ${VERSION}。$\r$\n$\r$\n如果已经安装，会直接更新：你的连接、图表、策略和指标都保持不变。$\r$\n$\r$\n点击“安装”继续。"
 LangString NotWritable ${LANG_ENGLISH} "Can't write to this folder (it may need administrator permissions, like Program Files). Choose another folder, for example on D:\ or inside your user folder."
 LangString NotWritable ${LANG_SPANISH} "No se puede escribir en esta carpeta (puede pedir permisos de administrador, como Archivos de programa). Elegí otra, por ejemplo en D:\ o dentro de tu carpeta de usuario."
 LangString NotWritable ${LANG_SIMPCHINESE} "无法写入这个文件夹（可能需要管理员权限，比如 Program Files）。请换一个文件夹，例如 D:\ 盘或你的用户文件夹里。"
-LangString OpenApp ${LANG_ENGLISH} "Open Trading Hub"
-LangString OpenApp ${LANG_SPANISH} "Abrir Trading Hub"
-LangString OpenApp ${LANG_SIMPCHINESE} "打开 Trading Hub"
-LangString StillOpen ${LANG_ENGLISH} "Trading Hub is open. Close it (if you have trades or strategies running, leave them as you want first) and click Retry."
-LangString StillOpen ${LANG_SPANISH} "Trading Hub está abierta. Cerrala (si tenés operaciones o estrategias corriendo, primero dejalas como quieras) y tocá Reintentar."
-LangString StillOpen ${LANG_SIMPCHINESE} "Trading Hub 正在运行。请先关闭它（如果有交易或策略在运行，请先按你的需要处理好），然后点击“重试”。"
-LangString StillOpenUn ${LANG_ENGLISH} "Trading Hub is open. Close it and click Retry."
-LangString StillOpenUn ${LANG_SPANISH} "Trading Hub está abierta. Cerrala y tocá Reintentar."
-LangString StillOpenUn ${LANG_SIMPCHINESE} "Trading Hub 正在运行。请关闭它，然后点击“重试”。"
+LangString OpenApp ${LANG_ENGLISH} "Open KVP"
+LangString OpenApp ${LANG_SPANISH} "Abrir KVP"
+LangString OpenApp ${LANG_SIMPCHINESE} "打开 KVP"
+LangString StillOpen ${LANG_ENGLISH} "KVP is open. Close it (if you have trades or strategies running, leave them as you want first) and click Retry."
+LangString StillOpen ${LANG_SPANISH} "KVP está abierta. Cerrala (si tenés operaciones o estrategias corriendo, primero dejalas como quieras) y tocá Reintentar."
+LangString StillOpen ${LANG_SIMPCHINESE} "KVP 正在运行。请先关闭它（如果有交易或策略在运行，请先按你的需要处理好），然后点击“重试”。"
+LangString StillOpenUn ${LANG_ENGLISH} "KVP is open. Close it and click Retry."
+LangString StillOpenUn ${LANG_SPANISH} "KVP está abierta. Cerrala y tocá Reintentar."
+LangString StillOpenUn ${LANG_SIMPCHINESE} "KVP 正在运行。请关闭它，然后点击“重试”。"
 
 ; Si está abierta, Windows no deja reemplazar sus archivos: pide cerrarla (sin cerrarla a la fuerza, por si está operando)
 Function WaitClosed
@@ -116,7 +121,14 @@ Function WaitClosed
     Pop $1
     ${StrStr} $2 $1 "${EXE}"
     ${If} $2 == ""
-      ${Break}
+      ; la edición anterior (TradingHub.exe), si es una actualización desde ella
+      nsExec::ExecToStack 'tasklist /FI "IMAGENAME eq ${OLDEXE}" /NH'
+      Pop $0
+      Pop $1
+      ${StrStr} $2 $1 "${OLDEXE}"
+      ${If} $2 == ""
+        ${Break}
+      ${EndIf}
     ${EndIf}
     MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(StillOpen)" /SD IDCANCEL IDRETRY +2
     Abort
@@ -142,8 +154,9 @@ FunctionEnd
 ; administrador (la instalación es por usuario).
 Function CheckInstallDir
   ${GetFileName} "$INSTDIR" $1
-  ${If} $1 != "Trading Hub"
-    StrCpy $INSTDIR "$INSTDIR\Trading Hub"
+  ${If} $1 != "KVP"
+  ${AndIf} $1 != "Trading Hub"
+    StrCpy $INSTDIR "$INSTDIR\KVP"
   ${EndIf}
   ClearErrors
   CreateDirectory "$INSTDIR"
@@ -182,27 +195,30 @@ Function un.CleanInstallDir
   !insertmacro RemoveProgram "$INSTDIR"
 FunctionEnd
 
-Section "Trading Hub" SecMain
+Section "KVP" SecMain
   Call WaitClosed
   ; una actualización reemplaza los archivos del programa; lo demás que haya en la carpeta queda
   Call RemoveOldInstall
   Call CleanInstallDir
   SetOutPath "$INSTDIR"
   File /r "${SRC}\*.*"
-  WriteUninstaller "$INSTDIR\Desinstalar Trading Hub.exe"
+  WriteUninstaller "$INSTDIR\Desinstalar KVP.exe"
 
-  CreateShortcut "$SMPROGRAMS\Trading Hub.lnk" "$INSTDIR\${EXE}" "" "$INSTDIR\${EXE}" 0
-  CreateShortcut "$DESKTOP\Trading Hub.lnk" "$INSTDIR\${EXE}" "" "$INSTDIR\${EXE}" 0
+  ; accesos de la edición anterior
+  Delete "$SMPROGRAMS\Trading Hub.lnk"
+  Delete "$DESKTOP\Trading Hub.lnk"
+  CreateShortcut "$SMPROGRAMS\KVP.lnk" "$INSTDIR\${EXE}" "" "$INSTDIR\${EXE}" 0
+  CreateShortcut "$DESKTOP\KVP.lnk" "$INSTDIR\${EXE}" "" "$INSTDIR\${EXE}" 0
 
   WriteRegStr HKCU "${UNINSTKEY}" "DisplayName" "${NAME}"
   WriteRegStr HKCU "${UNINSTKEY}" "DisplayVersion" "${VERSION}"
-  WriteRegStr HKCU "${UNINSTKEY}" "Publisher" "Trading Hub"
+  WriteRegStr HKCU "${UNINSTKEY}" "Publisher" "KVP"
   WriteRegStr HKCU "${UNINSTKEY}" "URLInfoAbout" "https://github.com/gouqizi2214730-source/trading-hub"
   WriteRegStr HKCU "${UNINSTKEY}" "URLUpdateInfo" "https://github.com/gouqizi2214730-source/trading-hub/releases"
   WriteRegStr HKCU "${UNINSTKEY}" "DisplayIcon" "$INSTDIR\${EXE}"
   WriteRegStr HKCU "${UNINSTKEY}" "InstallLocation" "$INSTDIR"
-  WriteRegStr HKCU "${UNINSTKEY}" "UninstallString" '"$INSTDIR\Desinstalar Trading Hub.exe"'
-  WriteRegStr HKCU "${UNINSTKEY}" "QuietUninstallString" '"$INSTDIR\Desinstalar Trading Hub.exe" /S'
+  WriteRegStr HKCU "${UNINSTKEY}" "UninstallString" '"$INSTDIR\Desinstalar KVP.exe"'
+  WriteRegStr HKCU "${UNINSTKEY}" "QuietUninstallString" '"$INSTDIR\Desinstalar KVP.exe" /S'
   WriteRegDWORD HKCU "${UNINSTKEY}" "NoModify" 1
   WriteRegDWORD HKCU "${UNINSTKEY}" "NoRepair" 1
   ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
@@ -214,6 +230,8 @@ Section "Uninstall"
   Call un.WaitClosed
   Delete "$SMPROGRAMS\Trading Hub.lnk"
   Delete "$DESKTOP\Trading Hub.lnk"
+  Delete "$SMPROGRAMS\KVP.lnk"
+  Delete "$DESKTOP\KVP.lnk"
   Call un.CleanInstallDir
   DeleteRegKey HKCU "${UNINSTKEY}"
 SectionEnd
