@@ -71,7 +71,7 @@ public sealed class ChartTab
 
     public bool IsReplay => Model?.Data.Feed is ReplayFeed;
 
-    public string Caption => Model == null ? Symbol : $"{(IsReplay ? "▶ " : "")}{Symbol} · {Model.Period.DisplayName}";
+    public string Caption => Model == null ? Symbol : $"{(IsReplay ? "▶ " : "")}{(Model.Settings.BlindReplay ? "???" : Symbol)} · {Model.Period.DisplayName}";
 
     /// <summary>Estrategias puestas en este gráfico (como indicadores: visuales o ejecutando en una cuenta).</summary>
     public List<ChartStrategy> Strategies { get; } = new();
@@ -919,6 +919,7 @@ public sealed partial class TradingView : UserControl
     // ===================================================================== replay
 
     private readonly Border _replayBar = new() { IsVisible = false };
+    private Button? _replayReveal;
     private readonly ToggleButton _replayPlay = new() { Width = 34, Height = 30, Padding = new Thickness(0), HorizontalContentAlignment = HorizontalAlignment.Center };
     private readonly TextBlock _replayClock = new() { FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center, MinWidth = 150 };
     private readonly ProgressBar _replayProgress = new() { Minimum = 0, Maximum = 1, Height = 4, MinWidth = 160, VerticalAlignment = VerticalAlignment.Center };
@@ -944,7 +945,8 @@ public sealed partial class TradingView : UserControl
         });
 
         var badge = new Border { Child = Ui.H(6, Ui.Icon(MaterialIconKind.PlayCircleOutline, 15, Ui.Accent), new TextBlock { Text = "REPLAY", FontSize = 11, FontWeight = FontWeight.Bold }), Classes = { "pill" } };
-        var row = Ui.H(12, badge, _replayPlay, _replaySpeed, _replayClock, _replayProgress, Ui.H(6, Jump("+5 min", TimeSpan.FromMinutes(5)), Jump("+30 min", TimeSpan.FromMinutes(30)), Jump("+1 h", TimeSpan.FromHours(1))));
+        _replayReveal = BuildRevealButton();
+        var row = Ui.H(12, badge, _replayPlay, _replaySpeed, _replayClock, _replayProgress, Ui.H(6, Jump("+5 min", TimeSpan.FromMinutes(5)), Jump("+30 min", TimeSpan.FromMinutes(30)), Jump("+1 h", TimeSpan.FromHours(1))), _replayReveal);
         row.Margin = new Thickness(12, 8);
         _replayBar.Child = row;
         _replayBar.Background = Ui.Bg1;
@@ -962,7 +964,11 @@ public sealed partial class TradingView : UserControl
         _replayPlay.Content = Ui.Icon(r.Paused || r.IsFinished ? MaterialIconKind.Play : MaterialIconKind.Pause, 18);
         _replaySpeed?.Select(r.Speed);
         var local = TimeZoneInfo.ConvertTimeFromUtc(r.Clock, _active.Model.Settings.TimeZone);
-        _replayClock.Text = r.IsFinished ? "Terminado" : local.ToString("ddd dd/MM HH:mm:ss", TradingHub.Common.UiCulture.Current);
+        bool blind = _active.Model.Settings.BlindReplay;
+        if (_replayReveal != null) _replayReveal.IsVisible = blind;
+        _replayClock.Text = r.IsFinished ? "Terminado"
+            : blind ? $"D{(int)Math.Floor((r.Clock - _active.Model.Settings.BlindReplayStart).TotalDays) + 1} {local:HH:mm:ss}"
+            : local.ToString("ddd dd/MM HH:mm:ss", TradingHub.Common.UiCulture.Current);
         _replayProgress.Value = r.Progress;
     }
 
@@ -1395,6 +1401,7 @@ public sealed partial class TradingView : UserControl
 
         if (!mainVisible && !slowFrame && !AnyPanelFloating) return;
         if (++_replayTick % 10 == 0 && _replayBar.IsVisible | ActiveReplay != null) UpdateReplayBar();
+        if (_replayTick % 30 == 0 && _replayRuns.Count > 0) TickReplayRuns();
 
         var data = _dom.Dom?.Data;
         if (data != null && (data.Trades.Count != _lastTradeCount || !ReferenceEquals(data.Depth, _lastDepth)))

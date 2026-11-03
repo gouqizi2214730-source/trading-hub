@@ -48,6 +48,16 @@ public sealed class ChartSettings
     /// <summary>Nombre del instrumento arriba a la izquierda del gráfico (ya está en la barra; por defecto no).</summary>
     public bool ShowLegendTitle { get; set; }
 
+    /// <summary>
+    /// Replay a ciegas: no se muestran el instrumento ni las fechas (el eje de tiempo cuenta días desde el inicio), para
+    /// practicar sin saber qué mercado ni qué día es.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool BlindReplay { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public DateTime BlindReplayStart { get; set; }
+
     /// <summary>Valores de la vela (Ap, Máx, Mín, Cie, Vol, Δ) en la leyenda.</summary>
     public bool ShowLegendValues { get; set; } = true;
 

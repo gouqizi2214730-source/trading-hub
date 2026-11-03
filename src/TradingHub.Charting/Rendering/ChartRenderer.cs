@@ -1197,6 +1197,13 @@ public sealed class ChartRenderer
                 float x = layout.CenterX(i);
                 bool major = prevLocal != null && local.Date != prevLocal.Value.Date;
                 string text = major && chosen.Step < TimeSpan.FromDays(1) ? local.ToString("dd MMM", es) : local.ToString(chosen.Format, es);
+                if (model.Settings.BlindReplay)
+                {
+                    // a ciegas: «Día 3» en vez de la fecha; las horas sí se ven
+                    int dayN = (int)Math.Floor((series[i].Time - model.Settings.BlindReplayStart).TotalDays) + 1;
+                    text = chosen.Step >= TimeSpan.FromDays(1) || major ? $"D{dayN}" : local.ToString("HH:mm", es);
+                }
+
                 if (x - lastX >= 60 && prevBucket != long.MinValue)
                 {
                     res.Add((x, text, major));
@@ -1312,7 +1319,7 @@ public sealed class ChartRenderer
         if (settings.ShowLegendTitle)
         {
             _text.Color = t.Text;
-            string head = $"{model.Instrument.Symbol}  ·  {model.Period.DisplayName}  ·  {model.Instrument.Exchange}";
+            string head = settings.BlindReplay ? $"???  ·  {model.Period.DisplayName}" : $"{model.Instrument.Symbol}  ·  {model.Period.DisplayName}  ·  {model.Instrument.Exchange}";
             canvas.DrawUiText(head, x, y, title, _text);
             y += 17;
         }
