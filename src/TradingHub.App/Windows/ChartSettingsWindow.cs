@@ -77,7 +77,9 @@ internal sealed class ChartSettingsWindow : Window
             ColorRow("Cursor (cruz)", nameof(ChartTheme.Crosshair)),
             ColorRow("Etiqueta del cursor", nameof(ChartTheme.CrosshairLabelBack)),
             ColorRow("Inicio de sesión", nameof(ChartTheme.NewSession)),
-            Toggle("Marcar el inicio de cada sesión", () => _model.Settings.ShowSessionLines, v => _model.Settings.ShowSessionLines = v));
+            Toggle("Marcar el inicio de cada sesión", () => _model.Settings.ShowSessionLines, v => _model.Settings.ShowSessionLines = v),
+            Toggle("Mapa de calor de liquidez (libro de órdenes) detrás de las velas", () => _model.Settings.ShowLiquidityHeatmap, v => _model.Settings.ShowLiquidityHeatmap = v),
+            Percent("Opacidad del mapa de calor", () => _model.Settings.HeatmapOpacity, v => _model.Settings.HeatmapOpacity = v));
         Tab("Footprint",
             ColorRow("Bid (vendedores)", nameof(ChartTheme.Bid)),
             ColorRow("Ask (compradores)", nameof(ChartTheme.Ask)),
@@ -215,6 +217,23 @@ internal sealed class ChartSettingsWindow : Window
         _model.ApplyColors();
         Workspace.Save(_host);
         foreach (var r in _refreshers) r();
+    }
+
+    private Control Percent(string label, Func<int> get, Action<int> set)
+    {
+        var slider = new Slider { Minimum = 0, Maximum = 100, Width = 180, Value = get(), TickFrequency = 5 };
+        var text = new TextBlock { Text = get() + " %", FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Foreground = Ui.Text2, Width = 40 };
+        slider.PropertyChanged += (_, e) =>
+        {
+            if (e.Property != Avalonia.Controls.Primitives.RangeBase.ValueProperty) return;
+            int v = (int)Math.Round(slider.Value);
+            text.Text = v + " %";
+            set(v);
+            _model.Invalidate();
+            Workspace.Save(_host);
+        };
+        _refreshers.Add(() => slider.Value = get());
+        return Ui.H(10, new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center }, slider, text);
     }
 
     private Control Toggle(string label, Func<bool> get, Action<bool> set)

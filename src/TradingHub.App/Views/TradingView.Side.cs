@@ -1098,6 +1098,16 @@ public sealed partial class TradingView
             Workspace.Save(this);
         };
         items.Add(sessionLines);
+        var heat = new MenuItem { Header = "Mapa de calor de liquidez (libro)", Icon = model.Settings.ShowLiquidityHeatmap ? Ui.Icon(MaterialIconKind.Check, 15, Ui.Accent) : Ui.Icon(MaterialIconKind.Fire, 16) };
+        heat.Click += (_, _) =>
+        {
+            model.Settings.ShowLiquidityHeatmap = !model.Settings.ShowLiquidityHeatmap;
+            model.Invalidate();
+            Workspace.Save(this);
+            if (model.Settings.ShowLiquidityHeatmap && model.Data.Liquidity.Count == 0)
+                _status("Mapa de calor: se va pintando con las fotos del libro de órdenes que llegan en vivo (y las guardadas de las últimas horas).");
+        };
+        items.Add(heat);
         items.Add(Item("Restablecer vista (Alt+R)", MaterialIconKind.Restore, () => model.ResetView()));
         var replay = new MenuItem { Header = "Replay aleatorio (práctica)", Icon = Ui.Icon(MaterialIconKind.Dice5Outline, 16) };
         replay.Items.Add(Item("Al azar, viendo el instrumento y la fecha", MaterialIconKind.PlayCircleOutline, () => _ = OpenRandomReplayAsync(blind: false)));

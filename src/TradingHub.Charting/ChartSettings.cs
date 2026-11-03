@@ -43,6 +43,12 @@ public sealed class ChartSettings
 
     public bool ShowGrid { get; set; } = true;
     public bool ShowSessionLines { get; set; } = true;
+
+    /// <summary>Mapa de calor de liquidez (fotos del libro de órdenes) detrás de las velas.</summary>
+    public bool ShowLiquidityHeatmap { get; set; }
+
+    /// <summary>Opacidad del mapa de calor (0-100).</summary>
+    public int HeatmapOpacity { get; set; } = 75;
     public bool ShowInfoPanel { get; set; } = true;
 
     /// <summary>Nombre del instrumento arriba a la izquierda del gráfico (ya está en la barra; por defecto no).</summary>

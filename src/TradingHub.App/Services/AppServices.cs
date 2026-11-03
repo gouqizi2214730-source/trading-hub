@@ -180,6 +180,12 @@ public sealed class AppSettings
     /// <summary>Sin compras / ventas del exchange, el delta de las velas de historia se estima por la forma de la vela.</summary>
     public bool EstimateDeltaFromShape { get; set; } = true;
 
+    /// <summary>Guardar fotos del libro de órdenes (cada 2 s) para el mapa de calor de liquidez y el delta del libro.</summary>
+    public bool RecordLiquidity { get; set; } = true;
+
+    /// <summary>Horas de libro que se mantienen en memoria para el mapa de calor.</summary>
+    public int LiquidityHours { get; set; } = 12;
+
     // velas automáticas: historia en velas bajada y al día en segundo plano (ver KlineKeeper)
     public bool KlineKeepEnabled { get; set; }
     public bool KlineKeepAuto { get; set; } = true;
@@ -433,6 +439,10 @@ public sealed class AppServices
         Hub.CompactRoot = AppPaths.TicksCompact;
         Hub.CompactMinutes = TradingHub.Data.CompactHistory.Granularities.Contains(Settings.CompactMinutes) ? Settings.CompactMinutes : 1;
         KlineHistory.CacheRoot = AppPaths.Klines;
+        // fotos del libro de órdenes (mapa de calor de liquidez), junto a los datos de mercado
+        TradingHub.Data.LiquidityHistory.Root = DataLocation.Root;
+        TradingHub.Data.LiquidityHistory.Enabled = Settings.RecordLiquidity;
+        TradingHub.Data.LiquidityHistory.KeepHours = Math.Clamp(Settings.LiquidityHours, 1, 72);
         // resultados ya calculados de los indicadores (junto a los datos de mercado: sobreviven a actualizaciones)
         TradingHub.Indicators.ResultCache.Root = Path.Combine(DataLocation.Root, "IndicatorCache");
         // TRADINGHUB_LIVE_DIR: cartera alternativa (pruebas)

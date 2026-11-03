@@ -699,6 +699,15 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
 
     public IndicatorCandle GetCandle(int bar) => _wrappers[Math.Clamp(bar, 0, _wrappers.Count - 1)];
 
+    /// <summary>Fotos del libro durante una vela (de la historia de liquidez del instrumento).</summary>
+    public IReadOnlyList<DepthSample> GetDepthSamples(int bar)
+    {
+        if (bar < 0 || bar >= Series.Count || Data.Liquidity.Count == 0) return Array.Empty<DepthSample>();
+        var from = Series[bar].Time;
+        var to = bar + 1 < Series.Count ? Series[bar + 1].Time : Period.IsTimeBased ? from + Period.ApproxDuration : DateTime.MaxValue;
+        return Data.Liquidity.Between(from, to);
+    }
+
     /// <summary>Niveles al tick de una vela: con las filas del gráfico en 1 tick son los de la vela; si no, se arman de las operaciones.</summary>
     public IEnumerable<PriceVolumeInfo> GetTickLevels(int bar)
     {

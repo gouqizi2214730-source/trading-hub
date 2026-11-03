@@ -30,11 +30,15 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         Instrument = instrument;
         Feed = feed;
         Trades = new TradeStore(instrument);
+        Liquidity = new LiquidityHistory(instrument);
     }
 
     public Instrument Instrument { get; }
     public IMarketDataFeed Feed { get; }
     public TradeStore Trades { get; }
+
+    /// <summary>Fotos del libro de órdenes (mapa de calor de liquidez, delta del libro).</summary>
+    public LiquidityHistory Liquidity { get; }
 
     // velas ya armadas por período y paso de precio: cambiar de 1h a 4h y volver no vuelve a recorrer millones de
     // operaciones (se comparten entre los gráficos del mismo instrumento; se tiran si se reemplaza la historia)
@@ -132,6 +136,7 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
 
         if (Feed.IsLive && RecordingRoot != null && RecordLive)
             _recorder = new TickRecorder(RecordingRoot, Instrument);
+        if (Feed.IsLive && LiquidityHistory.Root != null) Task.Run(Liquidity.Load);
 
         // 1) vivo primero (se acumula mientras carga la historia)
         try
@@ -800,6 +805,7 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         _subscription = null;
         _recorder?.Dispose();
         _recorder = null;
+        Liquidity.Close();
     }
 
     private static IEnumerable<DateOnly> EachDay(DateTime fromUtc, DateTime toUtc)
@@ -937,6 +943,7 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
             while (_depthChanges.TryDequeue(out var c)) changes.Add(c);
             bool full = _depthFull;
             _depthFull = false;
+            Liquidity.Sample(depth, persist: Feed.IsLive && RecordLive);
             DepthUpdated?.Invoke(new DepthUpdate { Snapshot = depth, Changes = changes, IsFullRefresh = full });
         }
     }

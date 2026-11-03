@@ -16,7 +16,7 @@ namespace TradingHub.App.Services;
 public static class AppLocation
 {
     private const string ScriptsFile = "carpetas.json";
-    private static readonly string[] MarketFolders = { "Ticks", "Klines", "TicksCompact", "IndicatorCache" };
+    private static readonly string[] MarketFolders = { "Ticks", "Klines", "TicksCompact", "IndicatorCache", "Liquidez" };
 
     private sealed class Pointer
     {

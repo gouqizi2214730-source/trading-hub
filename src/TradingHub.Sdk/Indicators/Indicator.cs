@@ -52,6 +52,12 @@ namespace TradingHub.Indicators
         /// perfiles y POC que tienen que dar lo mismo en cualquier período y con cualquier paso de precio.
         /// </summary>
         IEnumerable<PriceVolumeInfo> GetTickLevels(int bar) => GetCandle(bar).GetAllPriceLevels();
+
+        /// <summary>
+        /// Fotos del libro de órdenes tomadas durante una vela (las que guarda el mapa de calor de liquidez: cada pocos
+        /// segundos mientras el gráfico estuvo abierto). Vacío si no hay ninguna.
+        /// </summary>
+        IReadOnlyList<TradingHub.Data.DepthSample> GetDepthSamples(int bar) => Array.Empty<TradingHub.Data.DepthSample>();
     }
 
     /// <summary>Argumento de RedrawChart.</summary>
@@ -416,6 +422,9 @@ namespace TradingHub.Indicators
 
         /// <summary>Niveles de la vela al tick (ver <see cref="IIndicatorHost.GetTickLevels"/>).</summary>
         public IEnumerable<PriceVolumeInfo> GetTickLevels(int bar) => Host?.GetTickLevels(bar) ?? Array.Empty<PriceVolumeInfo>();
+
+        /// <summary>Fotos del libro de órdenes durante la vela (ver <see cref="IIndicatorHost.GetDepthSamples"/>).</summary>
+        public IReadOnlyList<TradingHub.Data.DepthSample> GetDepthSamples(int bar) => Host?.GetDepthSamples(bar) ?? Array.Empty<TradingHub.Data.DepthSample>();
 
         public IndicatorCandle GetCandle(int bar)
         {

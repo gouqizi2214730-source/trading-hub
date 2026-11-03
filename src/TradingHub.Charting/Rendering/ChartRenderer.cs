@@ -78,6 +78,7 @@ public sealed record BracketHandle(SKRect Rect, BracketDrag Drag, bool IsButton)
 public sealed class ChartRenderer
 {
     private readonly FootprintRenderer _footprint = new();
+    private readonly LiquidityHeatmapRenderer _heatmap = new();
     private readonly CandleRenderer _candles = new();
     private readonly SeriesRenderer _series = new();
     private readonly SKPaint _fill = new() { IsAntialias = false, Style = SKPaintStyle.Fill };
@@ -295,6 +296,7 @@ public sealed class ChartRenderer
     private void DrawMainPanel(SKCanvas canvas, ChartModel model, ChartLayout layout, PanelLayout main, List<AxisLabel> axisLabels)
     {
         var slots = model.Indicators.Where(s => s.Panel == null).ToList();
+        if (model.Settings.ShowLiquidityHeatmap) _heatmap.Render(canvas, model, layout, main);
         if (model.Settings.ShowSessionLines) DrawSessionLines(canvas, model, layout, main);
 
         _series.RenderBands(canvas, layout, main, slots);

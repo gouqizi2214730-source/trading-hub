@@ -1266,6 +1266,8 @@ public sealed partial class TradingView : UserControl
             m.Settings.Colors = src.Settings.Colors == null ? null : new Dictionary<string, uint>(src.Settings.Colors);
             m.Settings.ShowGrid = src.Settings.ShowGrid;
             m.Settings.ShowSessionLines = src.Settings.ShowSessionLines;
+            m.Settings.ShowLiquidityHeatmap = src.Settings.ShowLiquidityHeatmap;
+            m.Settings.HeatmapOpacity = src.Settings.HeatmapOpacity;
             m.Settings.ShowLastPriceLine = src.Settings.ShowLastPriceLine;
             m.Settings.ShowInfoPanel = src.Settings.ShowInfoPanel;
             m.Settings.ShowTradeMarks = src.Settings.ShowTradeMarks;
