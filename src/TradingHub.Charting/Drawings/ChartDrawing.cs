@@ -20,6 +20,8 @@ public enum DrawingKind
     Ruler,
     LongPosition,
     ShortPosition,
+    AnchoredVwap,
+    FixedRangeProfile,
 }
 
 public enum LineStyleKind
@@ -110,6 +112,22 @@ public sealed class ChartDrawing
 
     public decimal RiskPercent { get; set; } = 1;
 
+    /// <summary>VWAP anclado: bandas de desvío (× σ, 0 = sin banda).</summary>
+    public double Band1 { get; set; } = 1;
+    public double Band2 { get; set; }
+
+    /// <summary>Perfil de rango fijo: filas (0 = una por tick), área de valor, ancho (% del rango) y ajuste a sesiones enteras.</summary>
+    public int ProfileRows { get; set; } = 120;
+    public int ValueAreaPercent { get; set; } = 70;
+    public int ProfileWidthPercent { get; set; } = 60;
+    public bool SnapToSessions { get; set; }
+    public bool ShowValueArea { get; set; } = true;
+    public bool ShowDeltaProfile { get; set; }
+
+    /// <summary>Cálculo sobre las operaciones (VWAP anclado y perfil): se rehace solo cuando hace falta.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public TradeDrawingCalc Calc { get; } = new();
+
     /// <summary>Cantidad que usa la posición: la que sale del riesgo (si hay cuenta) o la escrita.</summary>
     public decimal EffectiveQuantity(decimal volumeStep = 0)
     {
@@ -142,7 +160,7 @@ public sealed class ChartDrawing
     public int RequiredPoints => Kind switch
     {
         DrawingKind.HorizontalLine or DrawingKind.HorizontalRay or DrawingKind.VerticalLine or DrawingKind.Text => 1,
-        DrawingKind.LongPosition or DrawingKind.ShortPosition => 1,
+        DrawingKind.LongPosition or DrawingKind.ShortPosition or DrawingKind.AnchoredVwap => 1,
         _ => 2,
     };
 
@@ -165,6 +183,8 @@ public sealed class ChartDrawing
         DrawingKind.Ruler => "Regla",
         DrawingKind.LongPosition => "Posición larga",
         DrawingKind.ShortPosition => "Posición corta",
+        DrawingKind.AnchoredVwap => "VWAP anclado",
+        DrawingKind.FixedRangeProfile => "Perfil de rango fijo",
         _ => k.ToString(),
     };
 
@@ -200,6 +220,14 @@ public sealed class ChartDrawing
         Quantity = src.Quantity;
         AccountSize = src.AccountSize;
         RiskPercent = src.RiskPercent;
+        Band1 = src.Band1;
+        Band2 = src.Band2;
+        ProfileRows = src.ProfileRows;
+        ValueAreaPercent = src.ValueAreaPercent;
+        ProfileWidthPercent = src.ProfileWidthPercent;
+        SnapToSessions = src.SnapToSessions;
+        ShowValueArea = src.ShowValueArea;
+        ShowDeltaProfile = src.ShowDeltaProfile;
     }
 
     // ------------------------------------------------------------------ posición larga/corta
@@ -233,6 +261,13 @@ public sealed class ChartDrawing
                     break;
             }
 
+            return;
+        }
+
+        if (Kind == DrawingKind.FixedRangeProfile && handle >= 0 && handle < Points.Count)
+        {
+            // solo se mueve en el tiempo (el precio del punto no cuenta)
+            Points[handle] = new ChartPoint(p.Time, Points[handle].Price);
             return;
         }
 
@@ -332,7 +367,10 @@ public sealed class ChartDrawing
         _ => null,
     };
 
-    public void Render(SKCanvas canvas, ChartLayout layout, CandleSeries series, ChartTheme theme, int decimals)
+    public void Render(SKCanvas canvas, ChartLayout layout, CandleSeries series, ChartTheme theme, int decimals) =>
+        Render(canvas, layout, series, theme, decimals, null);
+
+    public void Render(SKCanvas canvas, ChartLayout layout, CandleSeries series, ChartTheme theme, int decimals, TradeStore? trades)
     {
         if (Points.Count == 0 || !IsVisibleOn(series.Period)) return;
         var main = layout.Main;
@@ -464,6 +502,12 @@ public sealed class ChartDrawing
             case DrawingKind.ShortPosition:
                 RenderPosition(canvas, layout, series, theme, decimals, font);
                 break;
+            case DrawingKind.AnchoredVwap:
+                if (trades != null) RenderAnchoredVwap(canvas, layout, series, trades, theme, decimals, font, stroke);
+                break;
+            case DrawingKind.FixedRangeProfile:
+                if (trades != null) RenderFixedRangeProfile(canvas, layout, series, trades, theme, decimals, font, stroke);
+                break;
         }
 
         if (Selected)
@@ -555,6 +599,151 @@ public sealed class ChartDrawing
         else DrawBox(canvas, font, cx, yE - boxH / 2, midCol, mid);
     }
 
+    // ------------------------------------------------------------------ VWAP anclado y perfil de rango fijo
+
+    private readonly List<SKPoint> _vwapPath = new();
+    private SKRect? _profileRect;
+
+    /// <summary>El VWAP desde el ancla (al tick, desde las operaciones) con sus bandas, como línea vela a vela.</summary>
+    private void RenderAnchoredVwap(SKCanvas canvas, ChartLayout layout, CandleSeries series, TradeStore trades, ChartTheme theme, int decimals, SKFont font, SKPaint stroke)
+    {
+        _vwapPath.Clear();
+        var main = layout.Main;
+        var (firstBar, bars) = Calc.AnchoredVwap(trades, series, Points[0].Time);
+        if (bars.Count == 0) return;
+        int from = Math.Max(firstBar, layout.FirstVisible - 1), to = Math.Min(firstBar + bars.Count - 1, Math.Min(series.Count - 1, layout.LastVisible + 1));
+        var up1 = new List<SKPoint>();
+        var dn1 = new List<SKPoint>();
+        var up2 = new List<SKPoint>();
+        var dn2 = new List<SKPoint>();
+        for (int b = Math.Max(firstBar, 0); b <= firstBar + bars.Count - 1 && b < series.Count; b++)
+        {
+            var (v, sd) = bars[b - firstBar];
+            if (float.IsNaN(v)) continue;
+            float x = layout.CenterX(b);
+            _vwapPath.Add(new SKPoint(x, main.Y(v)));
+            if (b < from || b > to) continue;
+            if (Band1 > 0)
+            {
+                up1.Add(new SKPoint(x, main.Y(v + sd * Band1)));
+                dn1.Add(new SKPoint(x, main.Y(v - sd * Band1)));
+            }
+
+            if (Band2 > 0)
+            {
+                up2.Add(new SKPoint(x, main.Y(v + sd * Band2)));
+                dn2.Add(new SKPoint(x, main.Y(v - sd * Band2)));
+            }
+        }
+
+        using var band = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = Math.Max(1, Width - 0.5f), Color = Color.WithAlpha(120), PathEffect = SKPathEffect.CreateDash(new[] { 5f, 4f }, 0) };
+        using var fill = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill, Color = FillArgb != 0 ? new SKColor(FillArgb) : Color.WithAlpha(18) };
+        void Band(List<SKPoint> up, List<SKPoint> dn)
+        {
+            if (up.Count < 2) return;
+            using var path = new SKPath();
+            path.MoveTo(up[0]);
+            for (int i = 1; i < up.Count; i++) path.LineTo(up[i]);
+            for (int i = dn.Count - 1; i >= 0; i--) path.LineTo(dn[i]);
+            path.Close();
+            canvas.DrawPath(path, fill);
+            canvas.DrawPoints(SKPointMode.Polygon, up.ToArray(), band);
+            canvas.DrawPoints(SKPointMode.Polygon, dn.ToArray(), band);
+        }
+
+        Band(up2, dn2);
+        Band(up1, dn1);
+        // la línea solo en lo visible
+        var visible = _vwapPath.Where(p => p.X >= main.Rect.Left - 50 && p.X <= main.Rect.Right + 50).ToArray();
+        if (visible.Length >= 2) canvas.DrawPoints(SKPointMode.Polygon, visible, stroke);
+        else if (visible.Length == 1) canvas.DrawCircle(visible[0], 2, stroke);
+
+        // ancla y etiqueta con el valor actual
+        float xa = XOf(layout, series, Points[0].Time);
+        float ya = _vwapPath.Count > 0 ? _vwapPath[0].Y : main.Y(Points[0].Price);
+        canvas.DrawLine(xa, main.Rect.Top, xa, main.Rect.Bottom, band);
+        var (last, lastSd) = bars[^1];
+        if (!float.IsNaN(last))
+        {
+            string label = $"{UiText.Tr("VWAP anclado")} {Format(last, decimals)}" + (string.IsNullOrEmpty(Text) ? "" : " · " + Text);
+            DrawBox(canvas, font, Math.Clamp(_vwapPath[^1].X, main.Rect.Left + 60, main.Rect.Right - 60), _vwapPath[^1].Y - font.Spacing - 12, Color, label);
+        }
+    }
+
+    /// <summary>Perfil de volumen de las operaciones entre los dos puntos (ajustable a sesiones enteras): POC, VAH y VAL.</summary>
+    private void RenderFixedRangeProfile(SKCanvas canvas, ChartLayout layout, CandleSeries series, TradeStore trades, ChartTheme theme, int decimals, SKFont font, SKPaint stroke)
+    {
+        _profileRect = null;
+        if (Points.Count < 2) return;
+        var main = layout.Main;
+        var (from, to) = (Points[0].Time, Points[1].Time);
+        if (to < from) (from, to) = (to, from);
+        if (SnapToSessions)
+        {
+            // el rango abarca sesiones enteras: desde el inicio de la sesión del primer punto hasta el fin de la del segundo
+            from = series.Session.SessionStartUtc(series.Session.SessionDate(from));
+            to = series.Session.SessionStartUtc(series.Session.SessionDate(to).AddDays(1));
+        }
+
+        var r = Calc.FixedRangeProfile(trades, series.Instrument, from, to, ProfileRows, ValueAreaPercent);
+        float x0 = XOf(layout, series, from), x1 = XOf(layout, series, to);
+        using var edge = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1, Color = Color.WithAlpha(140), PathEffect = SKPathEffect.CreateDash(new[] { 4f, 3f }, 0) };
+        canvas.DrawLine(x0, main.Rect.Top, x0, main.Rect.Bottom, edge);
+        canvas.DrawLine(x1, main.Rect.Top, x1, main.Rect.Bottom, edge);
+        if (r == null || r.MaxVolume <= 0) return;
+
+        float yTop = main.Y((double)(r.High + series.Instrument.TickSize)), yBot = main.Y((double)r.Low);
+        _profileRect = new SKRect(Math.Min(x0, x1), yTop, Math.Max(x0, x1), yBot);
+        float maxW = Math.Max(4, (x1 - x0) * Math.Clamp(ProfileWidthPercent, 5, 100) / 100f);
+        using var fill = new SKPaint { IsAntialias = false, Style = SKPaintStyle.Fill };
+        var baseColor = FillArgb != 0 ? new SKColor(FillArgb) : Color.WithAlpha(90);
+        decimal tick = series.Instrument.TickSize;
+        foreach (var (row, v) in r.Rows)
+        {
+            decimal vol = v.Bid + v.Ask;
+            float yr0 = main.Y((double)(row + r.RowSize)), yr1 = main.Y((double)row);
+            float h = Math.Max(1, yr1 - yr0 - (yr1 - yr0 > 3 ? 1 : 0));
+            bool inVa = row >= r.Val && row <= r.Vah;
+            if (ShowDeltaProfile)
+            {
+                decimal d = v.Ask - v.Bid;
+                float w = (float)(maxW * (double)Math.Abs(d) / (double)r.MaxVolume);
+                fill.Color = (d >= 0 ? theme.UpCandle : theme.DownCandle).WithAlpha(inVa ? (byte)150 : (byte)90);
+                canvas.DrawRect(new SKRect(x0, yr0, x0 + Math.Max(1, w), yr0 + h), fill);
+            }
+            else
+            {
+                float w = (float)(maxW * (double)vol / (double)r.MaxVolume);
+                fill.Color = row == r.Poc ? new SKColor(255, 196, 0, 220) : inVa ? baseColor.WithAlpha((byte)Math.Min(255, baseColor.Alpha + 60)) : baseColor;
+                canvas.DrawRect(new SKRect(x0, yr0, x0 + Math.Max(1, w), yr0 + h), fill);
+            }
+        }
+
+        // POC, VAH, VAL hasta el final del rango
+        float yPoc = main.Y((double)(r.Poc + r.RowSize / 2));
+        using var poc = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = Selected ? Width + 1 : Width, Color = new SKColor(255, 196, 0) };
+        canvas.DrawLine(x0, yPoc, x1, yPoc, poc);
+        if (ShowValueArea)
+        {
+            float yVah = main.Y((double)(r.Vah + tick)), yVal = main.Y((double)r.Val);
+            canvas.DrawLine(x0, yVah, x1, yVah, stroke);
+            canvas.DrawLine(x0, yVal, x1, yVal, stroke);
+        }
+
+        using var text = new SKPaint { IsAntialias = true, Color = TextArgb != 0 ? new SKColor(TextArgb) : SKColors.White };
+        string title = (string.IsNullOrEmpty(Text) ? UiText.Tr("Perfil") : Text) + $" · POC {Format((double)r.Poc, decimals)} · VA {Format((double)r.Val, decimals)}–{Format((double)r.Vah, decimals)} · {UiText.Tr("Vol")} {FormatVolume(r.Total)}";
+        canvas.DrawUiText(title, Math.Max(x0, main.Rect.Left) + 4, Math.Max(yTop, main.Rect.Top) - 4, font, text);
+    }
+
+    private static string FormatVolume(decimal v)
+    {
+        decimal a = Math.Abs(v);
+        return a >= 1_000_000_000m ? (a / 1_000_000_000m).ToString("0.##", CultureInfo.InvariantCulture) + "B"
+            : a >= 1_000_000m ? (a / 1_000_000m).ToString("0.##", CultureInfo.InvariantCulture) + "M"
+            : a >= 1_000m ? (a / 1_000m).ToString("0.##", CultureInfo.InvariantCulture) + "K"
+            : a.ToString(a >= 10 ? "0" : "0.##", CultureInfo.InvariantCulture);
+    }
+
     /// <summary>Cajita oscura con una o más líneas de texto, centrada en <paramref name="cx"/>.</summary>
     private static void DrawBox(SKCanvas canvas, SKFont font, float cx, float top, SKColor color, params string[] lines)
     {
@@ -631,6 +820,22 @@ public sealed class ChartDrawing
             yield break;
         }
 
+        if (Kind == DrawingKind.FixedRangeProfile && Points.Count >= 2)
+        {
+            // los bordes del rango, a media altura de lo que ocupa el perfil
+            float ym = _profileRect is { } pr ? pr.MidY : (main.Y(Points[0].Price) + main.Y(Points[1].Price)) / 2;
+            yield return (XOf(layout, series, Points[0].Time), ym);
+            yield return (XOf(layout, series, Points[1].Time), ym);
+            yield break;
+        }
+
+        if (Kind == DrawingKind.AnchoredVwap)
+        {
+            float ya = _vwapPath.Count > 0 ? _vwapPath[0].Y : main.Y(Points[0].Price);
+            yield return (XOf(layout, series, Points[0].Time), ya);
+            yield break;
+        }
+
         for (int i = 0; i < Points.Count; i++)
         {
             float x = Kind == DrawingKind.HorizontalLine ? (main.Rect.Left + main.Rect.Right) / 2 : XOf(layout, series, Points[i].Time);
@@ -694,6 +899,19 @@ public sealed class ChartDrawing
             }
             case DrawingKind.Text:
                 return Math.Abs(x - x0 - 20) <= 30 && Math.Abs(y - y0 + 6) <= 10 + FontSize / 2;
+            case DrawingKind.AnchoredVwap:
+            {
+                // cerca de la línea del VWAP (los valores calculados en el último dibujo)
+                if (_vwapPath.Count < 2 || x < x0 - tol) return false;
+                for (int i = 1; i < _vwapPath.Count; i++)
+                    if (DistanceToSegment(x, y, _vwapPath[i - 1].X, _vwapPath[i - 1].Y, _vwapPath[i].X, _vwapPath[i].Y, false) <= tol) return true;
+                return false;
+            }
+            case DrawingKind.FixedRangeProfile:
+            {
+                if (_profileRect is not { } pr) return new SKRect(Math.Min(x0, x1) - tol, plot.Top, Math.Max(x0, x1) + tol, plot.Bottom).Contains(x, y);
+                return new SKRect(pr.Left - tol, pr.Top - tol, pr.Right + tol, pr.Bottom + tol).Contains(x, y);
+            }
             default:
             {
                 bool left = Kind == DrawingKind.ExtendedLine || (Kind == DrawingKind.TrendLine && ExtendLeft);

@@ -317,7 +317,7 @@ public sealed class ChartRenderer
         _series.RenderDrawingObjects(canvas, model, layout, main, slots);
 
         int decimals = Instrument_Decimals(model);
-        foreach (var d in model.Drawings) d.Render(canvas, layout, model.Series, model.Theme, decimals);
+        foreach (var d in model.Drawings) d.Render(canvas, layout, model.Series, model.Theme, decimals, model.Data.Trades);
 
         if (model.Settings.ShowLastPriceLine && model.Series.Count > 0)
         {

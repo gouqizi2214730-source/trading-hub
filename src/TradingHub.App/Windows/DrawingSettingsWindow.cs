@@ -30,6 +30,7 @@ public sealed class DrawingSettingsWindow : Window
     private readonly ChartPeriod _period;
     private readonly Action _changed;
     private readonly AppServices _svc;
+    private TimeZoneInfo _tz => _svc.Settings.TimeZoneId is { Length: > 0 } id && TimeZoneInfo.TryFindSystemTimeZoneById(id, out var z) ? z : TimeZoneInfo.Local;
 
     /// <param name="changed">Se llama en cada cambio (redibujar y guardar).</param>
     /// <param name="delete">Borra el dibujo de su lista.</param>
@@ -58,6 +59,8 @@ public sealed class DrawingSettingsWindow : Window
         if (drawing.Kind is DrawingKind.TrendLine or DrawingKind.Rectangle or DrawingKind.HorizontalRay or DrawingKind.FibRetracement) body.Children.Add(ExtendSection());
         if (drawing.Kind == DrawingKind.FibRetracement) body.Children.Add(LevelsSection());
         if (drawing.IsPosition) body.Children.Add(PositionSection());
+        else if (drawing.Kind == DrawingKind.AnchoredVwap) body.Children.Add(AnchoredVwapSection());
+        else if (drawing.Kind == DrawingKind.FixedRangeProfile) body.Children.Add(ProfileSection());
         else if (drawing.Kind != DrawingKind.VerticalLine) body.Children.Add(PricesSection());
         body.Children.Add(VisibilitySection());
 
@@ -370,6 +373,58 @@ public sealed class DrawingSettingsWindow : Window
             Labeled("Cantidad", qty),
             rr,
             Note("Con cuenta y riesgo, la cantidad sale sola (como en TradingView); si no, escribila. Desde la entrada hasta donde terminó se sombrea el recorrido con su resultado: cerrada si tocó el objetivo o el stop, abierta al último precio si no."));
+    }
+
+    private NumericUpDown Num(decimal value, decimal min, decimal max, decimal step, string format, Action<decimal> set)
+    {
+        var n = new NumericUpDown { Value = value, Minimum = min, Maximum = max, Increment = step, FormatString = format, MinWidth = 160, NumberFormat = CultureInfo.InvariantCulture.NumberFormat };
+        n.ValueChanged += (_, _) =>
+        {
+            set(n.Value ?? value);
+            Changed();
+        };
+        return n;
+    }
+
+    private Control AnchoredVwapSection()
+    {
+        var when = new TextBlock { Classes = { "muted" }, Text = $"Ancla: {TimeZoneInfo.ConvertTimeFromUtc(_d.Points[0].Time, _tz):yyyy-MM-dd HH:mm}" };
+        return Section("VWAP anclado",
+            when,
+            Labeled("Banda 1 (× σ)", Num((decimal)_d.Band1, 0, 10, 0.5m, "0.##", v => _d.Band1 = (double)v)),
+            Labeled("Banda 2 (× σ)", Num((decimal)_d.Band2, 0, 10, 0.5m, "0.##", v => _d.Band2 = (double)v)),
+            Note("Se calcula con cada operación desde el ancla (no con las velas): da lo mismo en cualquier período y con cualquier zoom. 0 = sin banda. Arrastrá el ancla para moverla."));
+    }
+
+    private Control ProfileSection()
+    {
+        var snap = new CheckBox { Content = "Sesiones enteras (del inicio de la primera al fin de la última)", IsChecked = _d.SnapToSessions };
+        snap.IsCheckedChanged += (_, _) =>
+        {
+            _d.SnapToSessions = snap.IsChecked == true;
+            Changed();
+        };
+        var va = new CheckBox { Content = "Mostrar VAH / VAL", IsChecked = _d.ShowValueArea };
+        va.IsCheckedChanged += (_, _) =>
+        {
+            _d.ShowValueArea = va.IsChecked == true;
+            Changed();
+        };
+        var delta = new CheckBox { Content = "Perfil de delta (comprador − vendedor) en vez de volumen", IsChecked = _d.ShowDeltaProfile };
+        delta.IsCheckedChanged += (_, _) =>
+        {
+            _d.ShowDeltaProfile = delta.IsChecked == true;
+            Changed();
+        };
+        return Section("Perfil de rango fijo",
+            new TextBlock { Classes = { "muted" }, Text = $"Desde {TimeZoneInfo.ConvertTimeFromUtc(_d.Points[0].Time, _tz):yyyy-MM-dd HH:mm} hasta {TimeZoneInfo.ConvertTimeFromUtc(_d.Points[^1].Time, _tz):yyyy-MM-dd HH:mm}" },
+            snap,
+            Labeled("Filas (0 = un tick)", Num(_d.ProfileRows, 0, 2000, 10, "0", v => _d.ProfileRows = (int)v)),
+            Labeled("Área de valor (%)", Num(_d.ValueAreaPercent, 1, 100, 1, "0", v => _d.ValueAreaPercent = (int)v)),
+            Labeled("Ancho (% del rango)", Num(_d.ProfileWidthPercent, 5, 100, 5, "0", v => _d.ProfileWidthPercent = (int)v)),
+            va,
+            delta,
+            Note("Como en Exocharts: elegí un inicio y un fin y se juntan en un solo perfil (varias sesiones, semanas…). Se arma con cada operación, así que es igual en todos los períodos. Arrastrá los bordes para cambiar el rango."));
     }
 
     private Control PricesSection()

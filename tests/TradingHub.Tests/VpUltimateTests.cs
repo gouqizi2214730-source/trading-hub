@@ -50,6 +50,7 @@ public class VpUltimateTests
         new VpRollingVwap { Band2 = true, Fill = true },
         new VpDoubleInside { MotherMultiple = 0 },
         new VpNakedPoc(),
+        new VpSessionVwap(),
         new TradingHub.Indicators.Native.Cvd { View = TradingHub.Indicators.Native.Cvd.CvdView.Area, MaPeriod = 20 },
     };
 
@@ -211,5 +212,59 @@ public class VpUltimateTests
         KlineHistory.EstimateDeltaFromShape = false;
         Assert.Equal(10m, KlineHistory.EstimateBuyVolume(k));
         KlineHistory.EstimateDeltaFromShape = true;
+    }
+
+    [Fact]
+    public void Vwap_anclado_y_perfil_de_rango_dan_lo_mismo_en_cualquier_periodo()
+    {
+        var data = Market(4);
+        var s15 = data.GetSeries(ChartPeriod.Parse("M15"), 1);
+        var h1 = data.GetSeries(ChartPeriod.Parse("H1"), 4); // otro paso de precio
+        var anchor = s15[40].Time;
+        var d = new TradingHub.Charting.Drawings.ChartDrawing { Kind = TradingHub.Charting.Drawings.DrawingKind.AnchoredVwap };
+        d.Points.Add(new TradingHub.Charting.Drawings.ChartPoint(anchor, 0));
+        var (f15, b15) = d.Calc.AnchoredVwap(data.Trades, s15, anchor);
+        var d2 = new TradingHub.Charting.Drawings.ChartDrawing { Kind = TradingHub.Charting.Drawings.DrawingKind.AnchoredVwap };
+        d2.Points.Add(new TradingHub.Charting.Drawings.ChartPoint(anchor, 0));
+        var (fh, bh) = d2.Calc.AnchoredVwap(data.Trades, h1, anchor);
+        // al cierre de cada vela de 1 h, el VWAP es el de la vela de 15 min que termina en el mismo instante
+        for (int k = 0; k < bh.Count - 1; k++)
+        {
+            var endTime = h1[fh + k].LastTime;
+            int j = -1;
+            for (int i = 0; i < b15.Count; i++)
+                if (s15[f15 + i].LastTime == endTime) j = i;
+            if (j < 0) continue;
+            Assert.Equal(bh[k].Vwap, b15[j].Vwap, 3);
+        }
+
+        // perfil de rango: mismo POC y volumen total con cualquier serie (sale de las operaciones)
+        var from = s15[20].Time;
+        var to = s15[200].Time;
+        var p1 = d.Calc.FixedRangeProfile(data.Trades, Btc, from, to, 0, 70)!;
+        var p2 = d2.Calc.FixedRangeProfile(data.Trades, Btc, from, to, 0, 70)!;
+        Assert.Equal(p1.Poc, p2.Poc);
+        Assert.Equal(p1.Total, p2.Total);
+        decimal expected = 0;
+        for (int i = data.Trades.LowerBound(from); i < data.Trades.LowerBound(to); i++) expected += data.Trades.GetVolume(i);
+        Assert.Equal(expected, p1.Total);
+        Assert.True(p1.Val <= p1.Poc && p1.Poc <= p1.Vah);
+
+        // se dibujan
+        var model = new ChartModel(data, ChartPeriod.Parse("M15"), new ChartSettings { TimeZoneId = "UTC" });
+        model.Update();
+        var frvp = new TradingHub.Charting.Drawings.ChartDrawing { Kind = TradingHub.Charting.Drawings.DrawingKind.FixedRangeProfile, SnapToSessions = true };
+        frvp.Points.Add(new TradingHub.Charting.Drawings.ChartPoint(from, 0));
+        frvp.Points.Add(new TradingHub.Charting.Drawings.ChartPoint(to, 0));
+        model.Drawings.Add(d);
+        model.Drawings.Add(frvp);
+        model.Viewport.BarWidth = 4;
+        using var surface = SKSurface.Create(new SKImageInfo(1400, 800));
+        new ChartRenderer().Render(surface.Canvas, model, 1400, 800, new ChartRenderState());
+        var dir = Environment.GetEnvironmentVariable("TH_SNAPSHOT_DIR");
+        if (string.IsNullOrEmpty(dir)) return;
+        using var img = surface.Snapshot();
+        using var png = img.Encode(SKEncodedImageFormat.Png, 90);
+        File.WriteAllBytes(Path.Combine(dir, "avwap-frvp.png"), png.ToArray());
     }
 }

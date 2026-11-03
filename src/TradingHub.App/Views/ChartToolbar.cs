@@ -414,6 +414,8 @@ internal sealed class DrawingToolStrip : UserControl
         [DrawingKind.LongPosition] = (MaterialIconKind.TrendingUp, "Posición larga (entrada, stop y objetivo)"),
         [DrawingKind.ShortPosition] = (MaterialIconKind.TrendingDown, "Posición corta (entrada, stop y objetivo)"),
         [DrawingKind.Text] = (MaterialIconKind.FormatText, "Texto"),
+        [DrawingKind.AnchoredVwap] = (MaterialIconKind.Anchor, "VWAP anclado (desde el punto que elijas, calculado con cada operación)"),
+        [DrawingKind.FixedRangeProfile] = (MaterialIconKind.ChartBar, "Perfil de rango fijo (volumen entre dos puntos; puede abarcar varias sesiones)"),
     };
 
     private readonly List<Group> _groups = new();
@@ -427,6 +429,7 @@ internal sealed class DrawingToolStrip : UserControl
             new DrawingKind?[] { DrawingKind.HorizontalLine, DrawingKind.HorizontalRay, DrawingKind.VerticalLine, DrawingKind.TrendLine, DrawingKind.Ray, DrawingKind.ExtendedLine },
             new DrawingKind?[] { DrawingKind.Rectangle },
             new DrawingKind?[] { DrawingKind.FibRetracement },
+            new DrawingKind?[] { DrawingKind.AnchoredVwap, DrawingKind.FixedRangeProfile },
             // a la vista, como en TradingView (antes compartían un botón y la corta quedaba escondida en el menú)
             new DrawingKind?[] { DrawingKind.LongPosition },
             new DrawingKind?[] { DrawingKind.ShortPosition },

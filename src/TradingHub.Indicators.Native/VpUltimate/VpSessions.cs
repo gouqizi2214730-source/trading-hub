@@ -370,3 +370,111 @@ public class VpSessionProfiles : VpSessionBase
         }
     }
 }
+
+/// <summary>VWAP de cada sesión (Asia, Londres, Nueva York): arranca en la primera vela de la sesión y termina con ella.</summary>
+[DisplayName("VP definitivo · VWAP por sesión")]
+[Category(Vp.Category)]
+[Description("Un VWAP por sesión de Asia, Londres y Nueva York (hora de Nueva York), con banda de desvío opcional; cada uno vive solo durante su sesión.")]
+public class VpSessionVwap : VpSessionBase
+{
+    private readonly ValueDataSeries[] _lines;
+    private readonly ValueDataSeries[] _up;
+    private readonly ValueDataSeries[] _dn;
+    private readonly VwapSum[] _acc = new VwapSum[3];
+    private readonly bool[] _active = new bool[3];
+    private decimal _band = 1;
+    private VpVwapSource _source = VpVwapSource.Trades;
+
+    public VpSessionVwap()
+    {
+        var colors = new[] { Color.FromArgb(255, 41, 98, 255), Color.FromArgb(255, 76, 175, 80), Color.FromArgb(255, 242, 54, 69) };
+        _lines = new ValueDataSeries[3];
+        _up = new ValueDataSeries[3];
+        _dn = new ValueDataSeries[3];
+        for (int i = 0; i < 3; i++)
+        {
+            _lines[i] = new ValueDataSeries("V" + i, "VWAP " + SessionNames[i]) { Color = colors[i], Width = 2, ShowZeroValue = false };
+            _up[i] = new ValueDataSeries("U" + i, "+σ " + SessionNames[i]) { Color = Vp.Alpha(colors[i], 110), ShowZeroValue = false, LineDashStyle = LineDashStyle.Dash };
+            _dn[i] = new ValueDataSeries("D" + i, "−σ " + SessionNames[i]) { Color = Vp.Alpha(colors[i], 110), ShowZeroValue = false, LineDashStyle = LineDashStyle.Dash };
+            DataSeries.Add(_lines[i]);
+            DataSeries.Add(_up[i]);
+            DataSeries.Add(_dn[i]);
+        }
+    }
+
+    [Display(Name = "Precio", GroupName = "Cálculo", Order = 5)]
+    public VpVwapSource Source { get => _source; set { _source = value; RecalculateValues(); } }
+
+    [Display(Name = "Banda (× σ, 0 = sin banda)", GroupName = "Cálculo", Order = 10)]
+    public decimal Band { get => _band; set { _band = Math.Max(0, value); RecalculateValues(); } }
+
+    [Display(Name = "Asia", GroupName = "Sesiones", Order = 10)] public bool ShowAsia { get; set; } = true;
+    [Display(Name = "Londres", GroupName = "Sesiones", Order = 20)] public bool ShowLondon { get; set; } = true;
+    [Display(Name = "Nueva York", GroupName = "Sesiones", Order = 30)] public bool ShowNewYork { get; set; } = true;
+
+    protected override void Reset()
+    {
+        for (int i = 0; i < 3; i++)
+        {
+            _acc[i] = default;
+            _active[i] = false;
+        }
+    }
+
+    private void Step(int bar, bool commit)
+    {
+        var c = GetCandle(bar);
+        var sessions = Sessions;
+        var ny = Vp.Ny(c.Time);
+        bool dateChanged = bar > 0 && Vp.Ny(GetCandle(bar - 1).Time).Date != ny.Date;
+        var on = new[] { ShowAsia, ShowLondon, ShowNewYork };
+        var sum = VwapSum.Of(c, _source);
+        for (int s = 0; s < 3; s++)
+        {
+            bool inside = Intraday && on[s] && Vp.InSession(Vp.Hm(ny), sessions[s]);
+            bool split = dateChanged && sessions[s].Start < sessions[s].End;
+            var acc = _acc[s];
+            bool active = _active[s];
+            if (!inside || (active && split && !inside))
+            {
+                if (commit)
+                {
+                    _active[s] = false;
+                    _acc[s] = default;
+                }
+
+                _lines[s][bar] = _up[s][bar] = _dn[s][bar] = 0;
+                continue;
+            }
+
+            if (!active || split)
+            {
+                acc = default;
+                if (bar > 0)
+                {
+                    _lines[s].SetPointOfEndLine(bar - 1);
+                    _up[s].SetPointOfEndLine(bar - 1);
+                    _dn[s].SetPointOfEndLine(bar - 1);
+                }
+            }
+
+            acc.Add(sum);
+            decimal v = acc.Vwap, sd = acc.StdDev;
+            _lines[s][bar] = v;
+            _up[s][bar] = _band > 0 ? v + _band * sd : 0;
+            _dn[s][bar] = _band > 0 ? v - _band * sd : 0;
+            if (commit)
+            {
+                _acc[s] = acc;
+                _active[s] = true;
+            }
+        }
+    }
+
+    protected override void Commit(int bar) => Step(bar, true);
+
+    protected override void Live(int bar)
+    {
+        if (bar > Committed) Step(bar, false);
+    }
+}
