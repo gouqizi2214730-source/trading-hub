@@ -162,3 +162,16 @@ resumen del backtest dice cuántos días aporta cada fuente.
 La historia vive en `~/Library/Application Support/Trading Hub/Ticks`, en una carpeta por conexión («rithmic»,
 «databento», «importado»…) y otra por instrumento, con un archivo por día. **Abrir carpeta** la muestra en el Finder.
 Ver también [Instalación](instalacion.md#dónde-guarda-tus-datos).
+
+## Velas automáticas
+
+En la columna derecha de Datos. La historia en velas (1, 5 y 15 minutos) de los instrumentos de la lista se baja una vez
+y después solo lo nuevo, al abrir la app y cada media hora. Con **Agregar solo los instrumentos que abro en gráficos**,
+cada instrumento que abrís entra solo a la lista (hasta 60). **Años hacia atrás** fija cuánta historia se mantiene.
+Sirve para que cambiar de período (1 h ↔ 4 h) o abrir años de historia no espere a la red, y para trabajar sin conexión.
+
+## Libro de órdenes guardado (liquidez)
+
+Mientras un gráfico está abierto se guarda una foto del libro cada 3 segundos (carpeta `Liquidez` de los datos de
+mercado, un archivo por día; unos 30-50 MB por día e instrumento). Alimenta el **mapa de calor de liquidez** (menú del
+gráfico) y el indicador **Delta del libro de órdenes**. Se apaga en Ajustes → Datos.

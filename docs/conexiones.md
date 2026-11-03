@@ -184,6 +184,29 @@ operación. Es pago por uso; las cuentas nuevas traen créditos gratis.
 - No da datos en vivo ni aparece en el buscador de instrumentos: se usa desde **Datos → Futuros de CME con
   Databento**. Ver [Datos](datos.md#databento).
 
+## 长桥 (Longbridge)
+
+Acciones y ETFs de Hong Kong (`700.HK`), EE.UU. (`AAPL.US`), Shanghái / Shenzhen (`600519.SH`, `300750.SZ`) y Singapur
+con tu cuenta de 长桥. No hace falta App Key ni Secret: se entra con **OAuth 2.0**.
+
+- **Conectar con 长桥** abre el navegador; entrás con tu cuenta y autorizás la app. La primera vez la app registra su
+  propio cliente OAuth (sin secreto) y después solo pide los permisos de datos de mercado (ni cuenta ni operar). Los
+  tokens se guardan en el Llavero y se renuevan solos; **Salir** los borra.
+- **Servidor**: global (`openapi.longbridge.com`) o China continental (`openapi.longbridge.cn`). Las cuentas de EE.UU.
+  tienen que usar el global.
+- **Símbolos del buscador**: la lista de códigos (`código.mercado`) que muestra el buscador; agregá los que quieras.
+- Da el tape del día (las últimas 1000 operaciones, con el lado real), profundidad en vivo y **velas de años**. Lo que no
+  tiene ticks se arma con las velas, repartiendo el volumen por la forma de cada vela (delta estimado; se apaga en
+  Ajustes → Datos). El tick de Hong Kong sale de la tabla de tramos según el precio.
+- La redirección usa `http://localhost:60355/callback` (o los puertos siguientes si está ocupado): si la CLI de 长桥
+  está abierta en ese puerto, cerrala al autorizar.
+
+## Cripto agregado
+
+Suma las operaciones y las velas de varios mercados del mismo instrumento (Binance Futures + Bybit por defecto; se eligen
+en la conexión) en uno solo, como aggr.trade: volumen, delta y footprint agregados. El precio y el DOM son los del primer
+mercado. Solo entran los símbolos que existen en al menos dos mercados. Datos públicos: no necesita cuenta.
+
 ## Interactive Brokers
 
 Abrí TWS o IB Gateway y habilitá la API (Configure → API → Settings). Completá **Host**, **Puerto** (habituales: 7497

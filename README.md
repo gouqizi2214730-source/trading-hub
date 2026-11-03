@@ -62,7 +62,12 @@ las compila, las prueba y arma reportes, y un agente que reparte el riesgo de tu
   perfil de volumen por sesión y grandes operaciones. Sumá los tuyos en C# (se recompilan al guardar), compatibles con
   la API de indicadores de ATAS, y los de ATAS u otras fuentes de código público: ver
   [Más indicadores](#más-indicadores).
-- **Replay** de cualquier día guardado, a la velocidad que quieras.
+- **Replay** de cualquier día guardado, a la velocidad que quieras; **replay aleatorio** (incluso a ciegas) para practicar.
+- **Mapa de calor de liquidez** (libro de órdenes guardado cada pocos segundos) detrás de las velas y el indicador
+  **Delta del libro de órdenes**; **estructura SMC / ICT** (swings, BOS/CHoCH, order blocks, FVG, EQH/EQL, CISD,
+  velas y FVG de períodos mayores, PO3 y T-Spot, breakers), Bollinger triple y VWAP Claire.
+- **Entrada rápida con el teclado**: escribí un símbolo o un período sobre el gráfico (15, 1h, 4h, d) y Enter;
+  «?» muestra los atajos.
 
 ### Operar
 - **Chart Trader** y DOM con órdenes de mercado, límite y stop, brackets (stop y objetivos) y OCO.
@@ -76,6 +81,11 @@ las compila, las prueba y arma reportes, y un agente que reparte el riesgo de tu
 - **Databento**: años de futuros de CME tick a tick (pago por uso, te muestra el costo antes). Se guarda aparte y en los
   backtests elegís **solo Rithmic, solo Databento o las dos combinadas** (Rithmic primero y Databento completa lo que falta).
 - Importación de CSV de Dukascopy, HistData, MetaTrader o TradingView.
+- **长桥 (Longbridge)**: acciones de Hong Kong, EE.UU. y China entrando con tu cuenta (OAuth 2.0, sin claves).
+- **Cripto agregado**: Binance + Bybit sumados en un solo instrumento (volumen y delta agregados).
+- **Velas automáticas**: la historia en velas de los instrumentos que elijas se mantiene al día en segundo plano (solo
+  baja lo nuevo), así cambiar de período o abrir años de historia no espera a la red.
+- Aceleración por **GPU** (CUDA / OpenCL) para los perfiles de volumen sobre millones de operaciones.
 
 ### Estrategias y backtesting
 - Estrategias en **C#** con un editor integrado que compila en milisegundos (Roslyn, con los errores marcados en el
