@@ -351,6 +351,9 @@ public sealed class InstrumentPicker : Button
         }
     }
 
+    /// <summary>Instrumentos ya listados de una conexión (sin pedirlos), o null.</summary>
+    public static IReadOnlyList<Instrument>? CachedInstruments(string profileId) => InstrumentCache.TryGetValue(profileId, out var list) ? list : null;
+
     /// <summary>Instrumentos de una conexión (con caché).</summary>
     public static async Task<IReadOnlyList<Instrument>> InstrumentsAsync(AppServices svc, string profileId)
     {

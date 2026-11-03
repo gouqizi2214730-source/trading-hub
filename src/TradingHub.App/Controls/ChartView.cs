@@ -64,6 +64,9 @@ public sealed class ChartView : SkiaView
     /// <summary>Clic en la hora de la esquina del eje de tiempo.</summary>
     public event Action? TimeZoneRequested;
 
+    /// <summary>Un carácter tecleado sobre el gráfico sin modificadores (entrada rápida de símbolo / período).</summary>
+    public event Action<string>? Typed;
+
     /// <summary>Ajustes de un indicador pedidos desde la leyenda.</summary>
     public event Action<IndicatorSlot>? IndicatorSettingsRequested;
 
@@ -205,6 +208,18 @@ public sealed class ChartView : SkiaView
         {
             e.Handled = true;
             InvalidateVisual();
+        }
+    }
+
+    protected override void OnTextInput(TextInputEventArgs e)
+    {
+        base.OnTextInput(e);
+        if (e.Handled || _model == null || string.IsNullOrEmpty(e.Text)) return;
+        string t = e.Text;
+        if (t.Length == 1 && (char.IsLetterOrDigit(t[0]) || t[0] is '.' or '?' or '/'))
+        {
+            Typed?.Invoke(t);
+            e.Handled = true;
         }
     }
 

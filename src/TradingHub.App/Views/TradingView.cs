@@ -545,6 +545,7 @@ public sealed partial class TradingView : UserControl
         };
         view.IndicatorsChanged += () => Workspace.Save(this);
         view.TimeZoneRequested += () => ShowTimeZoneMenu(chart);
+        view.Typed += text => OnChartTyped(chart, text);
         view.DrawingDoubleClicked += d => EditDrawing(chart, d);
         view.OrderDragged += (o, price) => _ = MoveOrderAsync(chart, o, price);
         view.BracketDropped += (d, price) => _ = OnBracketDroppedAsync(chart, d, price);
