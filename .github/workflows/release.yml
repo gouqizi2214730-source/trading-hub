@@ -69,7 +69,7 @@ jobs:
           H="$RUNNER_TEMP/th-home"; rm -rf "$H"; mkdir -p "$H/.config"
           set +e
           (cd "$H" && HOME="$H" XDG_CONFIG_HOME="$H/.config" timeout 20 xvfb-run -a -s "-screen 0 1600x1000x24" \
-            dotnet "$GITHUB_WORKSPACE/src/TradingHub.App/bin/Release/net10.0/KVP.dll" > "$H/out.txt" 2>&1)
+            dotnet "$GITHUB_WORKSPACE/src/TradingHub.App/bin/Release/net10.0/TradingHub.dll" > "$H/out.txt" 2>&1)
           code=$?
           set -e
           if [ "$code" != "124" ] || [ -f "$H/.config/KVP/crash.log" ]; then

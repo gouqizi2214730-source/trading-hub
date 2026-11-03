@@ -47,15 +47,14 @@ ${UnStrStr}
   Delete "${DIR}\*.pdb"
   Delete "${DIR}\TradingHub.deps.json"
   Delete "${DIR}\TradingHub.runtimeconfig.json"
-  Delete "${DIR}\KVP.deps.json"
-  Delete "${DIR}\KVP.runtimeconfig.json"
   Delete "${DIR}\Desinstalar Trading Hub.exe"
   Delete "${DIR}\Desinstalar KVP.exe"
   RMDir "${DIR}"
 !macroend
 
 !define NAME "KVP"
-!define EXE "KVP.exe"
+; el ejecutable conserva el nombre del ensamblado original (los recursos de la interfaz lo llevan adentro: avares://TradingHub/)
+!define EXE "TradingHub.exe"
 ; la edición anterior se llamaba así: también se espera a que cierre y se borra
 !define OLDEXE "TradingHub.exe"
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\TradingHub"
