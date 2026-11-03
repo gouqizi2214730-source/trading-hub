@@ -1090,6 +1090,14 @@ public sealed partial class TradingView
             Workspace.Save(this);
         };
         items.Add(marks);
+        var sessionLines = new MenuItem { Header = "Líneas de inicio de sesión (día)", Icon = model.Settings.ShowSessionLines ? Ui.Icon(MaterialIconKind.Check, 15, Ui.Accent) : Ui.Icon(MaterialIconKind.ViewColumnOutline, 16) };
+        sessionLines.Click += (_, _) =>
+        {
+            model.Settings.ShowSessionLines = !model.Settings.ShowSessionLines;
+            model.Invalidate();
+            Workspace.Save(this);
+        };
+        items.Add(sessionLines);
         items.Add(Item("Restablecer vista (Alt+R)", MaterialIconKind.Restore, () => model.ResetView()));
         items.Add(Item("Escala automática", MaterialIconKind.ArrowExpandVertical, () => { model.Viewport.AutoScale = true; model.Invalidate(); }));
         items.Add(Item("Ir al último precio", MaterialIconKind.PageLast, () => { model.Viewport.ScrollBars = 0; model.Invalidate(); }));

@@ -42,6 +42,12 @@ public sealed class ChartRenderState
 
     /// <summary>La ✕ de la etiqueta de la operación resaltada (saca el resaltado).</summary>
     public SKRect? FocusTradeClose { get; set; }
+
+    /// <summary>Botón «A» abajo del eje de precios: escala automática (como en TradingView).</summary>
+    public SKRect? AutoScaleButton { get; set; }
+
+    /// <summary>Rectángulo de zoom (Ctrl + arrastre): se amplía a lo que encierra al soltar.</summary>
+    public SKRect? ZoomBox { get; set; }
 }
 
 public enum LegendAction
@@ -126,6 +132,14 @@ public sealed class ChartRenderer
         if (state.Crosshair) DrawCrosshair(canvas, model, layout, state);
         DrawOverlay(canvas, model, layout, state);
         DrawGoLatest(canvas, model, layout, state);
+        DrawAutoScale(canvas, model, layout, state);
+        if (state.ZoomBox is { } zb)
+        {
+            using var zf = new SKPaint { Color = model.Theme.Crosshair.WithAlpha(40), Style = SKPaintStyle.Fill };
+            using var zs = new SKPaint { Color = model.Theme.Crosshair, Style = SKPaintStyle.Stroke, StrokeWidth = 1, IsAntialias = true, PathEffect = SKPathEffect.CreateDash(new[] { 4f, 3f }, 0) };
+            canvas.DrawRect(zb, zf);
+            canvas.DrawRect(zb, zs);
+        }
         model.ClearDirty();
         return layout;
     }
@@ -1453,6 +1467,25 @@ public sealed class ChartRenderer
 
         path.Close();
         canvas.DrawPath(path, p);
+    }
+
+    /// <summary>«A» abajo del eje de precios: prendida = escala automática; apagada (gris) = escala manual, clic para volver.</summary>
+    private static void DrawAutoScale(SKCanvas canvas, ChartModel model, ChartLayout layout, ChartRenderState state)
+    {
+        state.AutoScaleButton = null;
+        if (model.Series.Count == 0) return;
+        var t = model.Theme;
+        var axis = layout.PriceAxis;
+        var r = new SKRect(axis.Left + 6, layout.Plot.Bottom - 24, axis.Left + 26, layout.Plot.Bottom - 6);
+        bool on = model.Viewport.AutoScale;
+        bool hover = state.MouseX is float mx && state.MouseY is float my && r.Contains(mx, my);
+        using var back = new SKPaint { IsAntialias = true, Color = on ? t.CrosshairLabelBack.WithAlpha(hover ? (byte)255 : (byte)190) : t.CrosshairLabelBack.WithAlpha(hover ? (byte)150 : (byte)70) };
+        canvas.DrawRoundRect(r, 4, 4, back);
+        using var txt = new SKPaint { IsAntialias = true, Color = on ? t.CrosshairLabelText : t.CrosshairLabelText.WithAlpha(120) };
+        using var font = new SKFont(SKTypeface.Default, 11) { Embolden = true };
+        float w = font.MeasureUiText("A");
+        canvas.DrawUiText("A", r.MidX - w / 2, r.MidY + 4, font, txt);
+        state.AutoScaleButton = r;
     }
 
     /// <summary>Botón chiquito abajo a la derecha para volver a lo último cuando el gráfico está corrido hacia atrás.</summary>

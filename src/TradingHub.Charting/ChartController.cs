@@ -1,3 +1,4 @@
+using SkiaSharp;
 using TradingHub.Charting.Drawings;
 using TradingHub.Charting.Rendering;
 using TradingHub.Common.Logging;
@@ -41,6 +42,7 @@ public sealed class ChartController
         PanelResize,
         MoveOrder,
         Bracket,
+        ZoomBox,
     }
 
     private readonly ChartModel _model;
@@ -144,6 +146,20 @@ public sealed class ChartController
         // eje de precios
         if (l.PriceAxis.Contains(x, y))
         {
+            if (_state.AutoScaleButton is { } ab && ab.Contains(x, y))
+            {
+                // como la «A» de TradingView: prende la escala automática (apagarla: arrastrar el eje o el gráfico)
+                _model.Viewport.AutoScale = !_model.Viewport.AutoScale;
+                if (!_model.Viewport.AutoScale)
+                {
+                    _model.Viewport.PriceTop = l.Main.Top;
+                    _model.Viewport.PriceBottom = l.Main.Bottom;
+                }
+
+                _model.Invalidate();
+                return;
+            }
+
             if (clicks >= 2)
             {
                 _model.Viewport.AutoScale = true;
@@ -315,6 +331,14 @@ public sealed class ChartController
                 return;
             }
 
+            // Ctrl + arrastre: rectángulo de zoom (se amplía a lo que encierra)
+            if ((mods & (InputModifiers.Control | InputModifiers.Command)) != 0 && ActiveTool == null)
+            {
+                _drag = DragMode.ZoomBox;
+                _state.ZoomBox = new SKRect(x, y, x, y);
+                return;
+            }
+
             _drag = DragMode.Pan;
             _startScroll = _model.Viewport.ScrollBars;
             _startTop = l.Main.Top;
@@ -360,6 +384,13 @@ public sealed class ChartController
                 vp.AutoScale = false;
                 vp.PriceTop = mid + half;
                 vp.PriceBottom = mid - half;
+                break;
+            }
+            case DragMode.ZoomBox:
+            {
+                var plot = l.Plot;
+                float cx = Math.Clamp(x, plot.Left, plot.Right), cy = Math.Clamp(y, plot.Top, plot.Bottom);
+                _state.ZoomBox = new SKRect(Math.Min(_downX, cx), Math.Min(_downY, cy), Math.Max(_downX, cx), Math.Max(_downY, cy));
                 break;
             }
             case DragMode.TimeScale:
@@ -459,6 +490,12 @@ public sealed class ChartController
             if (to > 0 && Math.Abs(y - _downY) >= 4) BracketDropped?.Invoke(bd, to);
         }
 
+        if (_drag == DragMode.ZoomBox && _state.ZoomBox is { } zb && L is { } lz)
+        {
+            _state.ZoomBox = null;
+            if (zb.Width >= 8 && zb.Height >= 8) ZoomTo(lz, zb);
+        }
+
         if (_drag == DragMode.None) ForwardToIndicators(x, y, button, 1, mods, MouseKind.Up);
         _drag = DragMode.None;
         _active = _pendingSecondClick ? _active : null;
@@ -466,6 +503,27 @@ public sealed class ChartController
     }
 
     private bool _pendingSecondClick;
+
+    /// <summary>Amplía el gráfico a un rectángulo de la pantalla: las velas que abarca ocupan todo el ancho y sus precios todo el alto.</summary>
+    private void ZoomTo(ChartLayout l, SKRect r)
+    {
+        var vp = _model.Viewport;
+        double b0 = l.BarAtExact(r.Left), b1 = l.BarAtExact(r.Right);
+        double bars = Math.Max(2, b1 - b0);
+        double plot = l.Plot.Width;
+        vp.BarWidth = Math.Clamp(plot / bars, ChartViewport.MinBarWidth, ChartViewport.MaxBarWidth);
+        // la última vela del rectángulo queda en el borde derecho
+        vp.ScrollBars = Math.Max(0, l.Count - 1 - b1 + vp.RightMarginBars + 0.5);
+        var main = l.Main;
+        if (r.Top >= main.Rect.Top - 1 && r.Bottom <= main.Rect.Bottom + 1)
+        {
+            vp.AutoScale = false;
+            vp.PriceTop = main.ValueAt(r.Top);
+            vp.PriceBottom = main.ValueAt(r.Bottom);
+        }
+
+        _model.Invalidate();
+    }
 
     private void StartBracketDrag(BracketHandle h, float y)
     {
