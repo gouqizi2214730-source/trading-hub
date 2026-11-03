@@ -31,7 +31,7 @@ public enum VpVolumeMode
 /// mismo nombre). A diferencia del original, que reconstruye cada vela con velas de 1 minuto pedidas aparte, acá cada vela
 /// trae su footprint (volumen comprador / vendedor por precio): los perfiles, el delta y el VWAP de cada vela son exactos.
 /// </summary>
-internal static class Vp
+public static class Vp
 {
     public const string Category = "VP definitivo";
 

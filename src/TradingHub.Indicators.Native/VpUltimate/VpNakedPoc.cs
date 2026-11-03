@@ -12,7 +12,7 @@ namespace TradingHub.Indicators.Native.VpUltimate;
 /// período de gráfico (se arman con el footprint de las velas del gráfico: en un gráfico de 1 minuto salen los diarios,
 /// semanales, mensuales y anuales; en uno diario, los semanales en adelante). Los días ya cerrados se guardan en disco.
 /// </summary>
-internal sealed class NakedPocEngine
+public sealed class NakedPocEngine
 {
     public sealed class Level
     {
@@ -229,7 +229,7 @@ public class VpNakedPoc : VpIndicator
 
     protected override void Commit(int bar) => _engine.Commit(bar, NewPeriod, GetCandle, BarLength);
 
-    internal static void Render(VpIndicator owner, RenderContext ctx, NakedPocEngine engine, Color[] colors, bool showTouched, int width, LineDashStyle style, bool label, int maxPerPeriod)
+    public static void Render(VpIndicator owner, RenderContext ctx, NakedPocEngine engine, Color[] colors, bool showTouched, int width, LineDashStyle style, bool label, int maxPerPeriod)
     {
         if (owner.ChartInfo == null) return;
         var info = owner.ChartInfo;

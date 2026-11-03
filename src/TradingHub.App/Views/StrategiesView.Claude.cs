@@ -593,6 +593,14 @@ internal sealed partial class StrategiesView
         if (w.IsVisible) w.Close();
     }
 
+    /// <summary>Le pide a Claude que traduzca un Pine Script (guardado en la carpeta de indicadores) a un indicador en C#.</summary>
+    internal void AskClaudeToPortPine(string pinePath)
+    {
+        _tabs.Select("code");
+        ShowTab("code");
+        _ = SendToClaudeAsync($"Traducí el Pine Script de TradingView que está en «{pinePath}» a un indicador de esta plataforma en C# (un archivo .cs en la carpeta de indicadores, clase con [DisplayName] y [Category(\"Mis indicadores\")]). Respetá los parámetros (input.*) como propiedades con [Display], los plots como ValueDataSeries, bgcolor/barcolor como PaintbarsDataSeries y las líneas/cajas/etiquetas con OnRender. Donde Pine usa request.security de un período menor, usá el footprint de cada vela (GetCandle(bar).GetAllPriceLevels(), Bid/Ask/Delta); donde usa uno mayor, acumulá las velas del gráfico con IsNewSession/IsNewWeek/IsNewMonth. Si algo no se puede traducir, dejá un comentario claro. Compilalo y corregí hasta que compile.");
+    }
+
     /// <summary>Le pide al laboratorio que analice la cartera en vivo y proponga tamaños (los aprobás en En vivo → Propuestas).</summary>
     internal void AskClaudeForSizing()
     {

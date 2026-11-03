@@ -26,10 +26,14 @@ internal sealed class CodeEditorWindow : Window
     private readonly Avalonia.Controls.Shapes.Ellipse _dot = new() { Width = 8, Height = 8 };
     private readonly TextBlock _state = new() { FontSize = 12 };
     private string? _path;
+    private readonly (string Name, string Source)? _readOnly;
 
-    public CodeEditorWindow(AppServices svc, CodeKind kind)
+    /// <param name="open">Archivo propio a abrir (null = el primero).</param>
+    /// <param name="readOnly">Solo ver: nombre y código de un indicador de la biblioteca.</param>
+    public CodeEditorWindow(AppServices svc, CodeKind kind, string? open = null, (string Name, string Source)? readOnly = null)
     {
         _svc = svc;
+        _readOnly = readOnly;
         Title = "Indicadores propios — editor";
         Width = 1180;
         Height = 780;
@@ -48,16 +52,32 @@ internal sealed class CodeEditorWindow : Window
             if (_svc.Scripts != null) _svc.Scripts.Compiled -= OnCompiled;
             if (_editor.IsDirty) Save();
         };
-        FillFiles();
-        if (_svc.Scripts?.LastResult is { } last) OnCompiled(last);
+        if (readOnly is { } ro)
+        {
+            Title = ro.Name + " — código fuente (solo lectura)";
+            _title.Text = ro.Name;
+            _editor.Text = ro.Source;
+            _editor.IsReadOnly = true;
+            _editor.IsDirty = false;
+            _state.Text = "Solo lectura: en Indicadores, «Copiar como indicador propio» para modificarlo";
+            _dot.Fill = Ui.Text2;
+        }
+        else
+        {
+            FillFiles(open);
+            if (_svc.Scripts?.LastResult is { } last) OnCompiled(last);
+        }
     }
 
     private Control Build()
     {
         var add = Ui.Button("Nuevo", MaterialIconKind.Plus, () => _ = NewAsync());
         var folder = Ui.IconButton(MaterialIconKind.FolderOpenOutline, Os.IsWindows ? "Abrir la carpeta en el Explorador de archivos" : "Abrir la carpeta en Finder", () => Shell.OpenFolder(AppPaths.UserIndicators));
+        var pine = Ui.IconButton(MaterialIconKind.Import, "Importar un Pine Script de TradingView (Claude lo traduce a un indicador de KVP)", () => _ = ImportPineAsync(), 17);
+        var rename = Ui.IconButton(MaterialIconKind.RenameBox, "Cambiar el nombre del archivo", () => _ = RenameAsync(), 17);
+        var del = Ui.IconButton(MaterialIconKind.DeleteOutline, "Eliminar este archivo", () => _ = DeleteAsync(), 17);
         var head = new DockPanel { Margin = new Thickness(0, 0, 0, 10) };
-        var acts = Ui.H(4, folder, add);
+        var acts = Ui.H(2, pine, rename, del, folder, add);
         DockPanel.SetDock(acts, Dock.Right);
         head.Children.Add(acts);
         head.Children.Add(Ui.H3("Archivos"));
@@ -143,6 +163,74 @@ internal sealed class CodeEditorWindow : Window
         _dot.Fill = r.Success ? Ui.Up : Ui.Down;
         _state.Text = r.Success ? $"Compilado · {r.Elapsed.TotalMilliseconds:0} ms" : $"{errors} error(es)";
         if (_path != null) _editor.ShowDiagnostics(r.Diagnostics, _path);
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_path == null || _readOnly != null) return;
+        bool ok = await ConfirmDialog.ShowAsync(this, "Eliminar indicador", $"Se borra {Path.GetFileName(_path)}. Los gráficos que lo usan lo pierden.", "Eliminar", danger: true);
+        if (!ok) return;
+        try
+        {
+            File.Delete(_path);
+            _editor.IsDirty = false;
+            _path = null;
+            _editor.Text = "";
+            _title.Text = "";
+            FillFiles();
+            _svc.Scripts?.CompileAll();
+        }
+        catch (Exception ex)
+        {
+            await ConfirmDialog.ShowAsync(this, "No se pudo borrar", ex.Message, "Cerrar");
+        }
+    }
+
+    private async Task RenameAsync()
+    {
+        if (_path == null || _readOnly != null) return;
+        var name = await PromptDialog.ShowAsync(this, "Cambiar nombre", "Nombre del archivo", Path.GetFileNameWithoutExtension(_path), "Renombrar");
+        if (string.IsNullOrWhiteSpace(name)) return;
+        var target = Path.Combine(Path.GetDirectoryName(_path)!, name.Trim() + ".cs");
+        if (File.Exists(target)) return;
+        if (_editor.IsDirty) Save();
+        File.Move(_path, target);
+        _path = null;
+        FillFiles(target);
+        _svc.Scripts?.CompileAll();
+    }
+
+    /// <summary>Guarda el Pine Script en la carpeta propia y le pide a Claude (Backtesting → chat) que lo traduzca a C#.</summary>
+    private async Task ImportPineAsync()
+    {
+        var files = await StorageProvider.OpenFilePickerAsync(new Avalonia.Platform.Storage.FilePickerOpenOptions
+        {
+            Title = "Pine Script de TradingView",
+            AllowMultiple = false,
+            FileTypeFilter = new[] { new Avalonia.Platform.Storage.FilePickerFileType("Pine Script") { Patterns = new[] { "*.pine", "*.txt", "*.pinescript" } } },
+        });
+        if (files.Count == 0) return;
+        string text;
+        await using (var stream = await files[0].OpenReadAsync())
+        using (var reader = new StreamReader(stream))
+            text = await reader.ReadToEndAsync();
+        var pineDir = Path.Combine(AppPaths.UserIndicators, "Pine");
+        Directory.CreateDirectory(pineDir);
+        string baseName = new string(Path.GetFileNameWithoutExtension(files[0].Name).Where(c => char.IsLetterOrDigit(c) || c is '_' or '-').ToArray());
+        if (baseName.Length == 0) baseName = "script";
+        var pinePath = Path.Combine(pineDir, baseName + ".pine");
+        File.WriteAllText(pinePath, text);
+        if (TopLevel.GetTopLevel(this) is not MainWindow && Owner is not MainWindow)
+        {
+            // sin ventana principal a mano: queda guardado para pedirlo desde el chat
+            await ConfirmDialog.ShowAsync(this, "Pine Script guardado", $"Quedó en {pinePath}. En Backtesting → chat con Claude pedile que lo traduzca a un indicador.", "Cerrar");
+            return;
+        }
+
+        var main = (Owner as MainWindow) ?? (MainWindow)TopLevel.GetTopLevel(this)!;
+        main.Navigate("strategies");
+        if (main.Page("strategies") is Views.StrategiesView sv)
+            sv.AskClaudeToPortPine(pinePath);
     }
 
     private async Task NewAsync()

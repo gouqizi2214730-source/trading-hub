@@ -167,9 +167,82 @@ public sealed class IndicatorsWindow : Window
                 row.Children.Add(new TextBlock { Text = i.Name, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
                 var item = new ListBoxItem { Content = row, Tag = i };
                 if (!string.IsNullOrWhiteSpace(i.Description)) ToolTip.SetTip(item, i.Description);
+                item.ContextMenu = LibraryMenu(i);
                 _available.Items.Add(item);
             }
         }
+    }
+
+    /// <summary>Clic derecho en la biblioteca: ver el código, copiarlo como propio, editarlo o borrarlo.</summary>
+    private ContextMenu LibraryMenu(IndicatorInfo i)
+    {
+        var menu = new ContextMenu();
+        var items = new List<Control>();
+        var add = new MenuItem { Header = "Agregar al gráfico", Icon = Ui.Icon(MaterialIconKind.Plus, 16) };
+        add.Click += (_, _) => AddIndicator(i);
+        items.Add(add);
+        items.Add(new Separator());
+        bool own = i.Source == UserScripts.Source;
+        if (own)
+        {
+            var edit = new MenuItem { Header = "Editar el código…", Icon = Ui.Icon(MaterialIconKind.CodeBraces, 16) };
+            edit.Click += (_, _) => new CodeEditorWindow(_svc, CodeKind.Indicator, IndicatorSources.UserFile(i.Type)).Show(this);
+            items.Add(edit);
+            var del = new MenuItem { Header = "Eliminar este indicador…", Icon = Ui.Icon(MaterialIconKind.DeleteOutline, 16) };
+            del.Click += async (_, _) =>
+            {
+                var file = IndicatorSources.UserFile(i.Type);
+                if (file == null) return;
+                bool ok = await ConfirmDialog.ShowAsync(this, "Eliminar indicador", $"Se borra el archivo {Path.GetFileName(file)} de tus indicadores. Los gráficos que lo usan lo pierden.", "Eliminar", danger: true);
+                if (!ok) return;
+                try
+                {
+                    File.Delete(file);
+                    _svc.Scripts?.CompileAll();
+                }
+                catch (Exception ex)
+                {
+                    await ConfirmDialog.ShowAsync(this, "No se pudo borrar", ex.Message, "Cerrar");
+                }
+            };
+            items.Add(del);
+        }
+        else
+        {
+            var view = new MenuItem { Header = "Ver el código fuente…", Icon = Ui.Icon(MaterialIconKind.FileCodeOutline, 16) };
+            view.Click += (_, _) =>
+            {
+                var src = IndicatorSources.EmbeddedSource(i.Type);
+                if (src == null)
+                {
+                    _ = ConfirmDialog.ShowAsync(this, "Sin código fuente", "Este indicador viene compilado sin su código.", "Cerrar");
+                    return;
+                }
+
+                new CodeEditorWindow(_svc, CodeKind.Indicator, null, (i.Name, src)).Show(this);
+            };
+            items.Add(view);
+            var fork = new MenuItem { Header = "Copiar como indicador propio (para modificarlo)…", Icon = Ui.Icon(MaterialIconKind.ContentCopy, 16) };
+            fork.Click += async (_, _) =>
+            {
+                var name = await PromptDialog.ShowAsync(this, "Copiar como propio", "Nombre de la clase de la copia", i.Type.Name + "Propio", "Copiar");
+                if (name == null) return;
+                try
+                {
+                    var path = IndicatorSources.Fork(i.Type, name);
+                    _svc.Scripts?.CompileAll();
+                    new CodeEditorWindow(_svc, CodeKind.Indicator, path).Show(this);
+                }
+                catch (Exception ex)
+                {
+                    await ConfirmDialog.ShowAsync(this, "No se pudo copiar", ex.Message, "Cerrar");
+                }
+            };
+            items.Add(fork);
+        }
+
+        menu.ItemsSource = items;
+        return menu;
     }
 
     private void FillOnChart()
@@ -199,6 +272,11 @@ public sealed class IndicatorsWindow : Window
     private void AddSelected()
     {
         if (_available.SelectedItem is not ListBoxItem { Tag: IndicatorInfo info }) return;
+        AddIndicator(info);
+    }
+
+    private void AddIndicator(IndicatorInfo info)
+    {
         try
         {
             var ind = (Indicator)Activator.CreateInstance(info.Type)!;

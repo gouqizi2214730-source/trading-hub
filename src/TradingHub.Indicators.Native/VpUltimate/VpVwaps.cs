@@ -14,7 +14,7 @@ public enum VpVwapSource
 }
 
 /// <summary>Sumas de un VWAP (precio × volumen, volumen, precio² × volumen).</summary>
-internal struct VwapSum
+public struct VwapSum
 {
     public decimal Pv, V, P2v;
 
@@ -72,7 +72,7 @@ public abstract class VpPeriodVwapBase : VpIndicator
     [Display(Name = "Precio", GroupName = "Cálculo", Order = 5)]
     public VpVwapSource Source { get => _source; set { _source = value; RecalculateValues(); } }
 
-    private protected VwapSum Sum(int bar) => VwapSum.Of(GetCandle(bar), _source);
+    protected VwapSum Sum(int bar) => VwapSum.Of(GetCandle(bar), _source);
 }
 
 /// <summary>Módulo 2 del «VP definitivo»: VWAP del día, la semana, el mes, el trimestre y el año a la vez.</summary>

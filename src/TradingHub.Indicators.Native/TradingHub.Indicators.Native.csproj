@@ -7,6 +7,10 @@
     <InternalsVisibleTo Include="TradingHub.Tests" />
   </ItemGroup>
   <ItemGroup>
+    <!-- el código fuente viaja adentro del ensamblado: en KVP se puede ver y copiar cualquier indicador de la biblioteca -->
+    <EmbeddedResource Include="**\*.cs" Exclude="bin\**;obj\**" LogicalName="source/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\TradingHub.Sdk\TradingHub.Sdk.csproj" />
   </ItemGroup>
 </Project>
