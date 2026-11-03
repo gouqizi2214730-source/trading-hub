@@ -35,6 +35,45 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
     public Instrument Instrument { get; }
     public IMarketDataFeed Feed { get; }
     public TradeStore Trades { get; }
+
+    // velas ya armadas por período y paso de precio: cambiar de 1h a 4h y volver no vuelve a recorrer millones de
+    // operaciones (se comparten entre los gráficos del mismo instrumento; se tiran si se reemplaza la historia)
+    private readonly List<(string Key, long Generation, CandleSeries Series)> _seriesCache = new();
+    private const int MaxCachedSeries = 8;
+
+    /// <summary>
+    /// Las velas de un período (con el paso de precio pedido), armadas una sola vez y al día con las operaciones del
+    /// almacén. Hilo de UI.
+    /// </summary>
+    public CandleSeries GetSeries(ChartPeriod period, int priceStep, SessionSettings? session = null)
+    {
+        string key = period.Code + "|" + priceStep + "|" + (session == null ? "" : session.TimeZone.Id + "/" + session.Start);
+        for (int i = 0; i < _seriesCache.Count; i++)
+        {
+            var e = _seriesCache[i];
+            if (e.Key != key) continue;
+            if (e.Generation == Trades.Generation)
+            {
+                e.Series.Append(Trades);
+                // la usada más recientemente al final
+                _seriesCache.RemoveAt(i);
+                _seriesCache.Add(e);
+                return e.Series;
+            }
+
+            _seriesCache.RemoveAt(i);
+            break;
+        }
+
+        var series = new CandleSeries(Instrument, period, priceStep, session);
+        series.Rebuild(Trades);
+        _seriesCache.Add((key, Trades.Generation, series));
+        while (_seriesCache.Count > MaxCachedSeries) _seriesCache.RemoveAt(0);
+        return series;
+    }
+
+    /// <summary>Olvida las velas armadas (cuando la historia se reemplaza sin vaciar el almacén).</summary>
+    public void DropSeriesCache() => _seriesCache.Clear();
     public DepthSnapshot Depth { get; private set; } = DepthSnapshot.Empty;
 
     public FeedStatus Status => _status;

@@ -295,10 +295,10 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
     public void Rebuild()
     {
         int step = BaseStepFor(Settings.PriceStep);
-        Series = new CandleSeries(Instrument, Period, step);
-        Series.Rebuild(Data.Trades);
+        Series = Data.GetSeries(Period, step);
         _wrappers.Clear();
         for (int i = 0; i < Series.Count; i++) _wrappers.Add(new IndicatorCandle(Series[i], Series));
+        _seenTrades = Data.Trades.Count;
         UpdateInfos();
         foreach (var s in Indicators) s.NeedsRecalc = true;
         _openCumulative = null;
@@ -502,11 +502,19 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
         Rebuild();
     }
 
+    // la serie se comparte entre gráficos del mismo instrumento: lo que cambió se mide desde lo que este gráfico ya vio,
+    // no desde lo que la serie ya procesó (otro gráfico pudo haberla puesto al día antes)
+    private int _seenTrades;
+
     private void OnTradesAppended(int start, int count)
     {
-        var res = Series.Append(Data.Trades);
+        int candlesBefore = _wrappers.Count;
+        Series.Append(Data.Trades);
         for (int i = _wrappers.Count; i < Series.Count; i++) _wrappers.Add(new IndicatorCandle(Series[i], Series));
-        if (!res.Changed) return;
+        bool changed = Data.Trades.Count > _seenTrades && Series.Count > 0;
+        _seenTrades = Data.Trades.Count;
+        if (!changed) return;
+        var res = new AppendResult(Math.Clamp(candlesBefore - 1, 0, Series.Count - 1), Series.Count - candlesBefore);
 
         // ticks para los indicadores que los piden
         List<MarketDataArg>? args = null;

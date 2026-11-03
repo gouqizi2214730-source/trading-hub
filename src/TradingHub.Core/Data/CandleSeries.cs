@@ -98,10 +98,13 @@ public sealed class CandleSeries
         int firstChanged = _candles.Count > 0 ? _candles.Count - 1 : 0;
         int before = _candles.Count;
 
-        for (int i = _processed; i < store.Count; i++)
-        {
-            ProcessTrade(store, i);
-        }
+        // de cero y con millones de operaciones: las velas por tiempo se arman por tramos en paralelo (cada tramo empieza
+        // en un límite de vela, así los tramos no comparten velas) y se unen en orden
+        if (_candles.Count == 0 && _processed == 0 && Period.IsTimeBased && store.Count > 1_500_000 && Environment.ProcessorCount > 1)
+            BuildParallel(store);
+        else
+            for (int i = _processed; i < store.Count; i++)
+                ProcessTrade(store, i);
 
         _processed = store.Count;
         int created = _candles.Count - before;
@@ -109,7 +112,46 @@ public sealed class CandleSeries
         return new AppendResult(Math.Min(firstChanged, _candles.Count - 1), created);
     }
 
+    private void BuildParallel(TradeStore store)
+    {
+        int parts = Math.Clamp(Environment.ProcessorCount, 2, 16);
+        var starts = new List<int> { 0 };
+        for (int k = 1; k < parts; k++)
+        {
+            int i = (int)((long)store.Count * k / parts);
+            // adelante hasta el primer cambio de vela (la operación i empieza una vela distinta de la i-1)
+            long prevEnd = TimeBucket(store.GetTimeTicks(i - 1)).End;
+            while (i < store.Count && store.GetTimeTicks(i) < prevEnd) i++;
+            if (i < store.Count && i > starts[^1]) starts.Add(i);
+        }
+
+        var subs = new CandleSeries[starts.Count];
+        Parallel.For(0, starts.Count, k =>
+        {
+            var sub = new CandleSeries(Instrument, Period, PriceStep, Session);
+            int from = starts[k], to = k + 1 < starts.Count ? starts[k + 1] : store.Count;
+            for (int i = from; i < to; i++) sub.ProcessTrade(store, i);
+            subs[k] = sub;
+        });
+
+        foreach (var sub in subs)
+        {
+            if (sub._candles.Count == 0) continue;
+            if (_candles.Count > 0) _candles[^1].IsClosed = true;
+            _candles.AddRange(sub._candles);
+            _bucketEnd = sub._bucketEnd;
+            _aggregated = sub._aggregated;
+        }
+    }
+
     private bool _aggregated;
+
+    /// <summary>Procesa una sola operación del almacén, en orden (para pruebas y recorridos parciales).</summary>
+    public void AppendOne(TradeStore store, int i)
+    {
+        ProcessTrade(store, i);
+        _processed = Math.Max(_processed, i + 1);
+    }
 
     private void ProcessTrade(TradeStore store, int i)
     {
@@ -314,12 +356,18 @@ public sealed class CandleSeries
     public static int SuggestPriceStep(TradeStore store, Instrument instrument, ChartPeriod period, int targetRows = 18)
     {
         if (store.Count < 50) return 1;
+        // alcanza con las últimas ~300 velas: no se recorre toda la historia (eran decenas de millones de operaciones
+        // cada vez que se cambiaba de período)
+        int from = 0;
+        if (period.IsTimeBased && period.ApproxDuration > TimeSpan.Zero)
+            from = store.LowerBound(store.LastTime - TimeSpan.FromTicks(period.ApproxDuration.Ticks * 300));
+        else from = Math.Max(0, store.Count - 3_000_000);
         var probe = new CandleSeries(instrument, period, 1);
-        probe.Append(store);
+        for (int i = from; i < store.Count; i++) probe.ProcessTrade(store, i);
         if (probe.Count < 2) return 1;
         var ranges = new List<long>();
-        int from = Math.Max(0, probe.Count - 200);
-        for (int i = from; i < probe.Count; i++)
+        int tail = Math.Max(0, probe.Count - 200);
+        for (int i = tail; i < probe.Count; i++)
         {
             var c = probe[i];
             ranges.Add(c.HighTicks - c.LowTicks + 1);

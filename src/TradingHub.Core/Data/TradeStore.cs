@@ -53,11 +53,15 @@ public sealed class TradeStore
         if (t.Id > LastId) LastId = t.Id;
     }
 
+    /// <summary>Cambia cada vez que el almacén se vacía (se reemplaza la historia): lo armado sobre él ya no sirve.</summary>
+    public long Generation { get; private set; }
+
     public void Clear()
     {
         _chunks.Clear();
         Count = 0;
         LastId = -1;
+        Generation++;
     }
 
     public long GetId(int i) => _chunks[i >> ChunkBits].Ids[i & ChunkMask];

@@ -209,7 +209,7 @@ public sealed class InstrumentPicker : Button
                 var feed = _svc.Connections.GetFeed(p.Id);
                 if (!InstrumentCache.TryGetValue(p.Id, out var instruments))
                 {
-                    instruments = await feed.GetInstrumentsAsync(CancellationToken.None);
+                    instruments = await InstrumentCatalog.LoadAsync(feed, p.Id, CancellationToken.None);
                     InstrumentCache[p.Id] = instruments;
                 }
 
@@ -355,7 +355,7 @@ public sealed class InstrumentPicker : Button
     public static async Task<IReadOnlyList<Instrument>> InstrumentsAsync(AppServices svc, string profileId)
     {
         if (InstrumentCache.TryGetValue(profileId, out var list)) return list;
-        list = await svc.Connections.GetFeed(profileId).GetInstrumentsAsync(CancellationToken.None);
+        list = await InstrumentCatalog.LoadAsync(svc.Connections.GetFeed(profileId), profileId, CancellationToken.None);
         InstrumentCache[profileId] = list;
         return list;
     }
