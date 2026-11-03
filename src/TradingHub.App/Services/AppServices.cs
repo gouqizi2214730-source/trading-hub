@@ -180,6 +180,9 @@ public sealed class AppSettings
     /// <summary>Sin compras / ventas del exchange, el delta de las velas de historia se estima por la forma de la vela.</summary>
     public bool EstimateDeltaFromShape { get; set; } = true;
 
+    /// <summary>Aceleración por GPU (CUDA / OpenCL) para los perfiles de volumen: "auto" u "off".</summary>
+    public string GpuMode { get; set; } = "auto";
+
     /// <summary>Guardar fotos del libro de órdenes (cada 2 s) para el mapa de calor de liquidez y el delta del libro.</summary>
     public bool RecordLiquidity { get; set; } = true;
 
@@ -443,6 +446,7 @@ public sealed class AppServices
         TradingHub.Data.LiquidityHistory.Root = DataLocation.Root;
         TradingHub.Data.LiquidityHistory.Enabled = Settings.RecordLiquidity;
         TradingHub.Data.LiquidityHistory.KeepHours = Math.Clamp(Settings.LiquidityHours, 1, 72);
+        TradingHub.Compute.GpuCompute.Mode = Settings.GpuMode == "off" ? "off" : "auto";
         // resultados ya calculados de los indicadores (junto a los datos de mercado: sobreviven a actualizaciones)
         TradingHub.Indicators.ResultCache.Root = Path.Combine(DataLocation.Root, "IndicatorCache");
         // TRADINGHUB_LIVE_DIR: cartera alternativa (pruebas)
@@ -707,6 +711,7 @@ public sealed class AppServices
             foreach (var rs in _rithmicSessions.Values) rs.Dispose();
             foreach (var ts in _tradovateSessions.Values) ts.Dispose();
             _klines?.Dispose();
+            TradingHub.Compute.GpuCompute.Dispose();
             Hub.Dispose();
             Connections.DisposeAll();
         }

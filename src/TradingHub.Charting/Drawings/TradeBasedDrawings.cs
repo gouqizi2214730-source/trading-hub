@@ -115,27 +115,21 @@ public sealed class TradeDrawingCalc
 
         int a = store.LowerBound(fromUtc), b = store.LowerBound(toUtc);
         if (b <= a) return _profile = null;
-        var levels = new Dictionary<long, (decimal Bid, decimal Ask)>();
-        long lo = long.MaxValue, hi = long.MinValue;
-        for (int i = a; i < b; i++)
-        {
-            long p = store.GetPriceTicks(i);
-            if (p < lo) lo = p;
-            if (p > hi) hi = p;
-            levels.TryGetValue(p, out var v);
-            decimal vol = store.GetVolume(i);
-            levels[p] = store.GetSide(i) == TradeSide.Buy ? (v.Bid, v.Ask + vol) : (v.Bid + vol, v.Ask);
-        }
-
+        // agrupado por precio en la GPU si hay (millones de operaciones) o en la CPU en paralelo
+        var bins = TradingHub.Compute.GpuCompute.BinByPrice(store, a, b);
+        if (bins == null) return _profile = null;
+        long lo = bins.Low, hi = bins.High;
         decimal tick = instrument.TickSize;
         long span = hi - lo + 1;
         long ticksPerRow = rows <= 0 ? 1 : Math.Max(1, (long)Math.Ceiling(span / (double)rows));
         var result = new ProfileResult { RowSize = tick * ticksPerRow, Low = instrument.FromTicks(lo), High = instrument.FromTicks(hi), Trades = b - a, From = fromUtc, To = toUtc };
-        foreach (var (p, v) in levels)
+        for (long i = 0; i < span; i++)
         {
-            decimal row = instrument.FromTicks(lo + (p - lo) / ticksPerRow * ticksPerRow);
+            double bidV = bins.Bid[i], askV = bins.Ask[i];
+            if (bidV == 0 && askV == 0) continue;
+            decimal row = instrument.FromTicks(lo + i / ticksPerRow * ticksPerRow);
             result.Rows.TryGetValue(row, out var r);
-            result.Rows[row] = (r.Bid + v.Bid, r.Ask + v.Ask);
+            result.Rows[row] = (r.Bid + (decimal)bidV, r.Ask + (decimal)askV);
         }
 
         decimal max = -1, poc = 0, total = 0;

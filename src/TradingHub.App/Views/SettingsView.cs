@@ -154,6 +154,8 @@ internal sealed class SettingsView : UserControl, IPage
                 compact),
             Setting("Delta estimado en velas sin compras / ventas", "Cuando la historia viene en velas y el exchange no informa el volumen comprador (Bybit, acciones), el delta se estima por la forma de la vela: comprador = volumen × (cierre − mínimo) / (máximo − mínimo). Apagado: mitad y mitad (delta cero). Se aplica a la historia que cargues desde ahora.",
                 Switch(s.EstimateDeltaFromShape, v => { s.EstimateDeltaFromShape = v; TradingHub.Data.KlineHistory.EstimateDeltaFromShape = v; })),
+            Setting("Aceleración por GPU (CUDA / OpenCL)", "Los perfiles de volumen sobre millones de operaciones (perfil de rango fijo, composites) se agrupan en la placa de video si hay una compatible (NVIDIA con CUDA, o cualquiera con OpenCL); si no, en todos los núcleos de la CPU. El resultado es idéntico. " + GpuText(),
+                Switch(s.GpuMode != "off", v => { s.GpuMode = v ? "auto" : "off"; TradingHub.Compute.GpuCompute.Mode = s.GpuMode; })),
             Setting("Libro de órdenes guardado (mapa de calor de liquidez)", "Mientras un gráfico está abierto se guarda una foto del libro cada 3 segundos (hasta 100 niveles por lado; un libro más profundo se resume en tramos). Alimenta el mapa de calor de liquidez (menú del gráfico) y el indicador «Delta del libro de órdenes». Unos 30-50 MB por día e instrumento en la carpeta de datos (Liquidez).",
                 Switch(s.RecordLiquidity, v => { s.RecordLiquidity = v; TradingHub.Data.LiquidityHistory.Enabled = v; })),
             Setting("Footprint en la historia", "Cuánto hacia atrás la historia trae cada operación. Lo más viejo que tengas bajado en Datos se carga resumido (ver «Resumen de la historia más vieja»), con footprint y perfil en filas de ~1 punto básico; la primera vez arma un resumen por día y después abre al instante. Sin ticks bajados, lo viejo llega en velas y se ve sin footprint. Del exchange se traen solos hasta 30 días; para más, bajalos en Datos. Lo que no entra en la memoria se carga resumido.", tickHistory),
@@ -516,6 +518,14 @@ internal sealed class SettingsView : UserControl, IPage
     private readonly TextBlock _dataFolderState = new() { Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap, IsVisible = false };
     private readonly ProgressBar _dataFolderProgress = new() { Minimum = 0, Maximum = 1, Height = 6, IsVisible = false };
     private bool _movingData;
+
+    private static string GpuText()
+    {
+        if (TradingHub.Compute.GpuCompute.Mode == "off") return "Apagada.";
+        return TradingHub.Compute.GpuCompute.IsAvailable
+            ? $"Placa detectada: {TradingHub.Compute.GpuCompute.DeviceName} · usada {TradingHub.Compute.GpuCompute.GpuRuns} veces en esta sesión."
+            : "Estado: " + TradingHub.Compute.GpuCompute.Status;
+    }
 
     private Control BuildMarketDataFolder()
     {
