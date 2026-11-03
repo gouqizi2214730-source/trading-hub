@@ -157,6 +157,16 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     /// <summary>Tocó un límite de riesgo (mensaje para avisarte).</summary>
     public event Action<LiveStrategyRunner, string>? LimitHit;
 
+    /// <summary>La estrategia pidió una alerta (Strategy.Alert).</summary>
+    public event Action<LiveStrategyRunner, string>? Alerted;
+
+    public void Alert(string message)
+    {
+        if (_warmup) return;
+        Log("🔔 " + message);
+        Alerted?.Invoke(this, message);
+    }
+
     /// <summary>Limitador de riesgo duro (por ejemplo uno compartido por varias estrategias).</summary>
     public ILiveOrderGuard? Guard { get; set; }
 

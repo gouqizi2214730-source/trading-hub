@@ -168,6 +168,7 @@ internal sealed class SettingsView : UserControl, IPage
         var liveStart = BuildLiveStart();
         var hotkeys = BuildHotkeys();
         var updates = BuildUpdates();
+        var alerts = BuildAlerts();
 
         var logo = new Image { Source = AppIcon.Bitmap, Width = 56, Height = 56 };
         var about = Ui.Card(Ui.H(16, logo, Ui.V(4,
@@ -181,8 +182,93 @@ internal sealed class SettingsView : UserControl, IPage
             Spacing = 18,
             MaxWidth = 860,
             HorizontalAlignment = HorizontalAlignment.Left,
-            Children = { Ui.V(4, Ui.H1("Ajustes"), Ui.Muted("Preferencias generales de Trading Hub")), general, trading, liveStart, sleep, hotkeys, data, updates, about },
+            Children = { Ui.V(4, Ui.H1("Ajustes"), Ui.Muted("Preferencias generales de Trading Hub")), general, trading, alerts, liveStart, sleep, hotkeys, data, updates, about },
         };
+    }
+
+    // ===================================================================== alertas afuera
+
+    private Control BuildAlerts()
+    {
+        var s = _svc.Settings;
+        var state = new TextBlock { Classes = { "muted", "small" }, TextWrapping = TextWrapping.Wrap };
+
+        var webhook = Switch(s.AlertWebhookEnabled, v => s.AlertWebhookEnabled = v);
+        var url = new TextBox { Text = s.AlertWebhookUrl ?? "", Watermark = "https://…/webhook", MinWidth = 320 };
+        url.LostFocus += (_, _) =>
+        {
+            s.AlertWebhookUrl = url.Text?.Trim();
+            s.Save();
+        };
+        var header = new TextBox { Text = s.AlertWebhookHeader ?? "", Watermark = "Authorization: Bearer … (opcional)", MinWidth = 320 };
+        header.LostFocus += (_, _) =>
+        {
+            s.AlertWebhookHeader = header.Text?.Trim();
+            s.Save();
+        };
+
+        var telegram = Switch(s.AlertTelegramEnabled, v => s.AlertTelegramEnabled = v);
+        var token = new TextBox { Text = s.AlertTelegramToken ?? "", Watermark = "123456:ABC… (token del bot, va al llavero)", PasswordChar = '•', MinWidth = 320 };
+        token.LostFocus += (_, _) => s.AlertTelegramToken = string.IsNullOrWhiteSpace(token.Text) ? null : token.Text.Trim();
+        var chat = new TextBox { Text = s.AlertTelegramChatId ?? "", Watermark = "chat_id (número; negativo en grupos)", MinWidth = 320 };
+        chat.LostFocus += (_, _) =>
+        {
+            s.AlertTelegramChatId = chat.Text?.Trim();
+            s.Save();
+        };
+
+        var kinds = Ui.H(14,
+            new CheckBox { Content = "Precio", IsChecked = s.AlertExternalPrice }.Also(c => c.IsCheckedChanged += (_, _) => { s.AlertExternalPrice = c.IsChecked == true; s.Save(); }),
+            new CheckBox { Content = "Indicadores", IsChecked = s.AlertExternalIndicators }.Also(c => c.IsCheckedChanged += (_, _) => { s.AlertExternalIndicators = c.IsChecked == true; s.Save(); }),
+            new CheckBox { Content = "Estrategias", IsChecked = s.AlertExternalStrategies }.Also(c => c.IsCheckedChanged += (_, _) => { s.AlertExternalStrategies = c.IsChecked == true; s.Save(); }),
+            new CheckBox { Content = "Órdenes", IsChecked = s.AlertExternalOrders }.Also(c => c.IsCheckedChanged += (_, _) => { s.AlertExternalOrders = c.IsChecked == true; s.Save(); }));
+
+        var test = Ui.Button("Mandar una alerta de prueba", MaterialIconKind.BellRingOutline, () => _ = TestAsync());
+        async Task TestAsync()
+        {
+            // los campos pueden no haber perdido el foco todavía
+            s.AlertWebhookUrl = url.Text?.Trim();
+            s.AlertWebhookHeader = header.Text?.Trim();
+            s.AlertTelegramChatId = chat.Text?.Trim();
+            s.AlertTelegramToken = string.IsNullOrWhiteSpace(token.Text) ? null : token.Text.Trim();
+            s.Save();
+            state.Text = "Mandando…";
+            var err = await _svc.Alerts.TestExternalAsync();
+            state.Text = err == null ? "Llegó bien." : err;
+            _svc.Alerts.Raise(AlertKind.System, "", "Prueba", "Alerta de prueba (también se ve acá, en la app)");
+        }
+
+        var log = Ui.Button("Ver el registro de alertas", MaterialIconKind.History, () => ShowAlertLog());
+
+        return Section("Alertas", MaterialIconKind.BellOutline,
+            Setting("Webhook (HTTP POST con JSON)", "Cada alerta (precio, indicadores, estrategias, órdenes) se manda como POST a esta URL con JSON: app, time, kind, instrument, source, message, text. Sirve para n8n, Discord / Slack (con un puente), bots propios…", Ui.V(6, webhook, url, header)),
+            Setting("Telegram", "Un bot de Telegram (creado con @BotFather) manda cada alerta a este chat. El token se guarda en el llavero, no en los archivos.", Ui.V(6, telegram, token, chat)),
+            Setting("Qué se manda afuera", "En la app se muestran todas; afuera, solo las marcadas.", kinds),
+            Setting("Probar", "Manda una alerta de prueba por las salidas activadas y muestra el resultado.", Ui.V(6, Ui.H(8, test, log), state)));
+    }
+
+    private void ShowAlertLog()
+    {
+        var list = new StackPanel { Spacing = 4, Margin = new Thickness(14) };
+        foreach (var ev in _svc.Alerts.Recent.AsEnumerable().Reverse().Take(200))
+            list.Children.Add(new TextBlock
+            {
+                Text = $"{ev.TimeUtc.ToLocalTime():yyyy-MM-dd HH:mm:ss}  [{AlertCenter.KindName(ev.Kind)}]  {(ev.Instrument.Length > 0 ? ev.Instrument + " · " : "")}{ev.Source}: {ev.Message}",
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 12,
+            });
+        if (list.Children.Count == 0) list.Children.Add(Ui.Muted("Todavía no hubo alertas."));
+        var w = new Window
+        {
+            Title = "Registro de alertas",
+            Width = 720,
+            Height = 520,
+            Background = Ui.Bg0,
+            Content = new ScrollViewer { Content = list },
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+        };
+        if (TopLevel.GetTopLevel(this) is Window owner) w.Show(owner);
+        else w.Show();
     }
 
     // ===================================================================== estrategias en vivo al abrir

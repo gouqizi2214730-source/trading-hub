@@ -1322,11 +1322,7 @@ public sealed partial class TradingView : UserControl
         new FootprintEditorWindow(chart.Model, this).Show(owner);
     }
 
-    private void ShowAlert(AlertInfo a)
-    {
-        _status($"🔔 {a.Source}: {a.Message}");
-        Sound.Play();
-    }
+    private void ShowAlert(AlertInfo a) => _svc.Alerts.Raise(AlertKind.Indicator, a.Instrument, a.Source, a.Message);
 
     internal async Task RestoreOrDefaultAsync()
     {
@@ -1428,8 +1424,7 @@ public sealed partial class TradingView : UserControl
                 d.Dashed = false;
                 d.LineStyle = LineStyleKind.Solid;
                 DrawingsTouched(t);
-                _status($"🔔 {t.Symbol} tocó {m.Instrument.FormatPrice(level)}");
-                Sound.Play();
+                _svc.Alerts.Raise(AlertKind.Price, t.Symbol, "Precio", $"tocó {m.Instrument.FormatPrice(level)}" + (string.IsNullOrEmpty(d.Text) ? "" : " · " + d.Text));
                 m.Invalidate();
             }
 

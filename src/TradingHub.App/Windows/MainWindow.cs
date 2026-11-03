@@ -60,6 +60,12 @@ public sealed class MainWindow : Window
         _pages["trading"] = Trading;
         svc.Live.Trading = () => Trading;
         svc.Live.Notice += text => Dispatcher.UIThread.Post(() => SetStatus(text));
+        svc.Alerts.Raised += ev =>
+        {
+            SetStatus("🔔 " + (ev.Instrument.Length > 0 ? ev.Instrument + " · " : "") + (ev.Source.Length > 0 ? ev.Source + ": " : "") + ev.Message);
+            Views.Sound.Play();
+            ShowToast(ev);
+        };
         _pageDefs = new List<Page>
         {
             new("trading", "Trading", MaterialIconKind.ChartBoxOutline, () => Trading, new KeyGesture(Key.D1, Keys.Command)),
@@ -497,6 +503,36 @@ public sealed class MainWindow : Window
     }
 
     // ===================================================================== estado
+
+    /// <summary>Aviso arriba a la derecha (se va solo a los 8 s; clic para cerrarlo).</summary>
+    internal void ShowToast(AlertEvent ev)
+    {
+        var icon = ev.Kind switch
+        {
+            AlertKind.Price => MaterialIconKind.BellRing,
+            AlertKind.Strategy => MaterialIconKind.RobotOutline,
+            AlertKind.Order => MaterialIconKind.SwapVertical,
+            AlertKind.Indicator => MaterialIconKind.ChartBellCurve,
+            _ => MaterialIconKind.InformationOutline,
+        };
+        var title = new TextBlock { Text = (ev.Instrument.Length > 0 ? ev.Instrument + " · " : "") + ev.Source, FontWeight = FontWeight.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
+        var body = new TextBlock { Text = ev.Message, TextWrapping = TextWrapping.Wrap, Classes = { "muted" } };
+        var time = new TextBlock { Text = ev.TimeUtc.ToLocalTime().ToString("HH:mm:ss"), Classes = { "faint", "small" } };
+        var card = new Border
+        {
+            Child = Ui.H(10, Ui.Icon(icon, 20, Ui.Accent), Ui.V(2, title, body, time)),
+            Background = Ui.Bg1,
+            BorderBrush = Ui.Accent,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(12, 10),
+            Opacity = 0.97,
+        };
+        card.PointerPressed += (_, _) => _toasts.Children.Remove(card);
+        _toasts.Children.Add(card);
+        while (_toasts.Children.Count > 4) _toasts.Children.RemoveAt(0);
+        DispatcherTimer.RunOnce(() => _toasts.Children.Remove(card), TimeSpan.FromSeconds(8));
+    }
 
     internal void SetStatus(string text)
     {

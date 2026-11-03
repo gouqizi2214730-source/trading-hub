@@ -149,6 +149,26 @@ public sealed class AppSettings
     public decimal SimStartBalance { get; set; } = 10_000m;
     public bool SoundAlerts { get; set; } = true;
 
+    // alertas afuera: webhook (POST JSON) y Telegram (el token del bot va en el llavero)
+    public bool AlertWebhookEnabled { get; set; }
+    public string? AlertWebhookUrl { get; set; }
+    public string? AlertWebhookHeader { get; set; }
+    public bool AlertTelegramEnabled { get; set; }
+    public string? AlertTelegramChatId { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? AlertTelegramToken
+    {
+        get => Keychain.Get("alertas-telegram");
+        set => Keychain.Set("alertas-telegram", value);
+    }
+
+    /// <summary>Qué alertas se mandan afuera (las de la app se muestran siempre).</summary>
+    public bool AlertExternalPrice { get; set; } = true;
+    public bool AlertExternalIndicators { get; set; } = true;
+    public bool AlertExternalStrategies { get; set; } = true;
+    public bool AlertExternalOrders { get; set; } = true;
+
     public bool RecordLiveData { get; set; } = true;
 
     /// <summary>
@@ -432,6 +452,11 @@ public sealed class AppServices
     }
 
     public AppSettings Settings { get; } = AppSettings.Load();
+
+    private AlertCenter? _alerts;
+
+    /// <summary>Todas las alertas (aviso en la app, registro y salidas externas).</summary>
+    public AlertCenter Alerts => _alerts ??= new AlertCenter(Settings).Also(a => a.LoadRecent());
     public ConnectionManager Connections { get; } = new();
     public MarketDataHub Hub { get; } = new();
 

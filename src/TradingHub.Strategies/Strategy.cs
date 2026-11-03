@@ -101,6 +101,9 @@ internal interface IStrategyHost
     void Cancel(StrategyOrder order);
     void Modify(StrategyOrder order, decimal price);
     void Log(string message);
+
+    /// <summary>Alerta para el usuario (aviso en la app, sonido y salidas externas); en backtest queda en el registro.</summary>
+    void Alert(string message) => Log("🔔 " + message);
 }
 
 /// <summary>
@@ -324,6 +327,9 @@ public abstract class Strategy
     }
 
     protected void Log(string message) => Host.Log(message);
+
+    /// <summary>Alerta: en vivo se muestra en la app (y se manda por webhook / Telegram si está configurado); en backtest va al registro.</summary>
+    protected void Alert(string message) => Host.Alert(message);
 
     // ----------------------------------------------------------------- dibujos en el gráfico
 

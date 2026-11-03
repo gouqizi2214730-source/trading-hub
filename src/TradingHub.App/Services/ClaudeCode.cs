@@ -758,6 +758,8 @@ public sealed class ClaudeCodeBridge
         - Parámetros editables: propiedades públicas con `[Parameter("Nombre")]`; para optimizarlas, además `[Optimize(mín, máx, paso)]`.
         - Ciclo: `protected override void OnInit()` (crear indicadores), `protected override void OnBar(Bar bar)` (al cerrar cada vela),
           opcional `OnTick(Trade trade)`, `OnOrderFilled(StrategyOrder order)`, `OnSessionStart(DateOnly session)`, `OnStop()`.
+        - `Alert("texto")`: alerta para el usuario (en vivo: aviso en la app, sonido y webhook / Telegram si los configuró; en
+          backtest queda en el registro). `Log("texto")` solo escribe en el registro.
         - Datos: `Bars[0]` última vela cerrada, `Bars[1]` la anterior. `Bar`: Open, High, Low, Close, Volume, BuyVolume, SellVolume,
           Delta, MaxDelta, MinDelta, Trades, PocPrice, IsBullish, IsBearish, Range, Body, Typical, Time, CloseTime, Index.
           `bar.Levels` (precio → (Buy, Sell)) solo si en OnInit se pone `UseFootprint = true`.

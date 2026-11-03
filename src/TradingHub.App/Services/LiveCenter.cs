@@ -156,9 +156,15 @@ internal sealed partial class LiveCenter
         r.LimitHit += (_, msg) => Dispatcher.UIThread.Post(() =>
         {
             Notify("⚠ " + msg);
+            _svc.Alerts.Raise(AlertKind.Strategy, r.Instrument.Symbol, r.StrategyName, msg);
             _svc.SaveLiveState();
         });
-        r.Executed += (_, msg) => Dispatcher.UIThread.Post(() => Notify(msg));
+        r.Executed += (_, msg) => Dispatcher.UIThread.Post(() =>
+        {
+            Notify(msg);
+            _svc.Alerts.Raise(AlertKind.Order, r.Instrument.Symbol, r.StrategyName, msg);
+        });
+        r.Alerted += (_, msg) => Dispatcher.UIThread.Post(() => _svc.Alerts.Raise(AlertKind.Strategy, r.Instrument.Symbol, r.StrategyName, msg));
     }
 
     /// <summary>La que está corriendo con esa clave (de cualquier origen).</summary>
