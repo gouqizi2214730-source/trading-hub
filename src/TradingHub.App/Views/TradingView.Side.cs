@@ -1114,6 +1114,20 @@ public sealed partial class TradingView
         replay.Items.Add(Item("A ciegas (sin instrumento ni fecha)", MaterialIconKind.EyeOffOutline, () => _ = OpenRandomReplayAsync(blind: true)));
         if (tab.IsReplay && model.Settings.BlindReplay) replay.Items.Add(Item("Revelar este replay", MaterialIconKind.EyeOutline, () => RevealReplay(tab)));
         items.Add(replay);
+        items.Add(Item(ExternalTools.FindVpfm() != null ? "Abrir VPFM (热力 / 成交 / 流动 / 衍生 / 期权)" : "Instalar VPFM (módulos web: heatmap, aggr, GEX…)", MaterialIconKind.ApplicationBracketsOutline, () =>
+        {
+            var exe = ExternalTools.FindVpfm();
+            if (exe != null)
+            {
+                ExternalTools.Launch(exe);
+                _status("VPFM abierto en su propia ventana (Ctrl+1…7 cambia de módulo; el símbolo se sigue desde su pestaña 成交).");
+            }
+            else
+            {
+                Shell.Open(ExternalTools.VpfmReleases);
+                _status("VPFM no está instalado: se abrió la página de descarga. Después de instalarlo, este menú lo abre directo.");
+            }
+        }));
         items.Add(Item("Escala automática", MaterialIconKind.ArrowExpandVertical, () => { model.Viewport.AutoScale = true; model.Invalidate(); }));
         items.Add(Item("Ir al último precio", MaterialIconKind.PageLast, () => { model.Viewport.ScrollBars = 0; model.Invalidate(); }));
         if (model.FocusTrade != null) items.Add(Item("Quitar el resaltado de la operación", MaterialIconKind.SelectionRemove, () => ClearFocusTrade(tab)));

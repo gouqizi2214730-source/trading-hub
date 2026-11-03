@@ -186,6 +186,7 @@ namespace TradingHub.Indicators
         public const string Trend = "Tendencia";
         public const string Oscillators = "Osciladores";
         public const string Levels = "Niveles";
+        public const string Structure = "Estructura (SMC / ICT)";
         public const string Other = "Otros";
         public const string Custom = "Personalizados";
     }
