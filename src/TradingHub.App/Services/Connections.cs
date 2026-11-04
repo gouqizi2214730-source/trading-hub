@@ -173,6 +173,9 @@ public sealed class ConnectionProfile
     // Cripto agregado: qué mercados se suman (ids de datos de mercado)
     public List<string> AggregateSources { get; set; } = new() { BinanceFeed.FuturesId, BybitFeed.LinearId };
 
+    /// <summary>Conexión agregada: el libro de órdenes suma los de todos los mercados.</summary>
+    public bool AggregateBook { get; set; } = true;
+
     // Interactive Brokers
     public string IbHost { get; set; } = "127.0.0.1";
     public int IbPort { get; set; } = 7497;
@@ -478,7 +481,7 @@ public sealed class ConnectionManager
         }
 
         if (sources.Count == 0) sources.Add(new BinanceFeed(futures: true));
-        return new AggregateFeed(sources);
+        return new AggregateFeed(sources) { AggregateBook = p.AggregateBook };
     }
 
     /// <summary>Cliente de Databento con la API key de la conexión (TRADINGHUB_DATABENTO_URL lo apunta a otro servidor).</summary>

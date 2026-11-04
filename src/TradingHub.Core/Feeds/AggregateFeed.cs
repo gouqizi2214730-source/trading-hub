@@ -25,6 +25,28 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, ITickerStats
     }
 
     public IReadOnlyList<IMarketDataFeed> Sources => _sources;
+
+    /// <summary>
+    /// El libro de órdenes suma los de todos los mercados (precio por precio), como el «aggregated order book heatmap» de
+    /// openmarket. Apagado: el libro es el del primer mercado.
+    /// </summary>
+    public bool AggregateBook { get; set; } = true;
+
+    /// <summary>Junta los libros de cada mercado en uno (precios ya en ticks del instrumento agregado).</summary>
+    public static DepthSnapshot MergeBooks(IEnumerable<DepthSnapshot> books, DateTime time)
+    {
+        var bids = new Dictionary<long, decimal>();
+        var asks = new Dictionary<long, decimal>();
+        foreach (var b in books)
+        {
+            foreach (var l in b.Bids) bids[l.PriceTicks] = (bids.TryGetValue(l.PriceTicks, out var v) ? v : 0) + l.Size;
+            foreach (var l in b.Asks) asks[l.PriceTicks] = (asks.TryGetValue(l.PriceTicks, out var v) ? v : 0) + l.Size;
+        }
+
+        var bl = bids.Where(kv => kv.Value > 0).Select(kv => new BookLevel(kv.Key, kv.Value)).OrderByDescending(l => l.PriceTicks).ToArray();
+        var al = asks.Where(kv => kv.Value > 0).Select(kv => new BookLevel(kv.Key, kv.Value)).OrderBy(l => l.PriceTicks).ToArray();
+        return new DepthSnapshot(bl, al, time);
+    }
     public string Id => FeedId;
     public string DisplayName => "Agregado (" + string.Join(" + ", _sources.Select(s => s.DisplayName)) + ")";
     public bool SupportsHistory => true;
@@ -342,6 +364,8 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, ITickerStats
         public readonly List<IDisposable> Inner = new();
         public long LastTicks;
         public bool Disposed;
+        public DepthSnapshot?[] Books = Array.Empty<DepthSnapshot?>();
+        public long LastBookEmit;
 
         public void Dispose()
         {
@@ -375,8 +399,10 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, ITickerStats
         private readonly IMarketDataSink _sink;
         private readonly string _name;
         private readonly bool _depth;
+        private readonly Instrument? _source;
+        private readonly int _index;
 
-        public PartSink(AggregateFeed owner, Live live, Instrument instrument, IMarketDataSink sink, string name, bool depth)
+        public PartSink(AggregateFeed owner, Live live, Instrument instrument, IMarketDataSink sink, string name, bool depth, Instrument? source = null, int index = 0)
         {
             _owner = owner;
             _live = live;
@@ -384,6 +410,8 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, ITickerStats
             _sink = sink;
             _name = name;
             _depth = depth;
+            _source = source;
+            _index = index;
         }
 
         public void OnTrades(Instrument instrument, IReadOnlyList<Trade> trades)
@@ -402,7 +430,37 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, ITickerStats
 
         public void OnDepth(Instrument instrument, DepthUpdate update)
         {
-            if (_depth) _sink.OnDepth(_instrument, update);
+            if (!_owner.AggregateBook || _source == null)
+            {
+                if (_depth) _sink.OnDepth(_instrument, update);
+                return;
+            }
+
+            // libro sumado: el de este mercado (pasado a los ticks del agregado) se guarda y cada ~200 ms sale la suma
+            var snap = update.Snapshot;
+            var conv = new DepthSnapshot(Convert(snap.Bids), Convert(snap.Asks), snap.Time);
+            DepthSnapshot? merged = null;
+            lock (_live)
+            {
+                if (_index < _live.Books.Length) _live.Books[_index] = conv;
+                long now = DateTime.UtcNow.Ticks;
+                if (now - _live.LastBookEmit >= TimeSpan.TicksPerMillisecond * 200)
+                {
+                    _live.LastBookEmit = now;
+                    merged = MergeBooks(_live.Books.Where(b => b != null)!, snap.Time);
+                }
+            }
+
+            if (merged != null) _sink.OnDepth(_instrument, new DepthUpdate { Snapshot = merged, IsFullRefresh = true });
+        }
+
+        private BookLevel[] Convert(BookLevel[] levels)
+        {
+            if (_source == null || _source.TickSize == _instrument.TickSize) return levels;
+            var res = new BookLevel[levels.Length];
+            for (int i = 0; i < levels.Length; i++)
+                res[i] = new BookLevel(_instrument.ToTicks(_instrument.RoundPrice(_source.FromTicks(levels[i].PriceTicks))), levels[i].Size);
+            return res;
         }
 
         public void OnStatus(Instrument instrument, FeedStatus status, string? message) =>
@@ -425,10 +483,11 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, ITickerStats
                 return;
             }
 
+            lock (live) live.Books = new DepthSnapshot?[parts.Count];
             for (int i = 0; i < parts.Count; i++)
             {
                 var (feed, inst) = parts[i];
-                var inner = feed.Subscribe(inst, new PartSink(this, live, instrument, sink, feed.DisplayName, depth: i == 0));
+                var inner = feed.Subscribe(inst, new PartSink(this, live, instrument, sink, feed.DisplayName, depth: i == 0, inst, i));
                 bool late;
                 lock (live)
                 {

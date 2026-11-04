@@ -885,10 +885,13 @@ internal sealed class ConnectionsView : UserControl, IPage
         });
         var list = new StackPanel { Spacing = 6 };
         foreach (var c in checks) list.Children.Add(c);
+        var book = new CheckBox { Content = "Sumar también los libros de órdenes (DOM y mapa de calor agregados)", IsChecked = p.AggregateBook };
+        apply.Add(() => p.AggregateBook = book.IsChecked == true);
         return Ui.V(14,
             Ui.H2("Mercados que se suman"),
-            Note(MaterialIconKind.InformationOutline, "Las operaciones y las velas de todos los mercados elegidos se suman en un solo instrumento (BTCUSDT = Binance + Bybit), como en aggr.trade: volumen, delta y footprint agregados. El precio y el DOM son los del primero. Solo entran los símbolos que existen en al menos dos mercados."),
+            Note(MaterialIconKind.InformationOutline, "Las operaciones y las velas de todos los mercados elegidos se suman en un solo instrumento (BTCUSDT = Binance + Bybit), como en aggr.trade: volumen, delta y footprint agregados. El precio es el del primero; el libro de órdenes, la suma de todos (o el del primero, si se apaga abajo). Solo entran los símbolos que existen en al menos dos mercados."),
             list,
+            book,
             Note(MaterialIconKind.ShieldCheckOutline, "Datos públicos: no hace falta cuenta ni claves. Para operar, usá la conexión de cada mercado."));
     }
 
