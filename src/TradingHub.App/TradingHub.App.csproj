@@ -18,6 +18,12 @@
     <ProjectReference Include="..\TradingHub.Indicators.Technical\TradingHub.Indicators.Technical.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <!-- servidor local del Workbench (módulos web de VPFM y la API de datos de KVP) -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Yarp.ReverseProxy" Version="2.2.0" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
     <PackageReference Include="Avalonia" Version="$(AvaloniaVersion)" />
     <PackageReference Include="Avalonia.Desktop" Version="$(AvaloniaVersion)" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="$(AvaloniaVersion)" />

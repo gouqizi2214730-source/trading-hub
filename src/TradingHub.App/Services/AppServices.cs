@@ -512,6 +512,11 @@ public sealed class AppServices
 
     /// <summary>Velas automáticas (historia en velas al día en segundo plano).</summary>
     public KlineKeeper Klines => _klines ??= new KlineKeeper(this);
+
+    private Workbench.WorkbenchServer? _workbench;
+
+    /// <summary>El servidor local: módulos web del Workbench (VPFM) y la API de datos de KVP.</summary>
+    public Workbench.WorkbenchServer Workbench => _workbench ??= new Workbench.WorkbenchServer(this);
     public ConnectionManager Connections { get; } = new();
     public MarketDataHub Hub { get; } = new();
 
@@ -741,6 +746,15 @@ public sealed class AppServices
             foreach (var rs in _rithmicSessions.Values) rs.Dispose();
             foreach (var ts in _tradovateSessions.Values) ts.Dispose();
             _klines?.Dispose();
+            try
+            {
+                _workbench?.DisposeAsync().AsTask().Wait(3000);
+            }
+            catch
+            {
+                // cerrando
+            }
+
             TradingHub.Compute.GpuCompute.Dispose();
             Hub.Dispose();
             Connections.DisposeAll();

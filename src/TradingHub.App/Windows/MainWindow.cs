@@ -61,6 +61,24 @@ public sealed class MainWindow : Window
         svc.Live.Trading = () => Trading;
         svc.Live.Notice += text => Dispatcher.UIThread.Post(() => SetStatus(text));
         svc.Klines.Start();
+        // servidor local (Workbench y API de datos): en segundo plano, no demora la apertura
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await svc.Workbench.StartAsync();
+            }
+            catch (Exception ex)
+            {
+                Dispatcher.UIThread.Post(() => SetStatus("El servidor local de KVP no arrancó: " + ex.Message));
+            }
+        });
+        TradingHub.App.Services.Workbench.WorkbenchServer.UpdateRequested = async () =>
+        {
+            var r = await UpdateUi.CheckAsync(svc.Settings);
+            if (r?.Update is { } u) await UpdateUi.OfferAsync(this, u, svc.Settings, SetStatus);
+            else SetStatus($"{TradingHub.Common.Product.Name} está al día.");
+        };
         svc.Alerts.Raised += ev =>
         {
             SetStatus("🔔 " + (ev.Instrument.Length > 0 ? ev.Instrument + " · " : "") + (ev.Source.Length > 0 ? ev.Source + ": " : "") + ev.Message);
@@ -74,6 +92,7 @@ public sealed class MainWindow : Window
             new("strategies", "Backtesting", MaterialIconKind.FlaskOutline, () => new StrategiesView(svc, SetStatus), new KeyGesture(Key.D2, Keys.Command)),
             new("live", "En vivo", MaterialIconKind.AccessPoint, () => new LiveView(svc, SetStatus, this), new KeyGesture(Key.D7, Keys.Command)),
             new("data", "Datos", MaterialIconKind.DatabaseOutline, () => new DataView(svc, SetStatus, this), new KeyGesture(Key.D3, Keys.Command)),
+            new("workbench", "Workbench", MaterialIconKind.ViewDashboardVariantOutline, () => new WorkbenchView(svc), new KeyGesture(Key.D6, Keys.Command)),
             new("connections", "Conexiones", MaterialIconKind.LanConnect, () => new ConnectionsView(svc, SetStatus), new KeyGesture(Key.D4, Keys.Command)),
             new("settings", "Ajustes", MaterialIconKind.CogOutline, () => new SettingsView(svc, SetStatus), new KeyGesture(Key.OemComma, Keys.Command)),
         };

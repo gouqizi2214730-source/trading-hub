@@ -1,4 +1,4 @@
-# Checks ralphtradesz/trading-hub every 6 hours. When there are new commits, merges them into main (keeping this fork's
+# Checks ralphtradesz/trading-hub (and the Workbench originals: FlowMap, aggr, Liquidity Mapper Fast) every 6 hours. When there are new commits, merges them into main (keeping this fork's
 # changes: auto-update, build optimizations) and, if the merge is clean, builds and publishes new installers.
 # On a merge conflict nothing is pushed: an issue is opened with the conflicting files.
 #
@@ -69,9 +69,50 @@ jobs:
             exit 1
           fi
 
-  release:
+  # los originales del Workbench (FlowMap, aggr, Liquidity Mapper Fast): si publicaron algo, se anota la versión nueva en
+  # workbench/upstreams.json y se arma KVP con ella (si no compila, KVP sale igual con el Workbench anterior)
+  workbench:
     needs: sync
-    if: needs.sync.outputs.changed == 'true' || inputs.force_release == true
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.up.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Versiones nuevas de los originales
+        id: up
+        run: |
+          set -euo pipefail
+          git pull -q --ff-only origin main || true
+          python3 - <<'PY' > summary.txt
+          import json, subprocess
+          f = 'workbench/upstreams.json'
+          d = json.load(open(f))
+          changed = []
+          for name, u in d.items():
+              out = subprocess.run(['git', 'ls-remote', f"https://github.com/{u['repo']}.git", 'HEAD'], capture_output=True, text=True).stdout.split()
+              if out and out[0] != u['sha']:
+                  changed.append(f"{name} {u['sha'][:7]}→{out[0][:7]}")
+                  u['sha'] = out[0]
+          json.dump(d, open(f, 'w'), indent=2)
+          open(f, 'a').write('\n')
+          print(', '.join(changed))
+          PY
+          if [ -s summary.txt ] && ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -qam "Workbench: originales nuevos ($(cat summary.txt))"
+            git push origin HEAD:main
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  release:
+    needs: [sync, workbench]
+    if: ${{ !cancelled() && (needs.sync.outputs.changed == 'true' || needs.workbench.outputs.changed == 'true' || inputs.force_release == true) }}
     uses: ./.github/workflows/release.yml
     permissions:
       contents: write

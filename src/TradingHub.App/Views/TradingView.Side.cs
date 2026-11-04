@@ -1181,19 +1181,10 @@ public sealed partial class TradingView
         replay.Items.Add(Item("A ciegas (sin instrumento ni fecha)", MaterialIconKind.EyeOffOutline, () => _ = OpenRandomReplayAsync(blind: true)));
         if (tab.IsReplay && model.Settings.BlindReplay) replay.Items.Add(Item("Revelar este replay", MaterialIconKind.EyeOutline, () => RevealReplay(tab)));
         items.Add(replay);
-        items.Add(Item(ExternalTools.FindVpfm() != null ? "Abrir VPFM (热力 / 成交 / 流动 / 衍生 / 期权)" : "Instalar VPFM (módulos web: heatmap, aggr, GEX…)", MaterialIconKind.ApplicationBracketsOutline, () =>
+        items.Add(Item("Workbench (热力 / 成交 / 流动 / 衍生 / 期权 / 结构)…", MaterialIconKind.ViewDashboardVariantOutline, () =>
         {
-            var exe = ExternalTools.FindVpfm();
-            if (exe != null)
-            {
-                ExternalTools.Launch(exe);
-                _status("VPFM abierto en su propia ventana (Ctrl+1…7 cambia de módulo; el símbolo se sigue desde su pestaña 成交).");
-            }
-            else
-            {
-                Shell.Open(ExternalTools.VpfmReleases);
-                _status("VPFM no está instalado: se abrió la página de descarga. Después de instalarlo, este menú lo abre directo.");
-            }
+            if (TopLevel.GetTopLevel(this) is TradingHub.App.Windows.MainWindow mw) mw.Navigate("workbench");
+            else if (App.Services != null) _ = App.Services.Workbench.StartAsync().ContinueWith(_ => Shell.OpenUrl(App.Services.Workbench.BaseUrl + "/wb/"));
         }));
         items.Add(Item("Escala automática", MaterialIconKind.ArrowExpandVertical, () => { model.Viewport.AutoScale = true; model.Invalidate(); }));
         items.Add(Item("Ir al último precio", MaterialIconKind.PageLast, () => { model.Viewport.ScrollBars = 0; model.Invalidate(); }));

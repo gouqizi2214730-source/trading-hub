@@ -39,6 +39,13 @@ for ARCH in $ARCHES; do
   echo "== publish win-$ARCH $VERSION (ReadyToRun=$R2R)"
   dotnet publish src/TradingHub.App/TradingHub.App.csproj -c Release -r "win-$ARCH" --self-contained true -o "$OUT" -v q \
     -p:Version="$VERSION" -p:PublishReadyToRun="$R2R"
+  # Workbench (módulos web de VPFM y el motor del mapa de calor de FlowMap), si se armó (ver workbench/ y release.yml)
+  WBD="${WORKBENCH_DIR:-workbench-dist}"
+  if [ -f "$WBD/wb/index.html" ]; then
+    cp -r "$WBD/wb" "$OUT/wb"
+    if [ "$ARCH" = "x64" ] && [ -d "$WBD/flowmap/pyruntime" ]; then cp -r "$WBD/flowmap" "$OUT/flowmap"; fi
+    echo "   + Workbench ($(du -sh "$OUT/wb" | cut -f1) de páginas$([ -d "$OUT/flowmap" ] && echo ", motor del mapa de calor $(du -sh "$OUT/flowmap" | cut -f1)"))"
+  fi
   SETUP="dist/KVP-Setup-$ARCH.exe"
   # lo que es del programa (para borrar solo eso al actualizar o desinstalar: nunca la carpeta entera, por si el usuario
   # guardó datos adentro)
