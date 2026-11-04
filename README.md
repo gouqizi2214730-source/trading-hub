@@ -9,6 +9,12 @@
 > - **安装时可选安装位置**（例如 D 盘），以后更新会自动装回同一个位置。
 > - **所有文件夹都可以放到其他磁盘**：设置 → 数据 里的行情数据、数据文件夹（设置 / 连接 / 工作区 / 账户 / 回测）、自定义指标、策略，都能「更改…」并自动迁移已有文件。
 > - **更快启动**：ReadyToRun 预编译；修复 Rithmic 改单后价格短暂跳回旧价的问题。
+> - **VPFM 已并入 KVP（工作台，Ctrl+6）**：热力图（FlowMap）、聚合成交（aggr）、流动性地图、衍生品、期权 GEX、结构、工具箱都在 KVP 里，一个仓库一个安装包；模块请求的 K 线直接取 KVP 已下载的缓存（同一份数据），另有本地数据 API `http://127.0.0.1:47831/api/kvp/…`（见 [workbench/README.md](workbench/README.md)）。三个上游项目仍每 6 小时自动检查更新。
+> - **一个成交量分布、一个 VWAP**：交易时段成交量分布与 VP终极版分布合为一个，可像 Exocharts 一样**右键头一个分布、再右键尾一个分布直接合并**（也可一键合并整周 / 整月），或开启「重合超过 N% 自动合并」；VWAP（标准差带）、VWAP Claire 与 VP终极版的各种 VWAP 合为一个。
+> - **订单簿变化（新增 / 撤单 / 成交）阶梯、大单（虚假挂单 / 追单）标记、订单簿深度 0–X %、分交易所 CVD、资金费率 / 持仓量 / 爆仓**；聚合连接的订单簿也合并。
+> - **TradingView 式警报**：右键图表或指标线 → 价格 / 指标线 穿越、上穿、下穿、大于、小于、进出通道，可选频率和到期。
+> - **指标库直接编辑 / 删除**内置指标（不用先复制改名）；**KVS 脚本语言**（类似 openmarket 的 wrun：param / input / output / onBar）。
+> - **滚轮整体缩放**（价格和时间一起）；已算好的分布和裸 POC 跨周期复用，相邻周期后台预先生成，切换 1h / 4h 更快。
 >
 > **下载 Windows 安装程序：[TradingHub-Setup-x64.exe](https://github.com/gouqizi2214730-source/trading-hub/releases/latest/download/TradingHub-Setup-x64.exe)**（ARM 电脑用 [arm64 版](https://github.com/gouqizi2214730-source/trading-hub/releases/latest/download/TradingHub-Setup-arm64.exe)）· [全部版本](https://github.com/gouqizi2214730-source/trading-hub/releases)
 >
@@ -68,6 +74,14 @@ las compila, las prueba y arma reportes, y un agente que reparte el riesgo de tu
   velas y FVG de períodos mayores, PO3 y T-Spot, breakers), Bollinger triple y VWAP Claire.
 - **Entrada rápida con el teclado**: escribí un símbolo o un período sobre el gráfico (15, 1h, 4h, d) y Enter;
   «?» muestra los atajos.
+- **Un solo perfil de volumen** (sesión, semana, mes… o toda la historia) con POC, VAH / VAL, colas y POC vírgenes, y
+  **perfiles unidos** como en Exocharts: clic derecho en el primero y en el último (o la semana / el mes entero), o
+  solos cuando se superponen más de un porcentaje. **Un solo VWAP** con bandas σ, Claire y todos los del VP definitivo.
+- **Cambios del libro** (agregado / retirado / operado por precio, como el Order Book Delta de Kiyotaka), **órdenes
+  grandes** con marcas de spoof y chasing, profundidad del libro 0–X %, **CVD por mercado** y **derivados** (funding,
+  interés abierto y liquidaciones de Binance y Bybit).
+- **Alertas como en TradingView** sobre el precio o cualquier línea de un indicador (cruza, mayor / menor, canal).
+- La rueda acerca el gráfico entero (precio y tiempo a la vez).
 
 ### Operar
 - **Chart Trader** y DOM con órdenes de mercado, límite y stop, brackets (stop y objetivos) y OCO.
@@ -86,6 +100,9 @@ las compila, las prueba y arma reportes, y un agente que reparte el riesgo de tu
 - **Velas automáticas**: la historia en velas de los instrumentos que elijas se mantiene al día en segundo plano (solo
   baja lo nuevo), así cambiar de período o abrir años de historia no espera a la red.
 - Aceleración por **GPU** (CUDA / OpenCL) para los perfiles de volumen sobre millones de operaciones.
+- **Workbench** (lo que era VPFM): mapa de calor de FlowMap, aggr, mapa de liquidez, derivados, opciones GEX y
+  estructura dentro de KVP, con las velas de la misma caché, y una **API local de datos** (`/api/kvp/…`: velas,
+  operaciones, libro, liquidez y un WebSocket en vivo). Ver [workbench/README.md](workbench/README.md).
 
 ### Estrategias y backtesting
 - Estrategias en **C#** con un editor integrado que compila en milisegundos (Roslyn, con los errores marcados en el

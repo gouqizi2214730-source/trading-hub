@@ -75,7 +75,7 @@ internal sealed class AlertDialog : TradingHubDialog<bool>
         _lowerRow = Ui.Field("Borde de abajo del canal", Ui.Row(8, _lower, _lowerValue));
         var create = new Button { Content = "Crear alerta", IsDefault = true }.Classes("primary");
         create.Click += (_, _) => Create();
-        var close = new Button { Content = "Cerrar", IsCancel = true };
+        var close = new Button { Content = "Listo", IsCancel = true };
         close.Click += (_, _) => Close(_changed);
 
         var form = new StackPanel
