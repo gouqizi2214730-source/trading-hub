@@ -81,7 +81,21 @@ public sealed class WorkbenchServer : IAsyncDisposable
         }
     }
 
-    public async Task StartAsync()
+    private Task? _starting;
+    private readonly object _startLock = new();
+
+    /// <summary>Arranca el servidor (una sola vez aunque se pida desde varios lugares a la vez).</summary>
+    public Task StartAsync()
+    {
+        lock (_startLock)
+        {
+            // si falló, el próximo pedido lo vuelve a intentar
+            if (_starting == null || _starting.IsFaulted) _starting = StartCoreAsync();
+            return _starting;
+        }
+    }
+
+    private async Task StartCoreAsync()
     {
         if (_app != null) return;
         int port = 0;
