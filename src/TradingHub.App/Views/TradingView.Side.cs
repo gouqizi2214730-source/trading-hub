@@ -1,4 +1,6 @@
 using System.Globalization;
+using TradingHub.Common.Logging;
+using TradingHub.Indicators;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
@@ -945,6 +947,19 @@ public sealed partial class TradingView
 
     // ===================================================================== menú contextual
 
+    /// <summary>Abre las alertas del gráfico (crear, pausar, borrar) con la condición ya armada si se pasa.</summary>
+    internal async Task OpenAlertsAsync(ChartTab tab, AlertOperand? left, AlertOperand? right)
+    {
+        if (tab.Model == null) return;
+        var owner = tab.Window ?? TopLevel.GetTopLevel(this) as Window;
+        if (owner == null) return;
+        if (await AlertDialog.ShowAsync(owner, tab.Model, left, right))
+        {
+            tab.Model.Invalidate();
+            Workspace.Save(this);
+        }
+    }
+
     private void ShowChartMenu(ChartTab tab, Point p)
     {
         var model = tab.Model;
@@ -1030,6 +1045,21 @@ public sealed partial class TradingView
         }
 
         var layout = model.LastLayout;
+        // alertas como en TradingView: sobre la línea de un indicador que está bajo el mouse, o la ventana completa
+        if (layout != null && ChartAlertEngine.LineAt(model, x, y) is { } line)
+        {
+            bool onPrice = layout.Main.Rect.Contains(x, y);
+            var left = onPrice ? AlertOperand.Price("close", "Precio (cierre)") : line;
+            var right = onPrice ? line : AlertOperand.Fixed((decimal)(layout.PanelAt(y)?.ValueAt(y) ?? 0));
+            items.Add(Item($"Alerta en «{line.Label}»…", MaterialIconKind.BellPlusOutline, () => _ = OpenAlertsAsync(tab, left, right)));
+        }
+
+        if (layout != null && layout.PanelAt(y) is { } anyPanel)
+        {
+            items.Add(Item(model.Alerts.Count > 0 ? $"Alertas del gráfico ({model.Alerts.Count(a => a.Active)} activas)…" : "Crear alerta…", MaterialIconKind.BellCogOutline,
+                () => _ = OpenAlertsAsync(tab, null, anyPanel.IsPrice ? AlertOperand.Fixed(model.Instrument.RoundPrice((decimal)anyPanel.ValueAt(y))) : null)));
+        }
+
         if (layout != null && layout.Main.Rect.Contains(x, y))
         {
             decimal price = model.Instrument.RoundPrice((decimal)layout.Main.ValueAt(y));
@@ -1052,6 +1082,43 @@ public sealed partial class TradingView
                 DrawingsTouched(tab);
             }));
             if (acc?.ActiveOrders.Any() == true) items.Add(Item("Cancelar todas las órdenes", MaterialIconKind.CloseCircleOutline, () => _ = AccountActionAsync(tab, a => a.CancelAll(), "Órdenes canceladas")));
+            items.Add(new Separator());
+        }
+
+        // opciones de los indicadores en ese punto (por ejemplo, unir perfiles de volumen desde un inicio hasta un fin)
+        foreach (var slot in model.Indicators.ToList())
+        {
+            IReadOnlyList<IndicatorMenuItem> extra;
+            try
+            {
+                extra = slot.Indicator.GetMenuItems((int)x, (int)y);
+            }
+            catch (Exception ex)
+            {
+                this.LogWarn($"Menú de {slot.Indicator.Name}: {ex.Message}");
+                continue;
+            }
+
+            if (extra.Count == 0) continue;
+            foreach (var mi in extra)
+            {
+                var run = mi.Run;
+                items.Add(Item(mi.Text, mi.Checked ? MaterialIconKind.Check : MaterialIconKind.ChartBellCurve, () =>
+                {
+                    try
+                    {
+                        run();
+                    }
+                    catch (Exception ex)
+                    {
+                        _status(ex.Message);
+                    }
+
+                    model.Invalidate();
+                    Workspace.Save(this);
+                }));
+            }
+
             items.Add(new Separator());
         }
 

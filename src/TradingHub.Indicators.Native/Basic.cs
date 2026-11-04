@@ -75,6 +75,7 @@ public enum VwapAnchor
     [Display(Name = "Mes")] Month,
 }
 
+[Browsable(false)] // forma parte de «VWAP (bandas σ · Claire · VP definitivo)»
 [DisplayName("VWAP con desvíos")]
 [Category(IndicatorCategories.VolumeOrderFlow)]
 [Description("VWAP anclado a la sesión, la semana o el mes con hasta tres bandas de desvío estándar ponderado por volumen.")]

@@ -621,6 +621,8 @@ public sealed partial class TradingView : UserControl
 
             bool instrumentChanged = tab.Model != null && (tab.FeedId != profile.Id || !tab.Symbol.Equals(inst.Symbol, StringComparison.OrdinalIgnoreCase));
             var oldIndicators = copyIndicatorsFrom?.Model?.Indicators.Select(s => s.Indicator).ToList();
+            // las alertas siguen con el gráfico mientras sea el mismo instrumento (cambiar de período no las borra)
+            var oldAlerts = !instrumentChanged && ReferenceEquals(copyIndicatorsFrom, tab) ? tab.Model?.Alerts : null;
             tab.Model?.Dispose();
             var data = _svc.Open(profile.Id, inst);
             _svc.Klines.Track(profile.Id, inst);
@@ -632,6 +634,7 @@ public sealed partial class TradingView : UserControl
             model.Settings.TimeZoneId = _svc.Settings.TimeZoneId;
             model.Viewport.BarWidth = model.Settings.Style == ChartStyle.Footprint ? 110 : 8;
             model.AlertRaised += a => Dispatcher.UIThread.Post(() => ShowAlert(a));
+            if (oldAlerts != null) model.Alerts = oldAlerts;
             tab.Model = model;
             tab.FeedId = profile.Id;
             tab.Symbol = inst.Symbol;
@@ -1441,6 +1444,19 @@ public sealed partial class TradingView : UserControl
 
             _alertLast[d] = last;
         }
+
+        // alertas sobre el precio y las líneas de los indicadores (crear: clic derecho → «Crear alerta…»)
+        if (m.Alerts.Count == 0) return;
+        bool off = false;
+        foreach (var a in ChartAlertEngine.Evaluate(m, DateTime.UtcNow))
+        {
+            string text = (string.IsNullOrWhiteSpace(a.Message) ? a.Describe() : a.Message + " · " + a.Describe()) + $" · {m.Instrument.FormatPrice(last)}";
+            bool indicator = a.Left.Indicator != null || a.Right.Indicator != null || a.Lower?.Indicator != null;
+            _svc.Alerts.Raise(indicator ? AlertKind.Indicator : AlertKind.Price, t.Symbol, "Alerta", text);
+            off |= !a.Active;
+        }
+
+        if (off) Workspace.Save(this);
     }
 }
 

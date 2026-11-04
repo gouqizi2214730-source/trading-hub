@@ -113,6 +113,10 @@ namespace TradingHub.Indicators
         public string Instrument { get; set; } = "";
         public string Exchange { get; set; } = "";
         public decimal TickSize { get; set; } = 1m;
+
+        /// <summary>El tick real del instrumento (<see cref="TickSize"/> es el alto de las filas del gráfico, que puede juntar varios).</summary>
+        public decimal InstrumentTickSize { get; set; }
+
         public decimal TickCost { get; set; } = 1m;
         public TimeSpan TimeZoneOffset { get; set; } = TimeSpan.Zero;
         public Valuation Valuation { get; set; } = new();

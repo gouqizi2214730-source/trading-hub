@@ -76,6 +76,7 @@ public abstract class VpPeriodVwapBase : VpIndicator
 }
 
 /// <summary>Módulo 2 del «VP definitivo»: VWAP del día, la semana, el mes, el trimestre y el año a la vez.</summary>
+[Browsable(false)] // forma parte de «VWAP (bandas σ · Claire · VP definitivo)»
 [DisplayName("VP definitivo · VWAP de varios períodos")]
 [Category(Vp.Category)]
 [Description("VWAP diario, semanal, mensual, trimestral y anual en el mismo gráfico, cada uno se reinicia al empezar su período.")]
@@ -134,6 +135,7 @@ public class VpMultiVwap : VpPeriodVwapBase
 }
 
 /// <summary>Módulo 3 del «VP definitivo»: VWAP del período en curso con bandas de desvío estándar (ponderado por volumen).</summary>
+[Browsable(false)] // forma parte de «VWAP (bandas σ · Claire · VP definitivo)»
 [DisplayName("VP definitivo · VWAP anclado con bandas")]
 [Category(Vp.Category)]
 [Description("VWAP que se reinicia en cada período elegido, con dos bandas de desvío estándar ponderado por volumen y relleno opcional.")]
@@ -144,18 +146,20 @@ public class VpAnchoredVwap : VpPeriodVwapBase
     private readonly ValueDataSeries _u1 = new("U1", "+1σ") { Color = Color.FromArgb(102, 128, 128, 128), Width = 3, ShowZeroValue = false };
     private readonly ValueDataSeries _d1 = new("D1", "-1σ") { Color = Color.FromArgb(102, 128, 128, 128), Width = 3, ShowZeroValue = false };
     private readonly ValueDataSeries _d2 = new("D2", "-2σ") { Color = Color.FromArgb(77, 41, 98, 255), Width = 3, ShowZeroValue = false };
+    private readonly ValueDataSeries _u3 = new("U3", "+3σ") { Color = Color.FromArgb(200, 240, 82, 90), LineDashStyle = LineDashStyle.Dot, ShowZeroValue = false };
+    private readonly ValueDataSeries _d3 = new("D3", "-3σ") { Color = Color.FromArgb(200, 240, 82, 90), LineDashStyle = LineDashStyle.Dot, ShowZeroValue = false };
     private readonly RangeDataSeries _f1 = new("F1", "Relleno +2σ / +1σ") { RangeColor = Color.FromArgb(13, 242, 54, 69) };
     private readonly RangeDataSeries _f2 = new("F2", "Relleno ±1σ") { RangeColor = Color.FromArgb(26, 128, 128, 128) };
     private readonly RangeDataSeries _f3 = new("F3", "Relleno -1σ / -2σ") { RangeColor = Color.FromArgb(13, 41, 98, 255) };
     private VwapSum _acc;
     private VpPeriod _period = VpPeriod.Day;
-    private bool _band1 = true, _band2 = true, _fill, _showVwap = true;
-    private decimal _m1 = 1, _m2 = 2;
+    private bool _band1 = true, _band2 = true, _band3, _fill, _showVwap = true;
+    private decimal _m1 = 1, _m2 = 2, _m3 = 3;
 
     public VpAnchoredVwap()
     {
         DataSeries.Add(_vwap);
-        foreach (var s in new[] { _u2, _u1, _d1, _d2 }) DataSeries.Add(s);
+        foreach (var s in new[] { _u2, _u1, _d1, _d2, _u3, _d3 }) DataSeries.Add(s);
         foreach (var r in new[] { _f1, _f2, _f3 }) DataSeries.Add(r);
     }
 
@@ -177,6 +181,12 @@ public class VpAnchoredVwap : VpPeriodVwapBase
     [Display(Name = "Banda 2 (× σ)", GroupName = "Bandas", Order = 60)]
     public decimal Mult2 { get => _m2; set { _m2 = value; RecalculateValues(); } }
 
+    [Display(Name = "Banda 3", GroupName = "Bandas", Order = 62)]
+    public bool Band3 { get => _band3; set { _band3 = value; RecalculateValues(); } }
+
+    [Display(Name = "Banda 3 (× σ)", GroupName = "Bandas", Order = 64)]
+    public decimal Mult3 { get => _m3; set { _m3 = value; RecalculateValues(); } }
+
     [Display(Name = "Rellenar entre bandas", GroupName = "Bandas", Order = 70)]
     public bool Fill { get => _fill; set { _fill = value; RecalculateValues(); } }
 
@@ -190,6 +200,8 @@ public class VpAnchoredVwap : VpPeriodVwapBase
         _d1[bar] = _band1 ? v - _m1 * sd : 0;
         _u2[bar] = _band2 ? v + _m2 * sd : 0;
         _d2[bar] = _band2 ? v - _m2 * sd : 0;
+        _u3[bar] = _band3 ? v + _m3 * sd : 0;
+        _d3[bar] = _band3 ? v - _m3 * sd : 0;
         _f1[bar] = _fill && _band1 && _band2 ? new RangeValue(v + _m2 * sd, v + _m1 * sd) : new RangeValue();
         _f2[bar] = _fill && _band1 ? new RangeValue(v + _m1 * sd, v - _m1 * sd) : new RangeValue();
         _f3[bar] = _fill && _band1 && _band2 ? new RangeValue(v - _m1 * sd, v - _m2 * sd) : new RangeValue();
@@ -198,7 +210,7 @@ public class VpAnchoredVwap : VpPeriodVwapBase
     private void Break(int bar)
     {
         if (bar <= 0) return;
-        foreach (var s in new[] { _vwap, _u2, _u1, _d1, _d2 }) s.SetPointOfEndLine(bar - 1);
+        foreach (var s in new[] { _vwap, _u2, _u1, _d1, _d2, _u3, _d3 }) s.SetPointOfEndLine(bar - 1);
     }
 
     protected override void Commit(int bar)
@@ -225,6 +237,7 @@ public class VpAnchoredVwap : VpPeriodVwapBase
 }
 
 /// <summary>Módulo 4 del «VP definitivo»: VWAP final (y bandas) del período anterior, como escalón durante el período actual.</summary>
+[Browsable(false)] // forma parte de «VWAP (bandas σ · Claire · VP definitivo)»
 [DisplayName("VP definitivo · VWAP del período anterior")]
 [Category(Vp.Category)]
 [Description("Dónde terminó el VWAP del período anterior (por ejemplo, el «precio de liquidación» de ayer) y sus bandas, durante todo el período actual.")]
@@ -326,6 +339,7 @@ public class VpPreviousVwap : VpPeriodVwapBase
 }
 
 /// <summary>Módulo 5 del «VP definitivo»: el VWAP con que cerró cada período, como línea horizontal hacia la derecha.</summary>
+[Browsable(false)] // forma parte de «VWAP (bandas σ · Claire · VP definitivo)»
 [DisplayName("VP definitivo · Cierres del VWAP")]
 [Category(Vp.Category)]
 [Description("Al terminar cada período, el valor final de su VWAP (y, si querés, de sus bandas) queda como línea horizontal hacia la derecha. Se conservan los últimos N.")]
@@ -452,6 +466,7 @@ public class VpVwapCloses : VpPeriodVwapBase
 }
 
 /// <summary>Módulo 10 del «VP definitivo»: VWAP de una ventana móvil de tiempo (no se reinicia: no salta al abrir el período).</summary>
+[Browsable(false)] // forma parte de «VWAP (bandas σ · Claire · VP definitivo)»
 [DisplayName("VP definitivo · VWAP móvil")]
 [Category(Vp.Category)]
 [Description("VWAP de solo las últimas horas / días (la ventana se desliza con cada vela; no se reinicia en cada período), con bandas de desvío.")]

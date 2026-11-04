@@ -699,6 +699,7 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         long firstId = Trades.Count > 0 && Trades.GetId(0) > 0 ? Trades.GetId(0) : long.MaxValue;
         IsExtending = true;
         HistoryProgress = 0;
+        HistoryError = null;
         _pendingFrom = from;
         _ = Task.Run(async () =>
         {
@@ -867,6 +868,8 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
             {
                 Trades.Clear();
                 foreach (var t in hist) Trades.Add(t);
+                // con error de red: la parte que no llegó no cuenta como cargada (el próximo pedido la vuelve a intentar)
+                if (HistoryError != null) HistoryFrom = Trades.Count > 0 && Trades.FirstTime > HistoryFrom ? Trades.FirstTime : HistoryFrom;
                 _historyMerged = true;
                 IsLoadingHistory = false;
                 HistoryProgress = 1;
@@ -925,7 +928,8 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
                     foreach (var t in current) Trades.Add(t);
                 }
 
-                HistoryFrom = _pendingFrom;
+                HistoryFrom = HistoryError == null ? _pendingFrom
+                    : Trades.Count > 0 && Trades.FirstTime < HistoryFrom ? Trades.FirstTime : HistoryFrom;
                 IsExtending = false;
                 HistoryProgress = 1;
                 if (older.Count > 0) HistoryLoaded?.Invoke();

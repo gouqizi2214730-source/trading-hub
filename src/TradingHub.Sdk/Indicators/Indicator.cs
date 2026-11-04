@@ -18,6 +18,29 @@ using TradingHub.Trading;
 
 namespace TradingHub.Indicators
 {
+    /// <summary>Una opción del menú del clic derecho que agrega un indicador.</summary>
+    public sealed record IndicatorMenuItem(string Text, Action Run, bool Checked = false);
+
+    /// <summary>
+    /// Ajuste que se guarda con el gráfico aunque no se muestre en el editor (marcado además con [Browsable(false)]).
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Property)]
+    public sealed class KeepSettingAttribute : Attribute
+    {
+    }
+
+    /// <summary>
+    /// Indicador propio que reemplaza a uno de la biblioteca (su código editado): la biblioteca muestra este en su lugar y los
+    /// gráficos guardados con el original lo abren con este.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Class)]
+    public sealed class ReplacesIndicatorAttribute : Attribute
+    {
+        public ReplacesIndicatorAttribute(string fullName) => FullName = fullName;
+
+        public string FullName { get; }
+    }
+
     /// <summary>Lo que el gráfico le ofrece a un indicador. Lo implementa el motor de gráficos.</summary>
     public interface IIndicatorHost
     {
@@ -418,6 +441,12 @@ namespace TradingHub.Indicators
         public virtual bool ProcessKeyUp(Avalonia.Input.KeyEventArgs e) => false;
         public virtual StdCursor GetCursor(RenderControlMouseEventArgs e) => StdCursor.None;
 
+        /// <summary>
+        /// Opciones propias del indicador para el menú del clic derecho del gráfico en (<paramref name="x"/>, <paramref name="y"/>)
+        /// (por ejemplo «unir perfiles desde acá»). Vacío = ninguna.
+        /// </summary>
+        public virtual IReadOnlyList<IndicatorMenuItem> GetMenuItems(int x, int y) => Array.Empty<IndicatorMenuItem>();
+
         // ================================================================ servicios para los indicadores
 
         /// <summary>Niveles de la vela al tick (ver <see cref="IIndicatorHost.GetTickLevels"/>).</summary>
@@ -482,6 +511,16 @@ namespace TradingHub.Indicators
             child._parent = this;
             _children.Add(child);
         }
+
+        /// <summary>Dibuja un indicador hijo (registrado con <see cref="Add"/>) desde el OnRender del padre.</summary>
+        protected void RenderChild(Indicator child, RenderContext context, DrawingLayouts layout)
+        {
+            if (child != null && child._parent == this) child.OnRender(context, layout);
+        }
+
+        /// <summary>Opciones del menú del clic derecho de un indicador hijo.</summary>
+        protected IReadOnlyList<IndicatorMenuItem> ChildMenuItems(Indicator child, int x, int y) =>
+            child != null && child._parent == this ? child.GetMenuItems(x, y) : Array.Empty<IndicatorMenuItem>();
 
         /// <summary>Calcula una barra "a mano" (indicadores usados como calculadoras dentro de otros).</summary>
         public decimal Calculate(int bar, decimal value)

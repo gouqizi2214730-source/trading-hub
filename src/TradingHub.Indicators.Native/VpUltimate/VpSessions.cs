@@ -372,6 +372,7 @@ public class VpSessionProfiles : VpSessionBase
 }
 
 /// <summary>VWAP de cada sesión (Asia, Londres, Nueva York): arranca en la primera vela de la sesión y termina con ella.</summary>
+[Browsable(false)] // forma parte de «VWAP (bandas σ · Claire · VP definitivo)»
 [DisplayName("VP definitivo · VWAP por sesión")]
 [Category(Vp.Category)]
 [Description("Un VWAP por sesión de Asia, Londres y Nueva York (hora de Nueva York), con banda de desvío opcional; cada uno vive solo durante su sesión.")]

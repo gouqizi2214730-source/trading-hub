@@ -98,4 +98,43 @@ public static class IndicatorSources
         File.WriteAllText(path, text);
         return path;
     }
+
+    /// <summary>Carpeta de los indicadores de la biblioteca editados (dentro de los propios).</summary>
+    public static string EditedFolder => Path.Combine(AppPaths.UserIndicators, "Editados");
+
+    /// <summary>
+    /// Para editar un indicador de la biblioteca sin copiarlo ni cambiarle el nombre: su código pasa a la carpeta propia
+    /// («Editados») con el mismo nombre de clase y el mismo nombre visible, marcado con [ReplacesIndicator]: la biblioteca
+    /// muestra la versión editada en lugar del original y los gráficos guardados con el original la usan. Borrar el
+    /// archivo vuelve al original. Si ya estaba editado, devuelve el archivo que existe.
+    /// </summary>
+    public static string EditInPlace(Type t, string? folder = null)
+    {
+        folder ??= EditedFolder;
+        var path = Path.Combine(folder, t.Name + ".cs");
+        if (File.Exists(path)) return path;
+        var src = EmbeddedSource(t) ?? throw new InvalidOperationException("Este indicador no trae su código fuente.");
+        string text = src;
+        // vive en un namespace hijo («.Editado»): ve los tipos de la biblioteca y sus clases auxiliares no chocan con las originales
+        text = Regex.Replace(text, @"^(\s*namespace\s+[\w.]+)\s*;", "$1.Editado;", RegexOptions.Multiline);
+        text = Regex.Replace(text, @"^(\s*namespace\s+[\w.]+)\s*\{", "$1.Editado {", RegexOptions.Multiline);
+        text = Regex.Replace(text, @"\binternal\s+(static\s+|sealed\s+|abstract\s+)?class\b", m => m.Value.Replace("internal", "public"));
+        // las otras clases del mismo archivo (varios indicadores comparten archivo) no aparecen repetidas en la biblioteca
+        text = Regex.Replace(text, @"^(\s*)((public\s+)(sealed\s+)?(partial\s+)?class\s+(\w+)\b)", m =>
+        {
+            if (m.Groups[6].Value == t.Name) return m.Value;
+            int lineStart = m.Index;
+            var before = text[..lineStart].Split('\n').Reverse().Skip(1).TakeWhile(l => l.TrimStart().StartsWith('[') || l.TrimStart().StartsWith("///")).ToList();
+            if (before.Any(l => l.Contains("Browsable("))) return m.Value;
+            return $"{m.Groups[1].Value}[System.ComponentModel.Browsable(false)]\n{m.Groups[1].Value}{m.Groups[2].Value}";
+        }, RegexOptions.Multiline);
+        // la marca que lo pone en lugar del original
+        var rx = new Regex(@"^(\s*)((public\s+)?(sealed\s+|abstract\s+)?(partial\s+)?class\s+" + Regex.Escape(t.Name) + @"\b)", RegexOptions.Multiline);
+        text = rx.Replace(text, m => $"{m.Groups[1].Value}[TradingHub.Indicators.ReplacesIndicator(\"{t.FullName}\")]\n{m.Groups[1].Value}{m.Groups[2].Value}", 1);
+        text = "using System.IO;\nusing System.Threading;\nusing System.Threading.Tasks;\n" + text;
+        text = "// " + Indicator.DefaultName(t) + " (biblioteca de KVP), editado. Se recompila solo al guardar; borrá este archivo para volver al original.\n" + text;
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(path, text);
+        return path;
+    }
 }

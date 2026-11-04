@@ -183,32 +183,78 @@ public sealed class IndicatorsWindow : Window
         items.Add(add);
         items.Add(new Separator());
         bool own = i.Source == UserScripts.Source;
+        string? replaces = IndicatorCatalog.ReplacedBy(i.Type);
         if (own)
         {
             var edit = new MenuItem { Header = "Editar el código…", Icon = Ui.Icon(MaterialIconKind.CodeBraces, 16) };
             edit.Click += (_, _) => new CodeEditorWindow(_svc, CodeKind.Indicator, IndicatorSources.UserFile(i.Type)).Show(this);
             items.Add(edit);
-            var del = new MenuItem { Header = "Eliminar este indicador…", Icon = Ui.Icon(MaterialIconKind.DeleteOutline, 16) };
-            del.Click += async (_, _) =>
+            if (replaces != null)
             {
-                var file = IndicatorSources.UserFile(i.Type);
-                if (file == null) return;
-                bool ok = await ConfirmDialog.ShowAsync(this, "Eliminar indicador", $"Se borra el archivo {Path.GetFileName(file)} de tus indicadores. Los gráficos que lo usan lo pierden.", "Eliminar", danger: true);
-                if (!ok) return;
-                try
+                // un indicador de la biblioteca editado: borrar el archivo vuelve al original
+                var restore = new MenuItem { Header = "Volver al original de la biblioteca (descarta tus cambios)…", Icon = Ui.Icon(MaterialIconKind.Restore, 16) };
+                restore.Click += async (_, _) =>
                 {
-                    File.Delete(file);
-                    _svc.Scripts?.CompileAll();
-                }
-                catch (Exception ex)
+                    var file = IndicatorSources.UserFile(i.Type);
+                    if (file == null) return;
+                    if (!await ConfirmDialog.ShowAsync(this, "Volver al original", $"Se borra tu versión editada ({Path.GetFileName(file)}) y vuelve la de la biblioteca. Los gráficos que lo usan siguen andando con el original.", "Volver al original", danger: true)) return;
+                    try
+                    {
+                        File.Delete(file);
+                        _svc.Scripts?.CompileAll();
+                        FillAvailable();
+                    }
+                    catch (Exception ex)
+                    {
+                        await ConfirmDialog.ShowAsync(this, "No se pudo borrar", ex.Message, "Cerrar");
+                    }
+                };
+                items.Add(restore);
+                items.Add(HideItem(i, replaces));
+            }
+            else
+            {
+                var del = new MenuItem { Header = "Eliminar este indicador…", Icon = Ui.Icon(MaterialIconKind.DeleteOutline, 16) };
+                del.Click += async (_, _) =>
                 {
-                    await ConfirmDialog.ShowAsync(this, "No se pudo borrar", ex.Message, "Cerrar");
-                }
-            };
-            items.Add(del);
+                    var file = IndicatorSources.UserFile(i.Type);
+                    if (file == null) return;
+                    bool ok = await ConfirmDialog.ShowAsync(this, "Eliminar indicador", $"Se borra el archivo {Path.GetFileName(file)} de tus indicadores. Los gráficos que lo usan lo pierden.", "Eliminar", danger: true);
+                    if (!ok) return;
+                    try
+                    {
+                        File.Delete(file);
+                        _svc.Scripts?.CompileAll();
+                        FillAvailable();
+                    }
+                    catch (Exception ex)
+                    {
+                        await ConfirmDialog.ShowAsync(this, "No se pudo borrar", ex.Message, "Cerrar");
+                    }
+                };
+                items.Add(del);
+            }
         }
         else
         {
+            // editar directo (sin copiar ni renombrar): su código pasa a «Editados» y reemplaza al original en todos lados
+            var edit = new MenuItem { Header = "Editar el código…", Icon = Ui.Icon(MaterialIconKind.CodeBraces, 16) };
+            edit.Click += async (_, _) =>
+            {
+                try
+                {
+                    var path = IndicatorSources.EditInPlace(i.Type);
+                    _svc.Scripts?.CompileAll();
+                    new CodeEditorWindow(_svc, CodeKind.Indicator, path).Show(this);
+                    FillAvailable();
+                }
+                catch (Exception ex)
+                {
+                    await ConfirmDialog.ShowAsync(this, "No se pudo editar", ex.Message, "Cerrar");
+                }
+            };
+            items.Add(edit);
+            items.Add(HideItem(i, i.Type.FullName!));
             var view = new MenuItem { Header = "Ver el código fuente…", Icon = Ui.Icon(MaterialIconKind.FileCodeOutline, 16) };
             view.Click += (_, _) =>
             {
@@ -222,7 +268,7 @@ public sealed class IndicatorsWindow : Window
                 new CodeEditorWindow(_svc, CodeKind.Indicator, null, (i.Name, src)).Show(this);
             };
             items.Add(view);
-            var fork = new MenuItem { Header = "Copiar como indicador propio (para modificarlo)…", Icon = Ui.Icon(MaterialIconKind.ContentCopy, 16) };
+            var fork = new MenuItem { Header = "Copiar como indicador nuevo (con otro nombre)…", Icon = Ui.Icon(MaterialIconKind.ContentCopy, 16) };
             fork.Click += async (_, _) =>
             {
                 var name = await PromptDialog.ShowAsync(this, "Copiar como propio", "Nombre de la clase de la copia", i.Type.Name + "Propio", "Copiar");
@@ -241,8 +287,45 @@ public sealed class IndicatorsWindow : Window
             items.Add(fork);
         }
 
+        if (_svc.Catalog.Hidden.Count > 0)
+        {
+            items.Add(new Separator());
+            var back = new MenuItem { Header = $"Volver a mostrar los quitados de la biblioteca ({_svc.Catalog.Hidden.Count})", Icon = Ui.Icon(MaterialIconKind.EyeOutline, 16) };
+            back.Click += (_, _) =>
+            {
+                _svc.Catalog.Hidden.Clear();
+                _svc.Settings.HiddenIndicators.Clear();
+                _svc.Settings.Save();
+                _svc.Catalog.NotifyChanged();
+                FillAvailable();
+            };
+            items.Add(back);
+        }
+
         menu.ItemsSource = items;
         return menu;
+    }
+
+    /// <summary>Quitar un indicador de la biblioteca (no se borra nada: los gráficos guardados lo siguen abriendo).</summary>
+    private MenuItem HideItem(IndicatorInfo i, string fullName)
+    {
+        var hide = new MenuItem { Header = "Eliminar de la biblioteca…", Icon = Ui.Icon(MaterialIconKind.DeleteOutline, 16) };
+        hide.Click += async (_, _) =>
+        {
+            if (!await ConfirmDialog.ShowAsync(this, "Eliminar de la biblioteca", $"«{i.Name}» deja de aparecer en la lista. Los gráficos que ya lo usan lo siguen mostrando, y podés volver a mostrarlo desde este mismo menú.", "Eliminar", danger: true)) return;
+            _svc.Catalog.Hidden.Add(fullName);
+            if (!_svc.Settings.HiddenIndicators.Contains(fullName)) _svc.Settings.HiddenIndicators.Add(fullName);
+            if (i.Type.FullName != fullName && !_svc.Settings.HiddenIndicators.Contains(i.Type.FullName!))
+            {
+                _svc.Catalog.Hidden.Add(i.Type.FullName!);
+                _svc.Settings.HiddenIndicators.Add(i.Type.FullName!);
+            }
+
+            _svc.Settings.Save();
+            _svc.Catalog.NotifyChanged();
+            FillAvailable();
+        };
+        return hide;
     }
 
     private void FillOnChart()

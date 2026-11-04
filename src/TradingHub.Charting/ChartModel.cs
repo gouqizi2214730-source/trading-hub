@@ -172,6 +172,9 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
     /// <summary>Dibujos del gráfico. Los gráficos del mismo instrumento comparten la misma lista (se sincronizan).</summary>
     public List<Drawings.ChartDrawing> Drawings { get; set; } = new();
 
+    /// <summary>Alertas sobre el precio y las líneas de los indicadores de este gráfico (ver <see cref="ChartAlertEngine"/>).</summary>
+    public List<ChartAlert> Alerts { get; set; } = new();
+
     /// <summary>Gestor de trading (broker simulado) — opcional.</summary>
     public TradingManager? Trading { get; set; }
 
@@ -311,6 +314,7 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
         _instrumentInfo.Instrument = Instrument.Symbol;
         _instrumentInfo.Exchange = Instrument.Exchange;
         _instrumentInfo.TickSize = Series.RowSize;
+        _instrumentInfo.InstrumentTickSize = Instrument.TickSize > 0 ? Instrument.TickSize : Series.RowSize;
         _instrumentInfo.TickCost = Instrument.PointValue * Series.RowSize;
         _instrumentInfo.LotSize = Instrument.VolumeStep;
         _instrumentInfo.Description = Instrument.Description;
@@ -377,6 +381,47 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
         indicator.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(Indicator.Panel)) MoveToPanelByName(slot, indicator.Panel);
+        };
+        slot.NeedsRecalc = true;
+        ProcessPending();
+        Invalidate();
+        return slot;
+    }
+
+    /// <summary>
+    /// Cambia un indicador por otro en el mismo lugar (mismo panel, mismo orden, misma visibilidad): por ejemplo, su versión
+    /// recién compilada o editada.
+    /// </summary>
+    public IndicatorSlot ReplaceIndicator(IndicatorSlot old, Indicator replacement)
+    {
+        int index = Indicators.IndexOf(old);
+        if (index < 0) return AddIndicator(replacement, applyDefaultColors: false);
+        var panel = old.Panel;
+        int inPanel = panel?.Slots.IndexOf(old) ?? -1;
+        Indicators.RemoveAt(index);
+        panel?.Slots.Remove(old);
+        _timers.RemoveAll(t => t.Ind == old.Indicator);
+        try { old.Indicator.HostDetach(); }
+        catch (Exception ex) { this.LogError("Error al quitar el indicador", ex); }
+
+        var slot = new IndicatorSlot(replacement) { Visible = old.Visible, Panel = panel };
+        replacement.HostAttach(this);
+        if (panel != null) panel.Slots.Insert(Math.Max(0, inPanel), slot);
+        Indicators.Insert(index, slot);
+        try
+        {
+            replacement.HostInitialize(false);
+            slot.Initialized = true;
+        }
+        catch (Exception ex)
+        {
+            slot.Error = ex.Message;
+            this.LogError($"Error al inicializar {replacement.Name}", ex);
+        }
+
+        replacement.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(Indicator.Panel)) MoveToPanelByName(slot, replacement.Panel);
         };
         slot.NeedsRecalc = true;
         ProcessPending();

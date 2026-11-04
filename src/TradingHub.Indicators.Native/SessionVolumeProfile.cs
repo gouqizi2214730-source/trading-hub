@@ -7,8 +7,10 @@ using TradingHub.Rendering.Tools;
 namespace TradingHub.Indicators.Native;
 
 /// <summary>
-/// Perfil de volumen por sesión (o por semana) dibujado sobre las velas, con POC, VAH y VAL.
+/// Perfil de volumen por sesión (o por semana) dibujado sobre las velas, con POC, VAH y VAL. Reemplazado por
+/// <see cref="VpUltimate.VpProfile"/> (que lo incluye): queda oculto de la biblioteca para abrir los gráficos guardados.
 /// </summary>
+[Browsable(false)]
 [DisplayName("Perfil de volumen por sesión")]
 [Category(IndicatorCategories.VolumeOrderFlow)]
 public class SessionVolumeProfile : Indicator

@@ -58,6 +58,7 @@ internal static partial class Workspace
         public bool TraderVisible { get; set; } = true;
         public List<IndicatorDto> Indicators { get; set; } = new();
         public List<StrategyDto> Strategies { get; set; } = new();
+        public List<ChartAlert> Alerts { get; set; } = new();
     }
 
     /// <summary>Una estrategia puesta en un gráfico.</summary>
@@ -98,10 +99,18 @@ internal static partial class Workspace
             var props = base.CreateProperties(type, memberSerialization);
             return props.Where(p =>
             {
-                if (!p.Writable || !p.Readable) return false;
+                if (!p.Readable) return false;
                 var pi = type.GetProperty(p.UnderlyingName!, BindingFlags.Public | BindingFlags.Instance);
                 if (pi == null || pi.GetIndexParameters().Length > 0) return false;
-                if (pi.GetCustomAttribute<BrowsableAttribute>() is { Browsable: false }) return false;
+                // partes de un indicador compuesto (por ejemplo, el VWAP único): se guardan sus ajustes y al abrir se
+                // completan sobre la parte que ya existe
+                if (!p.Writable)
+                {
+                    if (!typeof(Indicator).IsAssignableFrom(pi.PropertyType)) return false;
+                    p.ObjectCreationHandling = ObjectCreationHandling.Reuse;
+                }
+
+                if (pi.GetCustomAttribute<BrowsableAttribute>() is { Browsable: false } && pi.GetCustomAttribute<KeepSettingAttribute>() == null) return false;
                 if (typeof(Indicator).IsAssignableFrom(type) && pi.DeclaringType == typeof(Indicator) && pi.Name != nameof(Indicator.IsVisible)) return false;
                 return true;
             }).ToList();
@@ -234,6 +243,7 @@ internal static partial class Workspace
             Settings = JObject.FromObject(t.Model.Settings, Serializer),
         };
         foreach (var slot in t.Model.Indicators) td.Indicators.Add(ToIndicatorDto(slot));
+        td.Alerts.AddRange(t.Model.Alerts);
         foreach (var cs in t.Strategies)
             td.Strategies.Add(new StrategyDto
             {
@@ -341,6 +351,7 @@ internal static partial class Workspace
         if (tab.Model == null) return;
         if (td.BarWidth > 0) tab.Model.Viewport.BarWidth = td.BarWidth;
         AddIndicators(w, tab.Model, td.Indicators);
+        tab.Model.Alerts = td.Alerts ?? new List<ChartAlert>();
 
         // estrategias: las visuales vuelven a correr; las que ejecutaban quedan pausadas hasta que las reanudes
         foreach (var sd in td.Strategies)

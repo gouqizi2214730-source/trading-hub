@@ -84,9 +84,13 @@ public sealed class MainWindow : Window
         Navigate("trading");
 
         _svc.Scripts = new UserScripts(_svc.Catalog);
-        _svc.Scripts.Compiled += r => SetStatus(r.Success
-            ? $"Indicadores propios compilados en {r.Elapsed.TotalMilliseconds:0} ms"
-            : $"Error compilando indicadores propios: {r.Diagnostics.FirstOrDefault(d => d.Severity == "error")}");
+        _svc.Scripts.Compiled += r =>
+        {
+            SetStatus(r.Success
+                ? $"Indicadores propios compilados en {r.Elapsed.TotalMilliseconds:0} ms"
+                : $"Error compilando indicadores propios: {r.Diagnostics.FirstOrDefault(d => d.Severity == "error")}");
+            if (r.Success) Dispatcher.UIThread.Post(SwapRecompiledIndicators);
+        };
         _svc.Scripts.CompileAll();
 
         Log.Entry += e =>
@@ -176,6 +180,37 @@ public sealed class MainWindow : Window
     internal Control? Page(string id) => _pages.GetValueOrDefault(id);
 
     // ===================================================================== layout
+
+    /// <summary>
+    /// Después de compilar los indicadores propios: los gráficos que usan uno de ellos (o un indicador de la biblioteca que
+    /// ahora tiene versión editada, o una versión editada que se borró) pasan a la versión nueva con los mismos ajustes.
+    /// </summary>
+    private void SwapRecompiledIndicators()
+    {
+        foreach (var tab in Trading.AllCharts.ToList())
+        {
+            var model = tab.Model;
+            if (model == null) continue;
+            foreach (var slot in model.Indicators.ToList())
+            {
+                var t = slot.Indicator.GetType();
+                var info = _svc.Catalog.Find(t.FullName!);
+                if (info == null && IndicatorCatalog.ReplacedBy(t) is { } original) info = _svc.Catalog.Find(original);
+                if (info == null || info.Type == t) continue;
+                try
+                {
+                    var props = Workspace.SaveIndicator(slot.Indicator, out var series);
+                    var fresh = (TradingHub.Indicators.Indicator)Activator.CreateInstance(info.Type)!;
+                    Workspace.LoadIndicator(fresh, props, series);
+                    model.ReplaceIndicator(slot, fresh);
+                }
+                catch (Exception ex)
+                {
+                    SetStatus($"No se pudo actualizar {slot.Indicator.Name} en el gráfico: {ex.Message}");
+                }
+            }
+        }
+    }
 
     private Control BuildLayout()
     {

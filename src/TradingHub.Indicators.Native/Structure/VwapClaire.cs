@@ -8,6 +8,7 @@ namespace TradingHub.Indicators.Native.Structure;
 /// VWAP «Claire»: los VWAP rodantes de 30, 90 y 365 días (se arman con velas diarias, el valor de cada día es el de
 /// hasta el día anterior: no cambia durante la sesión) y, si se quiere, los VWAP anclados al día, la semana y el mes.
 /// </summary>
+[Browsable(false)] // forma parte de «VWAP (bandas σ · Claire · VP definitivo)»
 [DisplayName("VWAP Claire (rodantes 30 / 90 / 365 días + día / semana / mes)")]
 [Category(IndicatorCategories.VolumeOrderFlow)]
 [Description("VWAP rodantes de 30, 90 y 365 días (con velas diarias, sin repintar en el día) y VWAP anclados al día, la semana y el mes.")]

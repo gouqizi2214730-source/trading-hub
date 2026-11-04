@@ -72,7 +72,26 @@ public sealed class IndicatorCatalog
     private readonly List<IndicatorInfo> _items = new();
     private readonly HashSet<Assembly> _scanned = new();
 
-    public IReadOnlyList<IndicatorInfo> Items => _items;
+    // indicadores de la biblioteca editados: tipo original → su versión propia
+    private readonly Dictionary<string, IndicatorInfo> _replaced = new(StringComparer.Ordinal);
+
+    /// <summary>Los de la biblioteca que se quitaron de la lista (siguen abriendo en los gráficos guardados).</summary>
+    public HashSet<string> Hidden { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Lo que se ve en la biblioteca: sin los quitados y con los editados en lugar de sus originales.</summary>
+    public IReadOnlyList<IndicatorInfo> Items => _items.Where(i => !Hidden.Contains(i.Type.FullName!) && !(i.Source != UserScripts.Source && _replaced.ContainsKey(i.Type.FullName!))).ToList();
+
+    /// <summary>Todo lo cargado, incluidos los quitados de la lista.</summary>
+    public IReadOnlyList<IndicatorInfo> AllItems => _items;
+
+    /// <summary>El original que reemplaza un indicador propio (null si no reemplaza a ninguno).</summary>
+    public static string? ReplacedBy(Type t) => t.GetCustomAttribute<ReplacesIndicatorAttribute>()?.FullName;
+
+    /// <summary>El indicador de la biblioteca ya tiene una versión editada.</summary>
+    public IndicatorInfo? EditedVersionOf(Type original) => _replaced.TryGetValue(original.FullName!, out var e) ? e : null;
+
+    public void NotifyChanged() => Changed?.Invoke();
+
     public event Action? Changed;
 
     public void Scan(Assembly asm, string source)
@@ -92,7 +111,9 @@ public sealed class IndicatorCatalog
             try { desc = t.GetCustomAttribute<System.ComponentModel.DataAnnotations.DisplayAttribute>()?.GetDescription() ?? t.GetCustomAttribute<DescriptionAttribute>()?.Description ?? ""; }
             catch { /* recursos de localización ausentes */ }
             _items.RemoveAll(i => i.Type.FullName == t.FullName && i.Source == source);
-            _items.Add(new IndicatorInfo(t, name, cat, source, desc));
+            var info = new IndicatorInfo(t, name, cat, source, desc);
+            _items.Add(info);
+            if (ReplacedBy(t) is { } original) _replaced[original] = info;
         }
 
         _items.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.CurrentCultureIgnoreCase));
@@ -102,6 +123,7 @@ public sealed class IndicatorCatalog
     public void RemoveSource(string source)
     {
         _items.RemoveAll(i => i.Source == source);
+        foreach (var k in _replaced.Where(kv => kv.Value.Source == source).Select(kv => kv.Key).ToList()) _replaced.Remove(k);
         _scanned.RemoveWhere(a => a.IsCollectible);
         Changed?.Invoke();
     }
@@ -116,7 +138,9 @@ public sealed class IndicatorCatalog
         }
     }
 
-    public IndicatorInfo? Find(string typeName) => _items.FirstOrDefault(i => i.Type.FullName == typeName) ?? _items.FirstOrDefault(i => i.Type.Name == typeName);
+    public IndicatorInfo? Find(string typeName) =>
+        (_replaced.TryGetValue(typeName, out var edited) ? edited : null)
+        ?? _items.FirstOrDefault(i => i.Type.FullName == typeName) ?? _items.FirstOrDefault(i => i.Type.Name == typeName);
 
     public Indicator? Create(string typeName)
     {
@@ -141,6 +165,9 @@ public sealed class AppSettings
 
     /// <summary>Plantilla de gráfico con la que arrancan las pestañas nuevas (null = copian el gráfico activo).</summary>
     public string? DefaultChartTemplate { get; set; }
+
+    /// <summary>Indicadores de la biblioteca quitados de la lista (tipo completo).</summary>
+    public List<string> HiddenIndicators { get; set; } = new();
 
     /// <summary>Plantilla con la que arranca cada indicador nuevo (tipo del indicador → nombre de la plantilla).</summary>
     public Dictionary<string, string> DefaultIndicatorTemplates { get; set; } = new();
@@ -457,6 +484,7 @@ public sealed class AppServices
         Hub.MaxTickWindow = TimeSpan.FromHours(Math.Clamp(Settings.TickHistoryHours, 2, 24 * 731));
         KlineHistory.EstimateDeltaFromShape = Settings.EstimateDeltaFromShape;
         StatsProvider.SetSource(Statistics);
+        foreach (var h in Settings.HiddenIndicators) Catalog.Hidden.Add(h);
         Catalog.Scan(typeof(TradingHub.Indicators.Native.BigTrades).Assembly, "Trading Hub");
         // los indicadores técnicos, si vienen en esta versión (la de código abierto no los trae)
         try

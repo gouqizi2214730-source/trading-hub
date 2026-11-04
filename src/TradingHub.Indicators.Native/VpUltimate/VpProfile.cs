@@ -1,20 +1,36 @@
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Drawing;
+using System.Globalization;
 using TradingHub.Rendering;
 using TradingHub.Rendering.Context;
 
 namespace TradingHub.Indicators.Native.VpUltimate;
 
+/// <summary>Período de cada perfil (los mismos nombres que <see cref="VpPeriod"/>, más «toda la historia»).</summary>
+public enum VpProfilePeriod
+{
+    [Display(Name = "1 hora")] Hour1,
+    [Display(Name = "4 horas")] Hour4,
+    [Display(Name = "Sesión (día)")] Day,
+    [Display(Name = "Semanal")] Week,
+    [Display(Name = "Mensual")] Month,
+    [Display(Name = "Trimestral")] Quarter,
+    [Display(Name = "Anual")] Year,
+    [Display(Name = "Toda la historia (un solo perfil)")] All,
+}
+
 /// <summary>
-/// Módulo 1 del «VP definitivo»: perfil de volumen por período con POC (normal o comprador / vendedor), área de valor,
-/// área de valor exterior y la «razón de colas» (ancho del área exterior ÷ ancho del área de valor, comparada con la de
-/// una distribución normal). Solo se dibujan los períodos terminados (el actual, opcional, con las velas cerradas). Los
-/// períodos cerrados se guardan en disco: al volver a abrir no se recalculan.
+/// Perfil de volumen único de KVP: junta el «perfil de volumen por sesión» y el módulo 1 del «VP definitivo». Un perfil por
+/// período (hora, sesión, semana…) con POC normal o comprador / vendedor, área de valor, área exterior y razón de colas,
+/// filas por cantidad o por ticks, vista de volumen, delta o bid / ask, POC vírgenes de otros períodos y — como en
+/// Exocharts — perfiles unidos: clic derecho en el primero («inicio»), clic derecho en el último («unir hasta acá») y
+/// quedan en uno solo; opcionalmente se unen solos los vecinos que se superponen más de un porcentaje.
+/// Los períodos cerrados se guardan en disco: al volver a abrir no se recalculan.
 /// </summary>
-[DisplayName("VP definitivo · Perfil de volumen")]
-[Category(Vp.Category)]
-[Description("Perfil de volumen por período (día, semana…) con POC normal o comprador / vendedor, área de valor, área exterior y razón de colas. Solo períodos terminados: no repinta.")]
+[DisplayName("Perfil de volumen (sesión / período · VP definitivo)")]
+[Category(IndicatorCategories.VolumeOrderFlow)]
+[Description("Perfil de volumen por sesión, semana, mes… con POC, VAH / VAL, área exterior, colas, POC vírgenes y perfiles unidos (clic derecho en el primero y en el último, o automático si se superponen). Solo períodos terminados: no repinta.")]
 public class VpProfile : VpIndicator
 {
     public enum PocKind
@@ -23,27 +39,76 @@ public class VpProfile : VpIndicator
         [Display(Name = "POC comprador / vendedor")] BullBear,
     }
 
+    public enum RowSizing
+    {
+        [Display(Name = "Cantidad de filas")] Rows,
+        [Display(Name = "Ticks por fila")] Ticks,
+    }
+
+    public enum ProfileStyle
+    {
+        [Display(Name = "Volumen")] Volume,
+        [Display(Name = "Delta")] Delta,
+        [Display(Name = "Bid / Ask")] BidAsk,
+    }
+
+    public enum OverlapBasis
+    {
+        [Display(Name = "Área de valor (VAL – VAH)")] ValueArea,
+        [Display(Name = "Rango completo (mínimo – máximo)")] Range,
+    }
+
+    private const int MaxRows = 4000;
+
     private sealed class Result
     {
         public int StartBar, EndBar;
         public decimal YMin, YMax, Step;
         public double[] Values = Array.Empty<double>();
+        public double[] Buy = Array.Empty<double>();
         public decimal Poc, PocUp, PocDn, Vah, Val, OuterHi, OuterLo;
         public double Tail;
 
         // POC que se extienden a la derecha: hasta qué vela llegan y si fueron tocados
         public int PocEnd, PocUpEnd, PocDnEnd;
         public bool PocDead, PocUpDead, PocDnDead;
+
+        // unido a mano (inicio / fin) o solo (superposición), y cuántos períodos tiene
+        public bool Manual, Auto;
+        public int Parts = 1;
+    }
+
+    /// <summary>Lo acumulado del período en curso (se suma vela a vela: no se recorre todo en cada vela nueva).</summary>
+    private sealed class Acc
+    {
+        public int Start = -1, End = -1;
+        public readonly Dictionary<decimal, (double All, double Buy)> Levels = new();
+        public decimal Lo = decimal.MaxValue, Hi = decimal.MinValue;
+
+        public void Clear(int start)
+        {
+            Start = start;
+            End = start - 1;
+            Levels.Clear();
+            Lo = decimal.MaxValue;
+            Hi = decimal.MinValue;
+        }
     }
 
     private readonly NakedPocEngine _naked;
     private readonly List<Result> _done = new();
     private readonly List<Result> _live = new(); // con algún POC todavía sin tocar
+    private readonly Acc _acc = new();
     private Result? _developing;
     private int _periodStart;
+    private int _periodParts = 1;
+    private List<(long From, long To)> _ranges = new();
+    private (long From, long To)? _head;
 
-    private VpPeriod _period = VpPeriod.Day;
+    private VpProfilePeriod _period = VpProfilePeriod.Day;
+    private RowSizing _rowSizing = RowSizing.Rows;
     private int _rows = 200;
+    private int _ticksPerRow = 1;
     private VpVolumeMode _volumeMode = VpVolumeMode.Raw;
     private decimal _capMult = 10;
     private bool _excludeAuction;
@@ -51,6 +116,9 @@ public class VpProfile : VpIndicator
     private int _outerPercent = 90;
     private bool _showDeveloping;
     private bool _deletePoc;
+    private bool _autoMerge;
+    private int _autoMergePercent = 50;
+    private OverlapBasis _overlapBasis = OverlapBasis.ValueArea;
 
     public VpProfile()
     {
@@ -64,11 +132,18 @@ public class VpProfile : VpIndicator
     // ------------------------------------------------------------------ cálculo
 
     [Display(Name = "Período del perfil", GroupName = "Perfil", Order = 10)]
-    public VpPeriod Period { get => _period; set { _period = value; RecalculateValues(); } }
+    public VpProfilePeriod Period { get => _period; set { _period = value; RecalculateValues(); } }
+
+    [Display(Name = "Tamaño de las filas", GroupName = "Perfil", Order = 15)]
+    public RowSizing RowMode { get => _rowSizing; set { _rowSizing = value; RecalculateValues(); } }
 
     [Display(Name = "Filas del perfil", GroupName = "Perfil", Order = 20)]
     [Range(10, 1000)]
     public int Rows { get => _rows; set { _rows = Math.Clamp(value, 10, 1000); RecalculateValues(); } }
+
+    [Display(Name = "Ticks por fila", GroupName = "Perfil", Order = 25)]
+    [Range(1, 10000)]
+    public int TicksPerRow { get => _ticksPerRow; set { _ticksPerRow = Math.Clamp(value, 1, 10000); RecalculateValues(); } }
 
     [Display(Name = "Volumen", GroupName = "Perfil", Order = 30)]
     public VpVolumeMode VolumeMode { get => _volumeMode; set { _volumeMode = value; RecalculateValues(); } }
@@ -83,12 +158,67 @@ public class VpProfile : VpIndicator
     [Display(Name = "Mostrar el período en curso", GroupName = "Perfil", Order = 60)]
     public bool ShowDeveloping { get => _showDeveloping; set { _showDeveloping = value; RecalculateValues(); } }
 
+    [Display(Name = "Vista", GroupName = "Perfil", Order = 65)]
+    public ProfileStyle Style { get; set; } = ProfileStyle.Volume;
+
     [Display(Name = "Ancho del perfil (% del período)", GroupName = "Perfil", Order = 70)]
     [Range(1, 100)]
     public int WidthPercent { get; set; } = 100;
 
     [Display(Name = "Color del perfil", GroupName = "Perfil", Order = 80)]
     public Color ProfileColor { get; set; } = Color.FromArgb(77, 33, 150, 243);
+
+    [Display(Name = "Pintar las filas del área de valor", GroupName = "Perfil", Order = 82)]
+    public bool ColorValueAreaRows { get; set; }
+
+    [Display(Name = "Color de las filas del área de valor", GroupName = "Perfil", Order = 84)]
+    public Color ValueAreaRowColor { get; set; } = Color.FromArgb(110, 120, 160, 220);
+
+    [Display(Name = "Pintar la fila del POC", GroupName = "Perfil", Order = 86)]
+    public bool ColorPocRow { get; set; }
+
+    [Display(Name = "Color comprador (delta / bid-ask)", GroupName = "Perfil", Order = 88)]
+    public Color BuyColor { get; set; } = Color.FromArgb(120, 73, 209, 73);
+
+    [Display(Name = "Color vendedor (delta / bid-ask)", GroupName = "Perfil", Order = 89)]
+    public Color SellColor { get; set; } = Color.FromArgb(120, 232, 69, 72);
+
+    // ------------------------------------------------------------------ unir perfiles
+
+    [Display(Name = "Unir solos los perfiles vecinos que se superponen", GroupName = "Unir perfiles", Order = 90)]
+    public bool AutoMerge { get => _autoMerge; set { _autoMerge = value; RecalculateValues(); } }
+
+    [Display(Name = "Superposición mínima para unir (%)", GroupName = "Unir perfiles", Order = 92)]
+    [Range(1, 100)]
+    public int AutoMergePercent { get => _autoMergePercent; set { _autoMergePercent = Math.Clamp(value, 1, 100); RecalculateValues(); } }
+
+    [Display(Name = "Superposición medida sobre", GroupName = "Unir perfiles", Order = 94)]
+    public OverlapBasis MergeBasis { get => _overlapBasis; set { _overlapBasis = value; RecalculateValues(); } }
+
+    [Display(Name = "Marcar los perfiles unidos", GroupName = "Unir perfiles", Order = 96)]
+    public bool LabelMerged { get; set; } = true;
+
+    /// <summary>Uniones hechas con el clic derecho: «desde-hasta;…» en ticks UTC del inicio de cada período.</summary>
+    [Browsable(false)]
+    [KeepSetting]
+    public string MergedRanges
+    {
+        get => string.Join(";", _ranges.Select(r => r.From.ToString(CultureInfo.InvariantCulture) + "-" + r.To.ToString(CultureInfo.InvariantCulture)));
+        set
+        {
+            var list = new List<(long, long)>();
+            foreach (var part in (value ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var ab = part.Split('-');
+                if (ab.Length == 2 && long.TryParse(ab[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var a)
+                    && long.TryParse(ab[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var b) && b >= a)
+                    list.Add((a, b));
+            }
+
+            _ranges = Normalize(list);
+            RecalculateValues();
+        }
+    }
 
     // ------------------------------------------------------------------ POC
 
@@ -101,6 +231,9 @@ public class VpProfile : VpIndicator
     [Display(Name = "Borrar el POC al ser tocado (solo los vírgenes)", GroupName = "POC", Order = 120)]
     public bool DeletePocOnTouch { get => _deletePoc; set { _deletePoc = value; RecalculateValues(); } }
 
+    [Display(Name = "Extender el POC hasta que lo toquen", GroupName = "POC", Order = 125)]
+    public bool ExtendPoc { get; set; } = true;
+
     [Display(Name = "Cantidad de POC a mostrar", GroupName = "POC", Order = 130)]
     [Range(1, 500)]
     public int PocCount { get; set; } = 10;
@@ -111,6 +244,9 @@ public class VpProfile : VpIndicator
     [Display(Name = "Grosor del POC", GroupName = "POC", Order = 150)]
     [Range(1, 10)]
     public int PocWidth { get; set; } = 2;
+
+    [Display(Name = "Estilo del POC", GroupName = "POC", Order = 155)]
+    public LineDashStyle PocStyle { get; set; } = LineDashStyle.Solid;
 
     [Display(Name = "Color del POC comprador", GroupName = "POC", Order = 160)]
     public Color BullPocColor { get; set; } = Color.FromArgb(255, 20, 217, 144);
@@ -208,7 +344,43 @@ public class VpProfile : VpIndicator
     [Range(1, 6)]
     public int NakedWidth { get; set; } = 1;
 
-    // ------------------------------------------------------------------ cálculo
+    // ------------------------------------------------------------------ períodos y uniones
+
+    private bool Developing => _showDeveloping || _period == VpProfilePeriod.All;
+
+    private bool Boundary(int bar) => _period != VpProfilePeriod.All && NewPeriod(bar, (VpPeriod)(int)_period);
+
+    private long TimeOf(int bar) => Vp.Utc(GetCandle(bar).Time).Ticks;
+
+    /// <summary>Ordena y junta las uniones que se tocan.</summary>
+    private static List<(long From, long To)> Normalize(List<(long From, long To)> list)
+    {
+        list.Sort((a, b) => a.From.CompareTo(b.From));
+        var res = new List<(long From, long To)>();
+        foreach (var r in list)
+        {
+            if (res.Count > 0 && r.From <= res[^1].To) res[^1] = (res[^1].From, Math.Max(res[^1].To, r.To));
+            else res.Add(r);
+        }
+
+        return res;
+    }
+
+    /// <summary>El período que empieza en <paramref name="next"/> sigue dentro de una unión que ya incluye a <paramref name="start"/>.</summary>
+    private bool KeepMerging(int start, int next)
+    {
+        if (_ranges.Count == 0) return false;
+        long t0 = TimeOf(start), t1 = TimeOf(next);
+        foreach (var (from, to) in _ranges)
+            if (t0 >= from && t0 <= to && t1 <= to) return true;
+        return false;
+    }
+
+    private bool InRange(int start)
+    {
+        long t = TimeOf(start);
+        return _ranges.Any(r => t >= r.From && t <= r.To);
+    }
 
     protected override void Reset()
     {
@@ -217,20 +389,22 @@ public class VpProfile : VpIndicator
         _live.Clear();
         _developing = null;
         _periodStart = 0;
+        _periodParts = 1;
+        _acc.Clear(-1);
     }
 
     protected override void Commit(int bar)
     {
         if (_naked.Enabled.Any(e => e)) _naked.Commit(bar, NewPeriod, GetCandle, BarLength);
-        if (bar > 0 && NewPeriod(bar, _period))
+        if (bar > 0 && Boundary(bar))
         {
-            if (Build(_periodStart, bar - 1, true) is { } r)
+            if (KeepMerging(_periodStart, bar)) _periodParts++;
+            else
             {
-                _done.Add(r);
-                _live.Add(r);
+                Finish(_periodStart, bar - 1, _periodParts);
+                _periodStart = bar;
+                _periodParts = 1;
             }
-
-            _periodStart = bar;
         }
 
         // POC que siguen a la derecha hasta que una vela cerrada los toca
@@ -244,7 +418,47 @@ public class VpProfile : VpIndicator
             if (r.PocDead && r.PocUpDead && r.PocDnDead) _live.RemoveAt(i);
         }
 
-        if (_showDeveloping && bar >= CurrentBar - 2 && bar >= _periodStart) _developing = Build(_periodStart, bar, false);
+        if (Developing && bar >= CurrentBar - 2 && bar >= _periodStart)
+        {
+            _developing = BuildDeveloping(_periodStart, bar);
+            if (_developing != null) _developing.Parts = _periodParts;
+        }
+    }
+
+    /// <summary>Un período (o varios unidos a mano) terminó: se arma y, si corresponde, se une con el anterior.</summary>
+    private void Finish(int s, int e, int parts)
+    {
+        bool manual = parts > 1 || InRange(s);
+        var r = Build(s, e, true);
+        if (r == null) return;
+        r.Manual = manual;
+        r.Parts = parts;
+        if (_autoMerge && !manual && _done.Count > 0)
+        {
+            var prev = _done[^1];
+            if (!prev.Manual && prev.EndBar == s - 1 && Overlap(prev, r) * 100 >= _autoMergePercent && Build(prev.StartBar, e, true) is { } joined)
+            {
+                _done.RemoveAt(_done.Count - 1);
+                _live.Remove(prev);
+                joined.Auto = true;
+                joined.Parts = prev.Parts + 1;
+                r = joined;
+            }
+        }
+
+        _done.Add(r);
+        _live.Add(r);
+    }
+
+    /// <summary>Parte del rango más chico que comparten dos perfiles (0 a 1).</summary>
+    private double Overlap(Result a, Result b)
+    {
+        bool va = _overlapBasis == OverlapBasis.ValueArea;
+        decimal aLo = va ? a.Val : a.YMin, aHi = va ? a.Vah : a.YMax, bLo = va ? b.Val : b.YMin, bHi = va ? b.Vah : b.YMax;
+        decimal inter = Math.Min(aHi, bHi) - Math.Max(aLo, bLo);
+        decimal smaller = Math.Min(aHi - aLo, bHi - bLo);
+        if (inter <= 0) return 0;
+        return smaller <= 0 ? 1 : (double)(inter / smaller);
     }
 
     private void Extend(int bar, decimal price, ref int end, ref bool dead)
@@ -256,11 +470,13 @@ public class VpProfile : VpIndicator
 
     protected override void Live(int bar)
     {
-        if (_showDeveloping && bar == _periodStart && Committed < bar) _developing = null;
+        if (Developing && bar == _periodStart && Committed < bar) _developing = null;
     }
 
-    private string Bucket => string.Join("|", "vpu-profile1", InstrumentInfo?.Instrument ?? "", InstrumentInfo?.TickSize ?? 0, _rows, (int)_volumeMode, _capMult,
-        _excludeAuction, _vaPercent, _outerPercent);
+    private decimal Tick => InstrumentInfo is { } i ? i.InstrumentTickSize > 0 ? i.InstrumentTickSize : i.TickSize : 0;
+
+    private string Bucket => string.Join("|", "vpu-profile2", InstrumentInfo?.Instrument ?? "", Tick, (int)_rowSizing,
+        _rowSizing == RowSizing.Rows ? _rows : _ticksPerRow, (int)_volumeMode, _capMult, _excludeAuction, _vaPercent, _outerPercent);
 
     private string Fingerprint(int s, int e)
     {
@@ -275,6 +491,50 @@ public class VpProfile : VpIndicator
         return string.Join("|", GetCandle(s).Time.Ticks, GetCandle(e).Time.Ticks, e - s, vol, delta);
     }
 
+    /// <summary>Tope de volumen por nivel en el modo «recortar extremos» (mediana del período × el múltiplo).</summary>
+    private decimal CapFor(int s, int e)
+    {
+        if (_volumeMode != VpVolumeMode.Cap) return decimal.MaxValue;
+        var sample = new List<decimal>();
+        for (int b = s; b <= e; b++)
+        {
+            if (_excludeAuction && Vp.IsAuction(GetCandle(b).Time)) continue;
+            foreach (var l in GetTickLevels(b)) sample.Add(l.Volume);
+        }
+
+        return sample.Count > 0 ? Vp.Median(sample) * _capMult : decimal.MaxValue;
+    }
+
+    private void AddBar(Acc acc, int bar, decimal cap)
+    {
+        var c = GetCandle(bar);
+        if (c.Volume > 0)
+        {
+            if (c.Low < acc.Lo) acc.Lo = c.Low;
+            if (c.High > acc.Hi) acc.Hi = c.High;
+        }
+
+        if (_excludeAuction && Vp.IsAuction(c.Time)) return;
+        foreach (var l in GetTickLevels(bar))
+        {
+            if (l.Volume <= 0) continue;
+            double v = (double)Math.Min(l.Volume, cap);
+            if (_volumeMode == VpVolumeMode.Log) v = Math.Log(1 + v);
+            double buyShare = l.Bid + l.Ask > 0 ? (double)(l.Ask / (l.Bid + l.Ask)) : 0.5;
+            acc.Levels.TryGetValue(l.Price, out var cur);
+            acc.Levels[l.Price] = (cur.All + v, cur.Buy + v * buyShare);
+        }
+    }
+
+    /// <summary>El período en curso: se suma solo lo nuevo desde la última vez (en «recortar», el tope cambia: se rearma).</summary>
+    private Result? BuildDeveloping(int s, int e)
+    {
+        if (_volumeMode == VpVolumeMode.Cap) return Build(s, e, false);
+        if (_acc.Start != s || _acc.End > e) _acc.Clear(s);
+        while (_acc.End < e) AddBar(_acc, ++_acc.End, decimal.MaxValue);
+        return FromLevels(s, e, _acc);
+    }
+
     private Result? Build(int s, int e, bool final)
     {
         if (e < s) return null;
@@ -287,60 +547,60 @@ public class VpProfile : VpIndicator
             return cached;
         }
 
-        decimal yMin = decimal.MaxValue, yMax = decimal.MinValue;
-        for (int b = s; b <= e; b++)
+        Result? r;
+        if (final && _volumeMode != VpVolumeMode.Cap && _acc.Start == s && _acc.End == e) r = FromLevels(s, e, _acc); // ya sumado
+        else
         {
-            var c = GetCandle(b);
-            if (c.Volume <= 0) continue;
-            yMin = Math.Min(yMin, c.Low);
-            yMax = Math.Max(yMax, c.High);
+            var acc = new Acc();
+            acc.Clear(s);
+            decimal cap = CapFor(s, e);
+            for (int b = s; b <= e; b++) AddBar(acc, b, cap);
+            r = FromLevels(s, e, acc);
         }
 
-        if (yMin > yMax) return null;
-        int rows = _rows;
-        decimal step = Math.Max((yMax - yMin) / rows, 0.0000000001m);
+        if (r != null && key != null) ResultCache.Put(Bucket, key, Write(r));
+        return r;
+    }
+
+    private Result? FromLevels(int s, int e, Acc acc)
+    {
+        decimal lo = acc.Lo, hi = acc.Hi;
+        if (lo > hi || acc.Levels.Count == 0) return null;
+        decimal yMin = lo, yMax = hi, step;
+        int rows;
+        decimal tick = Tick;
+        if (_rowSizing == RowSizing.Ticks && tick > 0)
+        {
+            step = tick * _ticksPerRow;
+            if ((hi - lo) / step > MaxRows) step = tick * Math.Ceiling((hi - lo) / tick / MaxRows);
+            yMin = Math.Floor(lo / step) * step;
+            rows = (int)Math.Floor((hi - yMin) / step);
+            yMax = yMin + (rows + 1) * step;
+        }
+        else
+        {
+            rows = _rows;
+            step = Math.Max((hi - lo) / rows, 0.0000000001m);
+        }
+
         var all = new double[rows + 1];
-        var up = new double[rows + 1];
-        var dn = new double[rows + 1];
-
-        decimal cap = decimal.MaxValue;
-        if (_volumeMode == VpVolumeMode.Cap)
+        var buy = new double[rows + 1];
+        foreach (var (price, (a, b)) in acc.Levels)
         {
-            var sample = new List<decimal>();
-            for (int b = s; b <= e; b++)
-            {
-                var c = GetCandle(b);
-                if (_excludeAuction && Vp.IsAuction(c.Time)) continue;
-                foreach (var l in GetTickLevels(b)) sample.Add(l.Volume);
-            }
-
-            if (sample.Count > 0) cap = Vp.Median(sample) * _capMult;
-        }
-
-        for (int b = s; b <= e; b++)
-        {
-            var c = GetCandle(b);
-            if (_excludeAuction && Vp.IsAuction(c.Time)) continue;
-            foreach (var l in GetTickLevels(b))
-            {
-                if (l.Volume <= 0) continue;
-                double v = (double)Math.Min(l.Volume, cap);
-                if (_volumeMode == VpVolumeMode.Log) v = Math.Log(1 + v);
-                double buyShare = l.Bid + l.Ask > 0 ? (double)(l.Ask / (l.Bid + l.Ask)) : 0.5;
-                int i = (int)Math.Clamp(Math.Floor((l.Price - yMin) / step), 0, rows);
-                all[i] += v;
-                up[i] += v * buyShare;
-                dn[i] += v * (1 - buyShare);
-            }
+            int i = (int)Math.Clamp(Math.Floor((price - yMin) / step), 0, rows);
+            all[i] += a;
+            buy[i] += b;
         }
 
         int pi = ArgMax(all);
         if (all[pi] <= 0) return null;
+        var sell = new double[rows + 1];
+        for (int i = 0; i <= rows; i++) sell[i] = all[i] - buy[i];
         decimal Mid(int i) => Math.Min(yMin + (i + 0.5m) * step, yMax);
         double total = all.Sum();
-        var (vu, vd, acc) = Expand(all, pi, pi, all[pi], total * _vaPercent / 100.0);
-        var (ou, od, _) = Expand(all, vu, vd, acc, total * _outerPercent / 100.0);
-        var r = new Result
+        var (vu, vd, accV) = Expand(all, pi, pi, all[pi], total * _vaPercent / 100.0);
+        var (ou, od, _) = Expand(all, vu, vd, accV, total * _outerPercent / 100.0);
+        return new Result
         {
             StartBar = s,
             EndBar = e,
@@ -348,9 +608,10 @@ public class VpProfile : VpIndicator
             YMax = yMax,
             Step = step,
             Values = all,
+            Buy = buy,
             Poc = Mid(pi),
-            PocUp = Mid(ArgMax(up)),
-            PocDn = Mid(ArgMax(dn)),
+            PocUp = Mid(ArgMax(buy)),
+            PocDn = Mid(ArgMax(sell)),
             Vah = Math.Min(yMin + (vu + 1) * step, yMax),
             Val = yMin + vd * step,
             OuterHi = Math.Min(yMin + (ou + 1) * step, yMax),
@@ -360,8 +621,6 @@ public class VpProfile : VpIndicator
             PocUpEnd = e,
             PocDnEnd = e,
         };
-        if (key != null) ResultCache.Put(Bucket, key, Write(r));
-        return r;
     }
 
     private static int ArgMax(double[] a)
@@ -395,6 +654,7 @@ public class VpProfile : VpIndicator
             w.Write(r.Tail);
             w.Write(r.Values.Length);
             foreach (var v in r.Values) w.Write(v);
+            foreach (var v in r.Buy) w.Write(v);
         }
 
         return ms.ToArray();
@@ -411,14 +671,100 @@ public class VpProfile : VpIndicator
                 PocDn = rd.ReadDecimal(), Vah = rd.ReadDecimal(), Val = rd.ReadDecimal(), OuterHi = rd.ReadDecimal(), OuterLo = rd.ReadDecimal(),
                 Tail = rd.ReadDouble(),
             };
-            r.Values = new double[rd.ReadInt32()];
-            for (int i = 0; i < r.Values.Length; i++) r.Values[i] = rd.ReadDouble();
+            int n = rd.ReadInt32();
+            r.Values = new double[n];
+            r.Buy = new double[n];
+            for (int i = 0; i < n; i++) r.Values[i] = rd.ReadDouble();
+            for (int i = 0; i < n; i++) r.Buy[i] = rd.ReadDouble();
             return r;
         }
         catch
         {
             return null;
         }
+    }
+
+    // ------------------------------------------------------------------ menú del clic derecho: unir perfiles
+
+    private Result? ResultAt(int bar)
+    {
+        foreach (var r in _done)
+            if (bar >= r.StartBar && bar <= r.EndBar) return r;
+        return _developing != null && bar >= _developing.StartBar ? _developing : null;
+    }
+
+    /// <summary>Primera y última vela del período <paramref name="p"/> que contiene a <paramref name="bar"/>.</summary>
+    private (int From, int To) Enclosing(int bar, VpPeriod p)
+    {
+        int a = bar;
+        while (a > 0 && !NewPeriod(a, p)) a--;
+        int b = bar + 1;
+        while (b < CurrentBar && !NewPeriod(b, p)) b++;
+        return (a, b - 1);
+    }
+
+    private void AddRange(long from, long to)
+    {
+        var list = new List<(long, long)>(_ranges) { (Math.Min(from, to), Math.Max(from, to)) };
+        _ranges = Normalize(list);
+        RecalculateValues();
+    }
+
+    public override IReadOnlyList<IndicatorMenuItem> GetMenuItems(int x, int y)
+    {
+        var items = new List<IndicatorMenuItem>();
+        if (ChartInfo == null || CurrentBar <= 0 || _period == VpProfilePeriod.All) return items;
+        int bar = Math.Clamp(ChartInfo.PriceChartContainer.GetBarByX(x), 0, CurrentBar - 1);
+        var r = ResultAt(bar);
+        if (r == null)
+        {
+            if (_head != null) items.Add(new IndicatorMenuItem(UiText.Tr("Perfiles: cancelar el inicio marcado"), () => _head = null));
+            return items;
+        }
+
+        long from = TimeOf(r.StartBar), to = TimeOf(Math.Min(r.EndBar, CurrentBar - 1));
+        if (_head is not { } head)
+            items.Add(new IndicatorMenuItem(UiText.Tr("Perfiles: marcar este como INICIO de la unión"), () => _head = (from, to)));
+        else
+        {
+            items.Add(new IndicatorMenuItem(UiText.Tr("Perfiles: unir desde el inicio marcado hasta este (FIN)"), () =>
+            {
+                _head = null;
+                AddRange(Math.Min(head.From, from), Math.Max(head.To, to));
+            }));
+            items.Add(new IndicatorMenuItem(UiText.Tr("Perfiles: cancelar el inicio marcado"), () => _head = null));
+        }
+
+        // atajos exactos: la semana o el mes entero de este perfil
+        if (_period < VpProfilePeriod.Week)
+        {
+            var (a, b) = Enclosing(r.StartBar, VpPeriod.Week);
+            items.Add(new IndicatorMenuItem(UiText.Tr("Perfiles: unir toda la semana de este perfil"), () => AddRange(TimeOf(a), TimeOf(b))));
+        }
+
+        if (_period < VpProfilePeriod.Month)
+        {
+            var (a, b) = Enclosing(r.StartBar, VpPeriod.Month);
+            items.Add(new IndicatorMenuItem(UiText.Tr("Perfiles: unir todo el mes de este perfil"), () => AddRange(TimeOf(a), TimeOf(b))));
+        }
+
+        if (r.Manual)
+            items.Add(new IndicatorMenuItem(UiText.Tr("Perfiles: separar este perfil unido"), () =>
+            {
+                _ranges = _ranges.Where(g => !(g.To >= from && g.From <= to)).ToList();
+                RecalculateValues();
+            }));
+        if (_autoMerge)
+            items.Add(new IndicatorMenuItem(UiText.Tr("Perfiles: dejar de unir solos los que se superponen"), () => AutoMerge = false, true));
+        else
+            items.Add(new IndicatorMenuItem(string.Format(UiText.Tr("Perfiles: unir solos los vecinos que se superponen más de {0}%"), _autoMergePercent), () => AutoMerge = true));
+        if (_ranges.Count > 0)
+            items.Add(new IndicatorMenuItem(UiText.Tr("Perfiles: quitar todas las uniones"), () =>
+            {
+                _ranges = new List<(long, long)>();
+                RecalculateValues();
+            }));
+        return items;
     }
 
     // ------------------------------------------------------------------ dibujo
@@ -431,9 +777,22 @@ public class VpProfile : VpIndicator
         int pocFrom = Math.Max(0, _done.Count - PocCount);
         int tailFrom = Math.Max(0, _done.Count - TailKeep);
         for (int i = 0; i < _done.Count; i++) Draw(context, _done[i], first, last, true, i >= pocFrom, i >= tailFrom, tailRef);
-        if (_showDeveloping && _developing != null) Draw(context, _developing, first, last, false, true, false, tailRef);
+        if (Developing && _developing != null) Draw(context, _developing, first, last, false, true, false, tailRef);
         if (_naked.Enabled.Any(e => e))
             VpNakedPoc.Render(this, context, _naked, new[] { NakedDailyColor, NakedWeeklyColor, NakedMonthlyColor, NakedYearlyColor }, NakedShowTouched, NakedWidth, LineDashStyle.Solid, true, 50);
+
+        // el inicio marcado para unir: recuadro punteado
+        if (_head is { } head && CurrentBar > 0)
+        {
+            var r = _done.FirstOrDefault(d => TimeOf(d.StartBar) == head.From);
+            if (r != null && r.EndBar >= first && r.StartBar <= last)
+            {
+                var pen = Vp.Pen(Color.FromArgb(230, 255, 196, 0), 2, LineDashStyle.Dash);
+                int x0 = X(r.StartBar), x1 = X(r.EndBar + 1), yTop = Y(r.YMax), yBot = Y(r.YMin);
+                context.DrawRectangle(pen, new Rectangle(x0, Math.Min(yTop, yBot), Math.Max(2, x1 - x0), Math.Max(2, Math.Abs(yBot - yTop))));
+                Text(context, UiText.Tr("Inicio de la unión: clic derecho en el último perfil → «unir hasta este»"), Color.FromArgb(255, 255, 196, 0), x0, Math.Min(yTop, yBot) - 2);
+            }
+        }
     }
 
     private void Draw(RenderContext ctx, Result r, int first, int last, bool final, bool withPoc, bool withTail, double tailRef)
@@ -447,13 +806,40 @@ public class VpProfile : VpIndicator
         if (max > 0 && r.EndBar >= first)
         {
             double w = Math.Max(1, x1 - x0) * Math.Clamp(WidthPercent, 1, 100) / 100.0;
+            int pocRow = ArgMax(r.Values);
+            bool hasBuy = r.Buy.Length == r.Values.Length;
             for (int i = 0; i < r.Values.Length; i++)
             {
                 if (r.Values[i] <= 0) continue;
                 decimal lo = r.YMin + i * r.Step, hi = Math.Min(lo + r.Step, r.YMax);
                 int yTop = Y(hi), yBot = Y(lo);
-                int len = (int)Math.Round(r.Values[i] / max * w);
-                if (len > 0) ctx.FillRectangle(ProfileColor, new Rectangle(x0, Math.Min(yTop, yBot), len, Math.Max(1, Math.Abs(yBot - yTop))));
+                var rect = (int len, int dx) => new Rectangle(x0 + dx, Math.Min(yTop, yBot), len, Math.Max(1, Math.Abs(yBot - yTop)));
+                double buy = hasBuy ? r.Buy[i] : r.Values[i] / 2, sell = r.Values[i] - buy;
+                switch (Style)
+                {
+                    case ProfileStyle.Delta:
+                    {
+                        double d = buy - sell;
+                        int len = (int)Math.Round(Math.Abs(d) / max * w);
+                        if (len > 0) ctx.FillRectangle(d >= 0 ? BuyColor : SellColor, rect(len, 0));
+                        break;
+                    }
+                    case ProfileStyle.BidAsk:
+                    {
+                        int ls = (int)Math.Round(sell / max * w), lb = (int)Math.Round(buy / max * w);
+                        if (ls > 0) ctx.FillRectangle(SellColor, rect(ls, 0));
+                        if (lb > 0) ctx.FillRectangle(BuyColor, rect(lb, ls));
+                        break;
+                    }
+                    default:
+                    {
+                        int len = (int)Math.Round(r.Values[i] / max * w);
+                        bool inVa = lo >= r.Val && hi <= r.Vah;
+                        var color = ColorPocRow && i == pocRow ? PocColor : ColorValueAreaRows && inVa ? ValueAreaRowColor : ProfileColor;
+                        if (len > 0) ctx.FillRectangle(color, rect(len, 0));
+                        break;
+                    }
+                }
             }
 
             if (ShowValueAreaBox)
@@ -461,15 +847,20 @@ public class VpProfile : VpIndicator
             var vaStyle = final ? ValueAreaStyle : LineDashStyle.Dot;
             if (ShowVah) ctx.DrawLine(Vp.Pen(VahColor, ValueAreaWidth, vaStyle), x0, Y(r.Vah), x1, Y(r.Vah));
             if (ShowVal) ctx.DrawLine(Vp.Pen(ValColor, ValueAreaWidth, vaStyle), x0, Y(r.Val), x1, Y(r.Val));
+            if (LabelMerged && r.Parts > 1)
+            {
+                string label = string.Format(UiText.Tr(r.Auto ? "Unido solo · {0} períodos" : "Unido · {0} períodos"), r.Parts);
+                Text(ctx, label, Color.FromArgb(200, 200, 200, 200), x0 + 2, Y(r.YMax) - 2);
+            }
         }
 
         if (ShowPoc && withPoc)
         {
-            if (PocType == PocKind.Regular) DrawPoc(ctx, r.Poc, x0, r.PocEnd, r.PocDead, PocColor, final);
+            if (PocType == PocKind.Regular) DrawPoc(ctx, r.Poc, x0, x1, r.PocEnd, r.PocDead, PocColor, final);
             else
             {
-                DrawPoc(ctx, r.PocUp, x0, r.PocUpEnd, r.PocUpDead, BullPocColor, final);
-                DrawPoc(ctx, r.PocDn, x0, r.PocDnEnd, r.PocDnDead, BearPocColor, final);
+                DrawPoc(ctx, r.PocUp, x0, x1, r.PocUpEnd, r.PocUpDead, BullPocColor, final);
+                DrawPoc(ctx, r.PocDn, x0, x1, r.PocDnEnd, r.PocDnDead, BearPocColor, final);
             }
         }
 
@@ -489,11 +880,11 @@ public class VpProfile : VpIndicator
         }
     }
 
-    private void DrawPoc(RenderContext ctx, decimal price, int x0, int end, bool dead, Color color, bool final)
+    private void DrawPoc(RenderContext ctx, decimal price, int x0, int x1, int end, bool dead, Color color, bool final)
     {
         if (final && dead && _deletePoc) return;
-        // sin tocar: llega hasta la vela actual
-        int xEnd = final ? (dead ? X(end, false) : X(CurrentBar - 1, false)) : X(CurrentBar - 1, false);
-        ctx.DrawLine(Vp.Pen(color, PocWidth, final ? LineDashStyle.Solid : LineDashStyle.Dot), x0, Y(price), Math.Max(x0 + 1, xEnd), Y(price));
+        // sin tocar: llega hasta la vela actual (o solo el ancho del perfil si no se extiende)
+        int xEnd = !ExtendPoc ? x1 : final ? (dead ? X(end, false) : X(CurrentBar - 1, false)) : X(CurrentBar - 1, false);
+        ctx.DrawLine(Vp.Pen(color, PocWidth, final ? PocStyle : LineDashStyle.Dot), x0, Y(price), Math.Max(x0 + 1, xEnd), Y(price));
     }
 }
