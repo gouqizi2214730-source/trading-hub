@@ -72,12 +72,13 @@ internal sealed class CodeEditorWindow : Window
     private Control Build()
     {
         var add = Ui.Button("Nuevo", MaterialIconKind.Plus, () => _ = NewAsync());
+        var addKvs = Ui.IconButton(MaterialIconKind.ScriptTextOutline, "Nuevo script KVS (el lenguaje simple: param / input / output / onBar, como wrun de openmarket)", () => _ = NewKvsAsync(), 17);
         var folder = Ui.IconButton(MaterialIconKind.FolderOpenOutline, Os.IsWindows ? "Abrir la carpeta en el Explorador de archivos" : "Abrir la carpeta en Finder", () => Shell.OpenFolder(AppPaths.UserIndicators));
         var pine = Ui.IconButton(MaterialIconKind.Import, "Importar un Pine Script de TradingView (Claude lo traduce a un indicador de KVP)", () => _ = ImportPineAsync(), 17);
         var rename = Ui.IconButton(MaterialIconKind.RenameBox, "Cambiar el nombre del archivo", () => _ = RenameAsync(), 17);
         var del = Ui.IconButton(MaterialIconKind.DeleteOutline, "Eliminar este archivo", () => _ = DeleteAsync(), 17);
         var head = new DockPanel { Margin = new Thickness(0, 0, 0, 10) };
-        var acts = Ui.H(2, pine, rename, del, folder, add);
+        var acts = Ui.H(2, pine, rename, del, folder, addKvs, add);
         DockPanel.SetDock(acts, Dock.Right);
         head.Children.Add(acts);
         head.Children.Add(Ui.H3("Archivos"));
@@ -122,9 +123,12 @@ internal sealed class CodeEditorWindow : Window
     private void FillFiles(string? select = null)
     {
         _files.Items.Clear();
-        foreach (var f in Directory.EnumerateFiles(AppPaths.UserIndicators, "*.cs", SearchOption.AllDirectories).Where(f => !f.Contains("/bin/") && !f.Contains("/obj/")).OrderBy(f => f))
+        foreach (var f in Directory.EnumerateFiles(AppPaths.UserIndicators, "*.*", SearchOption.AllDirectories)
+                     .Where(f => f.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".kvs", StringComparison.OrdinalIgnoreCase))
+                     .Where(f => !f.Contains("/bin/") && !f.Contains("/obj/")).OrderBy(f => f))
         {
-            var row = Ui.H(8, Ui.Icon(MaterialIconKind.LanguageCsharp, 16, Ui.Accent), new TextBlock { Text = Path.GetRelativePath(AppPaths.UserIndicators, f), TextTrimming = TextTrimming.CharacterEllipsis });
+            bool kvs = f.EndsWith(".kvs", StringComparison.OrdinalIgnoreCase);
+            var row = Ui.H(8, Ui.Icon(kvs ? MaterialIconKind.ScriptTextOutline : MaterialIconKind.LanguageCsharp, 16, Ui.Accent), new TextBlock { Text = Path.GetRelativePath(AppPaths.UserIndicators, f), TextTrimming = TextTrimming.CharacterEllipsis });
             _files.Items.Add(new ListBoxItem { Content = row, Tag = f });
         }
 
@@ -191,7 +195,7 @@ internal sealed class CodeEditorWindow : Window
         if (_path == null || _readOnly != null) return;
         var name = await PromptDialog.ShowAsync(this, "Cambiar nombre", "Nombre del archivo", Path.GetFileNameWithoutExtension(_path), "Renombrar");
         if (string.IsNullOrWhiteSpace(name)) return;
-        var target = Path.Combine(Path.GetDirectoryName(_path)!, name.Trim() + ".cs");
+        var target = Path.Combine(Path.GetDirectoryName(_path)!, name.Trim() + Path.GetExtension(_path));
         if (File.Exists(target)) return;
         if (_editor.IsDirty) Save();
         File.Move(_path, target);
@@ -243,6 +247,48 @@ internal sealed class CodeEditorWindow : Window
         if (!File.Exists(path)) File.WriteAllText(path, IndicatorTemplate(cls, name));
         FillFiles(path);
     }
+
+    private async Task NewKvsAsync()
+    {
+        var name = await PromptDialog.ShowAsync(this, "Nuevo script KVS", "Nombre del script", "MiScript", "Crear");
+        if (name == null) return;
+        string file = new string(name.Where(c => char.IsLetterOrDigit(c) || c is '_' or '-').ToArray());
+        if (file.Length == 0) file = "MiScript";
+        var path = Path.Combine(AppPaths.UserIndicators, file + ".kvs");
+        if (!File.Exists(path)) File.WriteAllText(path, KvsTemplate(name.Trim()));
+        FillFiles(path);
+        _svc.Scripts?.CompileAll();
+    }
+
+    /// <summary>Un script KVS de ejemplo: bandas de una media con alerta, y el delta del libro / de las operaciones.</summary>
+    private static string KvsTemplate(string display) => $$"""
+        // Script KVS: el lenguaje simple de KVP (parecido a wrun de openmarket). Al guardar se compila y aparece en
+        // Indicadores → «Scripts KVS». Funciones: ema sma rma wma stdev highest lowest sum change cum crossover crossunder
+        // abs min max sqrt log pow round nz. Entradas: ohlcv.open/high/low/close/volume/hl2/hlc3/ohlc4/time,
+        // trades.volume {side: "BUY"/"SELL"}, trades.delta, trades.count, book.bid / book.ask / book.delta {within: ticks}.
+        // Una serie con [n] es su valor de hace n velas: close[1] es el cierre anterior.
+        name "{{display}}"
+
+        param length = 20 { min: 1, max: 500, description: "Velas de la media" }
+        param mult = 2 { min: 0.1, max: 10, description: "Ancho de las bandas (× desvío)" }
+
+        input src = ohlcv.close
+        input buys = trades.volume { side: "BUY" }
+
+        output basis = line { overlay: true, color: "#f2b53a", width: 2 }
+        output upper = line { overlay: true, color: "#3d8bfd" }
+        output lower = line { overlay: true, color: "#3d8bfd" }
+
+        onBar {
+          basis = ema(src, length)
+          var dev = stdev(src, length)
+          upper = basis + mult * dev
+          lower = basis - mult * dev
+          if (crossover(src, upper)) {
+            alert("cerró arriba de la banda")
+          }
+        }
+        """;
 
     private static string IndicatorTemplate(string cls, string display) => $$"""
         using System.ComponentModel;

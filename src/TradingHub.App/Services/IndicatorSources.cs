@@ -14,6 +14,10 @@ public static class IndicatorSources
     public static string? UserFile(Type t)
     {
         if (!Directory.Exists(AppPaths.UserIndicators)) return null;
+        // un script KVS: su clase se llama Kvs_ + el nombre del archivo
+        if (t.Name.StartsWith("Kvs_", StringComparison.Ordinal))
+            foreach (var f in Directory.EnumerateFiles(AppPaths.UserIndicators, "*.kvs", SearchOption.AllDirectories))
+                if (TradingHub.Scripting.KvsTranslator.ClassNameFor(Path.GetFileNameWithoutExtension(f)) == t.Name) return f;
         var rx = new Regex(@"\bclass\s+" + Regex.Escape(t.Name) + @"\b");
         foreach (var f in Directory.EnumerateFiles(AppPaths.UserIndicators, "*.cs", SearchOption.AllDirectories))
         {

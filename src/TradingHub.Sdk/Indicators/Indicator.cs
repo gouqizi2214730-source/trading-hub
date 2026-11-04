@@ -495,6 +495,10 @@ namespace TradingHub.Indicators
         protected void AddAlert(string soundFile, string instrument, string message, Color backgroundColor, Color foregroundColor) =>
             Host?.AddAlert(this, soundFile, instrument, message, backgroundColor, foregroundColor);
 
+        /// <summary>Alerta pedida por un script (KVS): como <see cref="AddAlert(string, string)"/>.</summary>
+        public void AddAlertFromScript(string message) =>
+            Host?.AddAlert(this, "alert1", InstrumentInfo?.Instrument ?? "", message, Color.Black, Color.White);
+
         protected void AddAlert(string soundFile, string message) =>
             Host?.AddAlert(this, soundFile, InstrumentInfo?.Instrument ?? "", message, Color.Black, Color.White);
 

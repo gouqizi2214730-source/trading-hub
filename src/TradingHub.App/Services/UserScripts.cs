@@ -31,7 +31,10 @@ public sealed class UserScripts : IDisposable
 
         try
         {
-            _watcher = new FileSystemWatcher(Folder, "*.cs") { IncludeSubdirectories = true, EnableRaisingEvents = true };
+            // los .cs y los scripts .kvs
+            _watcher = new FileSystemWatcher(Folder) { IncludeSubdirectories = true, EnableRaisingEvents = true };
+            _watcher.Filters.Add("*.cs");
+            _watcher.Filters.Add("*.kvs");
             _watcher.Changed += (_, _) => Dispatcher.UIThread.Post(Restart);
             _watcher.Created += (_, _) => Dispatcher.UIThread.Post(Restart);
             _watcher.Deleted += (_, _) => Dispatcher.UIThread.Post(Restart);
@@ -57,7 +60,8 @@ public sealed class UserScripts : IDisposable
 
     public ScriptCompileResult? CompileAll()
     {
-        var files = Directory.EnumerateFiles(Folder, "*.cs", SearchOption.AllDirectories)
+        var files = Directory.EnumerateFiles(Folder, "*.*", SearchOption.AllDirectories)
+            .Where(f => f.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".kvs", StringComparison.OrdinalIgnoreCase))
             .Where(f => !f.Contains("/bin/") && !f.Contains("/obj/"))
             .OrderBy(f => f)
             .ToList();

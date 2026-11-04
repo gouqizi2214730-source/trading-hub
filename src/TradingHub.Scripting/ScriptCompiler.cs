@@ -95,6 +95,7 @@ public sealed class ScriptCompiler
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var parse = new CSharpParseOptions(LanguageVersion.Latest, preprocessorSymbols: new[] { "CROSS_PLATFORM", "TRADINGHUB" });
         var trees = new List<SyntaxTree> { CSharpSyntaxTree.ParseText(GlobalUsings, parse, path: "GlobalUsings.g.cs", encoding: System.Text.Encoding.UTF8) };
+        var kvsErrors = new List<ScriptDiagnostic>();
         foreach (var f in files)
         {
             string source;
@@ -105,6 +106,20 @@ public sealed class ScriptCompiler
             catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
             {
                 continue; // se borró entre que se listó la carpeta y se leyó: queda afuera (quien vigila la carpeta vuelve a compilar)
+            }
+
+            // scripts KVS: se traducen a C# (los errores de C# vuelven con la línea del .kvs)
+            if (f.EndsWith(".kvs", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    source = KvsTranslator.Translate(source, Path.GetFileNameWithoutExtension(f), f);
+                }
+                catch (KvsTranslator.KvsException ex)
+                {
+                    kvsErrors.Add(new ScriptDiagnostic(f, ex.Line, 1, "error", "KVS", ex.Message));
+                    continue;
+                }
             }
 
             var text = Preprocess(source);
@@ -124,13 +139,14 @@ public sealed class ScriptCompiler
             .Where(d => d.Severity == DiagnosticSeverity.Error || (d.Severity == DiagnosticSeverity.Warning && !IgnoredWarnings.Contains(d.Id)))
             .Select(d =>
             {
-                var span = d.Location.GetLineSpan();
+                var span = d.Location.GetMappedLineSpan(); // con #line (scripts KVS): la línea del .kvs
                 return new ScriptDiagnostic(span.Path ?? "", span.StartLinePosition.Line + 1, span.StartLinePosition.Character + 1,
                     d.Severity == DiagnosticSeverity.Error ? "error" : "advertencia", d.Id, d.GetMessage(TradingHub.Common.UiCulture.Current));
             })
             .ToList();
+        diags.InsertRange(0, kvsErrors);
 
-        if (!emit.Success)
+        if (!emit.Success || kvsErrors.Count > 0)
             return new ScriptCompileResult { Success = false, Diagnostics = diags, Elapsed = sw.Elapsed };
 
         pe.Position = 0;
