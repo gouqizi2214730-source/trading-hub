@@ -1,5 +1,14 @@
 {
-  "flowmap": { "repo": "nazmiefearmutcu/flowmap", "sha": "48f8baf0bf05513a2b39f09515806be4e8628f29" },
-  "aggr": { "repo": "Tucsky/aggr", "sha": "41c1609ea3ac7c2dcf12ffba94ac78027e1c0012" },
-  "lmap": { "repo": "liquiditymapperfast/liquiditymapperfast.github.io", "sha": "50595f3134944e07319e99d4d16e1150b4e161bf" }
+  "flowmap": {
+    "repo": "nazmiefearmutcu/flowmap",
+    "sha": "48f8baf0bf05513a2b39f09515806be4e8628f29"
+  },
+  "aggr": {
+    "repo": "Tucsky/aggr",
+    "sha": "41c1609ea3ac7c2dcf12ffba94ac78027e1c0012"
+  },
+  "lmap": {
+    "repo": "liquiditymapperfast/liquiditymapperfast.github.io",
+    "sha": "12f748638b8d7b95c5b92a073d27fa7286d7ef0d"
+  }
 }
