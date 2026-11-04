@@ -16,7 +16,34 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, ITickerStats
     private readonly object _lock = new();
     private readonly Dictionary<string, List<(IMarketDataFeed Feed, Instrument Instrument)>> _map = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _listing = new(1, 1);
-    private long _liveId = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000;
+    private long _liveSlot;
+
+    /// <summary>
+    /// Ids de las operaciones agregadas: el instante en microsegundos × 8 más el número del mercado de origen (0 a 7), así
+    /// cada operación sabe de qué mercado vino (para el CVD por mercado) y los ids siguen creciendo con el tiempo.
+    /// </summary>
+    public static long TaggedId(DateTime utc, int source, ref long lastSlot)
+    {
+        long slot = (utc.Ticks - DateTime.UnixEpoch.Ticks) / 10;
+        if (slot <= lastSlot) slot = lastSlot + 1;
+        lastSlot = slot;
+        return slot * 8 + (source & 7);
+    }
+
+    /// <summary>Mercado de origen de una operación agregada (índice en <see cref="Sources"/>; -1 si no se sabe).</summary>
+    public static int SourceOf(long id) => id > 0 ? (int)(id & 7) : -1;
+
+    private long NextLiveId(DateTime utc, int source)
+    {
+        lock (this) return TaggedId(utc, source, ref _liveSlot);
+    }
+
+    private int SourceIndex(IMarketDataFeed feed)
+    {
+        for (int i = 0; i < _sources.Count; i++)
+            if (ReferenceEquals(_sources[i], feed)) return i;
+        return 7;
+    }
 
     public AggregateFeed(IReadOnlyList<IMarketDataFeed> sources)
     {
@@ -187,7 +214,8 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, ITickerStats
         var heads = new IReadOnlyList<Trade>?[parts.Count];
         var idx = new int[parts.Count];
         var done = new bool[parts.Count];
-        long lastId = 0;
+        long lastSlot = 0;
+        var srcIndex = parts.Select(p => SourceIndex(p.Feed)).ToArray();
         var merged = new List<Trade>(8192);
         async Task<bool> FillAsync(int i)
         {
@@ -234,7 +262,7 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, ITickerStats
 
                 if (best < 0) break;
                 var tr = heads[best]![idx[best]++];
-                merged.Add(new Trade(HistoryBuilder.TimeId(tr.Time, ref lastId), tr.Time, instrument.RoundPrice(tr.Price), tr.Volume, tr.Side));
+                merged.Add(new Trade(TaggedId(tr.Time, srcIndex[best], ref lastSlot), tr.Time, instrument.RoundPrice(tr.Price), tr.Volume, tr.Side));
                 if (merged.Count >= 8192)
                 {
                     if (!onBatch(merged))
@@ -401,9 +429,11 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, ITickerStats
         private readonly bool _depth;
         private readonly Instrument? _source;
         private readonly int _index;
+        private readonly int _sourceIndex;
 
-        public PartSink(AggregateFeed owner, Live live, Instrument instrument, IMarketDataSink sink, string name, bool depth, Instrument? source = null, int index = 0)
+        public PartSink(AggregateFeed owner, Live live, Instrument instrument, IMarketDataSink sink, string name, bool depth, Instrument? source = null, int index = 0, int sourceIndex = 0)
         {
+            _sourceIndex = sourceIndex;
             _owner = owner;
             _live = live;
             _instrument = instrument;
@@ -422,7 +452,8 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, ITickerStats
                 // tiempo que nunca retrocede (los relojes de los mercados difieren unos milisegundos)
                 long ticks = Math.Max(t.Time.Ticks, Volatile.Read(ref _live.LastTicks));
                 Volatile.Write(ref _live.LastTicks, ticks);
-                list.Add(new Trade(Interlocked.Increment(ref _owner._liveId), new DateTime(ticks, DateTimeKind.Utc), _instrument.RoundPrice(t.Price), t.Volume, t.Side));
+                var time = new DateTime(ticks, DateTimeKind.Utc);
+                list.Add(new Trade(_owner.NextLiveId(time, _sourceIndex), time, _instrument.RoundPrice(t.Price), t.Volume, t.Side));
             }
 
             if (list.Count > 0) _sink.OnTrades(_instrument, list);
@@ -487,7 +518,7 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, ITickerStats
             for (int i = 0; i < parts.Count; i++)
             {
                 var (feed, inst) = parts[i];
-                var inner = feed.Subscribe(inst, new PartSink(this, live, instrument, sink, feed.DisplayName, depth: i == 0, inst, i));
+                var inner = feed.Subscribe(inst, new PartSink(this, live, instrument, sink, feed.DisplayName, depth: i == 0, inst, i, SourceIndex(feed)));
                 bool late;
                 lock (live)
                 {

@@ -471,6 +471,8 @@ public sealed class AppServices
         KlineHistory.CacheRoot = AppPaths.Klines;
         // fotos del libro de órdenes (mapa de calor de liquidez), junto a los datos de mercado
         TradingHub.Data.LiquidityHistory.Root = DataLocation.Root;
+        // financiación, interés abierto y liquidaciones ya traídos (junto a los datos de mercado)
+        TradingHub.Feeds.Derivatives.Root = DataLocation.Root;
         TradingHub.Data.LiquidityHistory.Enabled = Settings.RecordLiquidity;
         TradingHub.Data.LiquidityHistory.KeepHours = Math.Clamp(Settings.LiquidityHours, 1, 72);
         TradingHub.Compute.GpuCompute.Mode = Settings.GpuMode == "off" ? "off" : "auto";

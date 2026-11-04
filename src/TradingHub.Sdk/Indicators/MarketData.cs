@@ -117,6 +117,9 @@ namespace TradingHub.Indicators
         /// <summary>El tick real del instrumento (<see cref="TickSize"/> es el alto de las filas del gráfico, que puede juntar varios).</summary>
         public decimal InstrumentTickSize { get; set; }
 
+        /// <summary>Mercados que forman el instrumento (agregado: Binance, Bybit…; uno solo en los demás).</summary>
+        public string[] Sources { get; set; } = Array.Empty<string>();
+
         public decimal TickCost { get; set; } = 1m;
         public TimeSpan TimeZoneOffset { get; set; } = TimeSpan.Zero;
         public Valuation Valuation { get; set; } = new();

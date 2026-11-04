@@ -326,6 +326,7 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
         _instrumentInfo.Exchange = Instrument.Exchange;
         _instrumentInfo.TickSize = Series.RowSize;
         _instrumentInfo.InstrumentTickSize = Instrument.TickSize > 0 ? Instrument.TickSize : Series.RowSize;
+        _instrumentInfo.Sources = Data.Feed is TradingHub.Feeds.AggregateFeed agg ? agg.Sources.Select(f => f.DisplayName).ToArray() : new[] { Data.Feed.DisplayName };
         _instrumentInfo.TickCost = Instrument.PointValue * Series.RowSize;
         _instrumentInfo.LotSize = Instrument.VolumeStep;
         _instrumentInfo.Description = Instrument.Description;
@@ -762,6 +763,23 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
         var from = Series[bar].Time;
         var to = bar + 1 < Series.Count ? Series[bar + 1].Time : Period.IsTimeBased ? from + Period.ApproxDuration : DateTime.MaxValue;
         return Data.Liquidity.Between(from, to);
+    }
+
+    /// <summary>Operaciones de una vela (con el mercado de origen si el instrumento es agregado).</summary>
+    public IEnumerable<BarTrade> GetTrades(int bar)
+    {
+        if (bar < 0 || bar >= Series.Count) yield break;
+        var c = Series[bar];
+        if (c.FirstTradeIndex < 0 || c.LastTradeIndex < c.FirstTradeIndex) yield break;
+        var store = Data.Trades;
+        bool aggregate = Data.Feed is TradingHub.Feeds.AggregateFeed;
+        int last = Math.Min(c.LastTradeIndex, store.Count - 1);
+        for (int i = c.FirstTradeIndex; i <= last; i++)
+        {
+            long id = store.GetId(i);
+            yield return new BarTrade(id, store.GetTime(i), store.GetPrice(i), store.GetVolume(i), store.GetSide(i) == TradingHub.Market.TradeSide.Buy,
+                aggregate ? TradingHub.Feeds.AggregateFeed.SourceOf(id) : 0);
+        }
     }
 
     /// <summary>Niveles al tick de una vela: con las filas del gráfico en 1 tick son los de la vela; si no, se arman de las operaciones.</summary>

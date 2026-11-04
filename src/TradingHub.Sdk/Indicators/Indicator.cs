@@ -81,7 +81,16 @@ namespace TradingHub.Indicators
         /// segundos mientras el gráfico estuvo abierto). Vacío si no hay ninguna.
         /// </summary>
         IReadOnlyList<TradingHub.Data.DepthSample> GetDepthSamples(int bar) => Array.Empty<TradingHub.Data.DepthSample>();
+
+        /// <summary>
+        /// Las operaciones de una vela, en orden (vacío si la vela viene de historia en velas). En un instrumento agregado,
+        /// <see cref="BarTrade.Source"/> dice de qué mercado vino cada una (ver <see cref="InstrumentInfo.Sources"/>).
+        /// </summary>
+        IEnumerable<BarTrade> GetTrades(int bar) => Array.Empty<BarTrade>();
     }
+
+    /// <summary>Una operación de una vela (para indicadores que necesitan cada operación).</summary>
+    public readonly record struct BarTrade(long Id, DateTime Time, decimal Price, decimal Volume, bool IsBuy, int Source);
 
     /// <summary>Argumento de RedrawChart.</summary>
     public class RedrawArg
@@ -454,6 +463,9 @@ namespace TradingHub.Indicators
 
         /// <summary>Fotos del libro de órdenes durante la vela (ver <see cref="IIndicatorHost.GetDepthSamples"/>).</summary>
         public IReadOnlyList<TradingHub.Data.DepthSample> GetDepthSamples(int bar) => Host?.GetDepthSamples(bar) ?? Array.Empty<TradingHub.Data.DepthSample>();
+
+        /// <summary>Operaciones de la vela (ver <see cref="IIndicatorHost.GetTrades"/>).</summary>
+        public IEnumerable<BarTrade> GetTrades(int bar) => Host?.GetTrades(bar) ?? Array.Empty<BarTrade>();
 
         public IndicatorCandle GetCandle(int bar)
         {
