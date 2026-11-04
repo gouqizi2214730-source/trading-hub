@@ -363,7 +363,10 @@ public sealed class CandleSeries
             from = store.LowerBound(store.LastTime - TimeSpan.FromTicks(period.ApproxDuration.Ticks * 300));
         else from = Math.Max(0, store.Count - 3_000_000);
         var probe = new CandleSeries(instrument, period, 1);
-        for (int i = from; i < store.Count; i++) probe.ProcessTrade(store, i);
+        // con decenas de millones de operaciones (velas diarias de un año) alcanza con una de cada k para el rango típico
+        int count = store.Count;
+        int stride = Math.Max(1, (count - from) / 2_000_000);
+        for (int i = from; i < count; i += stride) probe.ProcessTrade(store, i);
         if (probe.Count < 2) return 1;
         var ranges = new List<long>();
         int tail = Math.Max(0, probe.Count - 200);
@@ -377,6 +380,19 @@ public sealed class CandleSeries
         long median = ranges[ranges.Count / 2];
         long raw = Math.Max(1, median / Math.Max(1, targetRows));
         return NiceStep(raw);
+    }
+
+    /// <summary>
+    /// Paso base de las velas: el automático o, si el usuario fijó uno, el mayor divisor de ese paso que no supere al
+    /// automático (así se puede acercar el zoom sin reconstruir).
+    /// </summary>
+    public static int BaseStep(int userStep, int auto)
+    {
+        if (userStep <= 0) return auto;
+        if (userStep <= auto) return userStep;
+        for (int d = auto; d >= 1; d--)
+            if (userStep % d == 0) return d;
+        return 1;
     }
 
     public static int NiceStep(long raw)

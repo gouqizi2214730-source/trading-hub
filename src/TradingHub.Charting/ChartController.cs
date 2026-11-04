@@ -599,16 +599,37 @@ public sealed class ChartController
             return;
         }
 
-        // zoom horizontal alrededor del mouse
+        // zoom alrededor del mouse: el tiempo y (si así está) también el precio en la misma proporción
+        ZoomAround(l, x, y, Math.Pow(1.12, dy));
+    }
+
+    /// <summary>
+    /// Acerca (factor &gt; 1) o aleja el gráfico alrededor de (x, y): las velas se ensanchan y, con «zoom de los dos ejes»,
+    /// el rango de precio se achica en la misma proporción (como agrandar una imagen); si no, solo el tiempo.
+    /// </summary>
+    private void ZoomAround(ChartLayout l, float x, float y, double factor)
+    {
+        var vp = _model.Viewport;
         double before = l.BarAtExact(x);
-        double newWidth = Math.Clamp(vp.BarWidth * Math.Pow(1.12, dy), ChartViewport.MinBarWidth, ChartViewport.MaxBarWidth);
+        double newWidth = Math.Clamp(vp.BarWidth * factor, ChartViewport.MinBarWidth, ChartViewport.MaxBarWidth);
         if (Math.Abs(newWidth - vp.BarWidth) < 1e-9) return;
+        double applied = newWidth / vp.BarWidth;
         bool followingLive = l.ScrollBars <= 0.01;
         vp.BarWidth = newWidth;
         if (!followingLive)
         {
             // mantiene fija la barra bajo el mouse: x = R - (N-1-b+M-S+0.5)*W  =>  S = N-1-b+M+0.5-(R-x)/W
             vp.ScrollBars = (l.Count - 1 - before + vp.RightMarginBars + 0.5) - (l.Plot.Right - x) / newWidth;
+        }
+
+        if (_model.Settings.ZoomBothAxes)
+        {
+            // el precio bajo el mouse queda quieto (fuera del panel de precio, el centro)
+            double top = l.Main.Top, bottom = l.Main.Bottom;
+            double anchor = y >= l.Main.Rect.Top && y <= l.Main.Rect.Bottom ? l.Main.ValueAt(y) : (top + bottom) / 2;
+            vp.AutoScale = false;
+            vp.PriceTop = anchor + (top - anchor) / applied;
+            vp.PriceBottom = anchor - (anchor - bottom) / applied;
         }
 
         _model.Invalidate();
@@ -674,13 +695,11 @@ public sealed class ChartController
                 return true;
             case "Add":
             case "OemPlus":
-                vp.BarWidth = Math.Min(ChartViewport.MaxBarWidth, vp.BarWidth * 1.2);
-                _model.Invalidate();
+                if (L is { } lp) ZoomAround(lp, lp.Plot.MidX, lp.Main.Rect.MidY, 1.2);
                 return true;
             case "Subtract":
             case "OemMinus":
-                vp.BarWidth = Math.Max(ChartViewport.MinBarWidth, vp.BarWidth / 1.2);
-                _model.Invalidate();
+                if (L is { } lm) ZoomAround(lm, lm.Plot.MidX, lm.Main.Rect.MidY, 1 / 1.2);
                 return true;
         }
 

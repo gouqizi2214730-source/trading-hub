@@ -285,13 +285,23 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
     /// </summary>
     private int BaseStepFor(int userStep)
     {
-        if (_autoStep == null && Data.Trades.Count > 100) _autoStep = CandleSeries.SuggestPriceStep(Data.Trades, Instrument, Period, targetRows: 150);
-        int auto = _autoStep ?? 1;
-        if (userStep <= 0) return auto;
-        if (userStep <= auto) return userStep;
-        for (int d = auto; d >= 1; d--)
-            if (userStep % d == 0) return d;
-        return 1;
+        if (_autoStep == null && Data.Trades.Count > 100) _autoStep = Data.SuggestStep(Period, 150);
+        return CandleSeries.BaseStep(userStep, _autoStep ?? 1);
+    }
+
+    private static readonly ChartPeriod[] Ladder = { ChartPeriod.M1, ChartPeriod.M5, ChartPeriod.M15, ChartPeriod.H1, ChartPeriod.H4, ChartPeriod.D1 };
+
+    /// <summary>
+    /// Deja armadas en segundo plano las velas de los períodos vecinos (el de arriba y el de abajo del actual): pasar de
+    /// 1 h a 4 h y volver es instantáneo.
+    /// </summary>
+    private void PrewarmNeighbors()
+    {
+        if (!Period.IsTimeBased || Data.Trades.Count < 200_000) return;
+        int i = Array.FindIndex(Ladder, p => p == Period);
+        if (i < 0) return;
+        foreach (int j in new[] { i + 1, i - 1 })
+            if (j >= 0 && j < Ladder.Length) Data.Prewarm(Ladder[j], Settings.PriceStep, 150);
     }
 
     /// <summary>Reconstruye las velas desde las operaciones y recalcula los indicadores.</summary>
@@ -307,6 +317,7 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
         _openCumulative = null;
         ProcessPending();
         Invalidate();
+        PrewarmNeighbors();
     }
 
     private void UpdateInfos()

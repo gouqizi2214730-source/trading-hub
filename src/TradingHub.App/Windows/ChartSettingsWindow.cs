@@ -68,7 +68,8 @@ internal sealed class ChartSettingsWindow : Window
             ColorRow("Líneas de los ejes", nameof(ChartTheme.AxisLine)),
             ColorRow("Texto", nameof(ChartTheme.Text)),
             ColorRow("Texto secundario", nameof(ChartTheme.TextDim)),
-            Toggle("Datos de la vela arriba (Ap, Máx, Mín, Cie…)", () => _model.Settings.ShowInfoPanel, v => _model.Settings.ShowInfoPanel = v));
+            Toggle("Datos de la vela arriba (Ap, Máx, Mín, Cie…)", () => _model.Settings.ShowInfoPanel, v => _model.Settings.ShowInfoPanel = v),
+            Toggle("La rueda acerca el gráfico entero (precio y tiempo a la vez, como una imagen)", () => _model.Settings.ZoomBothAxes, v => _model.Settings.ZoomBothAxes = v));
         Tab("Precio",
             ColorRow("Último precio (sube)", nameof(ChartTheme.LastPriceUp)),
             ColorRow("Último precio (baja)", nameof(ChartTheme.LastPriceDown)),

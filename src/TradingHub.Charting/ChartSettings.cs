@@ -49,6 +49,12 @@ public sealed class ChartSettings
 
     /// <summary>Opacidad del mapa de calor (0-100).</summary>
     public int HeatmapOpacity { get; set; } = 75;
+
+    /// <summary>
+    /// La rueda acerca y aleja el gráfico entero (tiempo y precio en la misma proporción, alrededor del mouse, como una
+    /// imagen). Apagado: la rueda solo cambia el ancho de las velas y el precio se ajusta solo.
+    /// </summary>
+    public bool ZoomBothAxes { get; set; } = true;
     public bool ShowInfoPanel { get; set; } = true;
 
     /// <summary>Nombre del instrumento arriba a la izquierda del gráfico (ya está en la barra; por defecto no).</summary>

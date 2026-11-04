@@ -43,7 +43,59 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
     // velas ya armadas por período y paso de precio: cambiar de 1h a 4h y volver no vuelve a recorrer millones de
     // operaciones (se comparten entre los gráficos del mismo instrumento; se tiran si se reemplaza la historia)
     private readonly List<(string Key, long Generation, CandleSeries Series)> _seriesCache = new();
-    private const int MaxCachedSeries = 8;
+    private const int MaxCachedSeries = 12;
+    private readonly HashSet<string> _warming = new();
+
+    private static string SeriesKey(ChartPeriod period, int priceStep, SessionSettings? session) =>
+        period.Code + "|" + priceStep + "|" + (session == null ? "" : session.TimeZone.Id + "/" + session.Start);
+
+    private readonly Dictionary<string, (long Generation, int Step)> _autoSteps = new();
+
+    /// <summary>
+    /// Paso de fila sugerido para un período (ver <see cref="CandleSeries.SuggestPriceStep"/>), recordado mientras la historia
+    /// sea la misma: volver a un período ya visto no vuelve a recorrer las operaciones. Se puede llamar desde cualquier hilo.
+    /// </summary>
+    public int SuggestStep(ChartPeriod period, int targetRows)
+    {
+        string key = period.Code + "|" + targetRows;
+        long gen = Trades.Generation;
+        lock (_autoSteps)
+            if (_autoSteps.TryGetValue(key, out var v) && v.Generation == gen) return v.Step;
+        int step = CandleSeries.SuggestPriceStep(Trades, Instrument, period, targetRows);
+        lock (_autoSteps) _autoSteps[key] = (gen, step);
+        return step;
+    }
+
+    /// <summary>
+    /// Arma en segundo plano las velas de otro período (por ejemplo, el de al lado del que se está viendo) para que cambiar
+    /// a él sea instantáneo. Se llama desde el hilo de UI; el resultado vuelve a él y queda en la caché de velas.
+    /// </summary>
+    public void Prewarm(ChartPeriod period, int userStep, int targetRows)
+    {
+        var ctx = SynchronizationContext.Current;
+        if (ctx == null || Trades.Count == 0 || _seriesCache.Count >= MaxCachedSeries || !_warming.Add(period.Code)) return;
+        long gen = Trades.Generation;
+        Task.Run(() =>
+        {
+            try
+            {
+                int step = CandleSeries.BaseStep(userStep, SuggestStep(period, targetRows));
+                var s = new CandleSeries(Instrument, period, step);
+                s.Append(Trades);
+                return (SeriesKey(period, step, null), s);
+            }
+            catch
+            {
+                return ((string, CandleSeries)?)null; // la historia cambió mientras se armaba
+            }
+        }).ContinueWith(t => ctx.Post(_ =>
+        {
+            _warming.Remove(period.Code);
+            if (t.Result is not { } r || gen != Trades.Generation || _seriesCache.Exists(e => e.Key == r.Item1) || _seriesCache.Count >= MaxCachedSeries) return;
+            // al principio: es la menos usada (si hace falta lugar, se va primero)
+            _seriesCache.Insert(0, (r.Item1, gen, r.Item2));
+        }, null), TaskScheduler.Default);
+    }
 
     /// <summary>
     /// Las velas de un período (con el paso de precio pedido), armadas una sola vez y al día con las operaciones del
@@ -51,7 +103,7 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
     /// </summary>
     public CandleSeries GetSeries(ChartPeriod period, int priceStep, SessionSettings? session = null)
     {
-        string key = period.Code + "|" + priceStep + "|" + (session == null ? "" : session.TimeZone.Id + "/" + session.Start);
+        string key = SeriesKey(period, priceStep, session);
         for (int i = 0; i < _seriesCache.Count; i++)
         {
             var e = _seriesCache[i];

@@ -475,7 +475,7 @@ public class VpProfile : VpIndicator
 
     private decimal Tick => InstrumentInfo is { } i ? i.InstrumentTickSize > 0 ? i.InstrumentTickSize : i.TickSize : 0;
 
-    private string Bucket => string.Join("|", "vpu-profile2", InstrumentInfo?.Instrument ?? "", Tick, (int)_rowSizing,
+    private string Bucket => string.Join("|", "vpu-profile3", InstrumentInfo?.Instrument ?? "", Tick, (int)_rowSizing,
         _rowSizing == RowSizing.Rows ? _rows : _ticksPerRow, (int)_volumeMode, _capMult, _excludeAuction, _vaPercent, _outerPercent);
 
     private string Fingerprint(int s, int e)
@@ -488,7 +488,12 @@ public class VpProfile : VpIndicator
             delta += c.Delta;
         }
 
-        return string.Join("|", GetCandle(s).Time.Ticks, GetCandle(e).Time.Ticks, e - s, vol, delta);
+        // la misma clave en cualquier período del gráfico (inicio, inicio del siguiente, volumen y delta): al pasar de 1 h a
+        // 4 h o a 15 min los perfiles cerrados salen de lo ya calculado. El recorte y la exclusión de subastas miran cada vela:
+        // ahí sí cuenta el largo de la vela.
+        string end = e + 1 < CurrentBar ? TimeOf(e + 1).ToString(CultureInfo.InvariantCulture) : GetCandle(e).Time.Ticks + "~" + (e - s);
+        string tf = _excludeAuction || _volumeMode == VpVolumeMode.Cap ? BarLength.Ticks.ToString(CultureInfo.InvariantCulture) : "";
+        return string.Join("|", TimeOf(s), end, vol, delta, tf);
     }
 
     /// <summary>Tope de volumen por nivel en el modo «recortar extremos» (mediana del período × el múltiplo).</summary>

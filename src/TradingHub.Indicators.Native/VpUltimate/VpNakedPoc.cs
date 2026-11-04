@@ -56,7 +56,10 @@ public sealed class NakedPocEngine
         Naked.Clear();
     }
 
-    private string Bucket => string.Join("|", "npoc-day1", _owner.InstrumentInfo?.Instrument ?? "", _owner.InstrumentInfo?.TickSize ?? 0);
+    private string Bucket => string.Join("|", "npoc-day2", _owner.InstrumentInfo?.Instrument ?? "",
+        _owner.InstrumentInfo is { InstrumentTickSize: > 0 } ii ? ii.InstrumentTickSize : _owner.InstrumentInfo?.TickSize ?? 0);
+
+    private TimeSpan _barLength;
 
     /// <summary>Una vela cerrada, en orden.</summary>
     public void Commit(int bar, Func<int, VpPeriod, bool> newPeriod, Func<int, IndicatorCandle> candle, TimeSpan barLength)
@@ -71,16 +74,10 @@ public sealed class NakedPocEngine
             _day = new Dictionary<decimal, decimal>();
         }
 
-        // el día se arma con los niveles de cada vela (en gráficos diarios o mayores, cada vela ya es un día o más)
+        // los niveles del día se suman recién al cerrarlo, y solo si no estaban ya calculados (ver CloseDay)
         _dayVol += c.Volume;
         _dayDelta += c.Delta;
-        if (barLength <= TimeSpan.FromDays(1))
-            foreach (var l in _owner.GetTickLevels(bar))
-            {
-                if (l.Volume <= 0) continue;
-                _day.TryGetValue(l.Price, out var v);
-                _day[l.Price] = v + l.Volume;
-            }
+        _barLength = barLength;
 
         // tocados al cierre de esta vela
         for (int i = Naked.Count - 1; i >= 0; i--)
@@ -99,10 +96,24 @@ public sealed class NakedPocEngine
     private void CloseDay(int bar, Func<int, VpPeriod, bool> newPeriod)
     {
         var dayStartTime = Vp.Utc(_owner.GetCandle(_dayStart).Time);
-        // en disco: los niveles del día (clave: cuándo empezó y lo que suma)
-        string key = string.Join("|", dayStartTime.Ticks, bar - _dayStart, _dayVol, _dayDelta);
-        if (_day.Count == 0 && ResultCache.TryGet(Bucket, key, out var bytes)) _day = ReadDay(bytes);
-        else if (_day.Count > 0) ResultCache.Put(Bucket, key, WriteDay(_day));
+        // en disco: los niveles del día. La clave (inicio, inicio del día siguiente, volumen y delta) es la misma en
+        // cualquier período del gráfico: al cambiar de 1 h a 15 min no se vuelven a recorrer las operaciones
+        string key = string.Join("|", dayStartTime.Ticks, Vp.Utc(_owner.GetCandle(bar).Time).Ticks, _dayVol, _dayDelta);
+        if (ResultCache.TryGet(Bucket, key, out var bytes)) _day = ReadDay(bytes);
+        else if (_barLength <= TimeSpan.FromDays(1))
+        {
+            // el día se arma con los niveles de cada vela (en gráficos diarios o mayores, cada vela ya es un día o más)
+            _day = new Dictionary<decimal, decimal>();
+            for (int b = _dayStart; b < bar; b++)
+                foreach (var l in _owner.GetTickLevels(b))
+                {
+                    if (l.Volume <= 0) continue;
+                    _day.TryGetValue(l.Price, out var v);
+                    _day[l.Price] = v + l.Volume;
+                }
+
+            if (_day.Count > 0) ResultCache.Put(Bucket, key, WriteDay(_day));
+        }
 
         for (int i = 0; i < 4; i++)
         {
