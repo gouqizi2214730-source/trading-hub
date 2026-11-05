@@ -70,16 +70,24 @@ public sealed class DrawnLine
         return Prices[^1];
     }
 
+    /// <summary>Puntos que se guardan con una alerta (de una curva larga, los últimos: lo que importa para alertar).</summary>
+    private const int MaxSnapshotPoints = 400;
+
     /// <summary>Una copia que se guarda con la alerta (en instantes: sobrevive a más historia y a reiniciar).</summary>
-    public DrawnLine Snapshot(CandleSeries series) => new()
+    public DrawnLine Snapshot(CandleSeries series)
     {
-        Times = Bars != null ? Bars.Select(b => TimeAt(series, b)).ToArray() : (DateTime[])Times.Clone(),
-        Prices = (decimal[])Prices.Clone(),
-        Color = Color,
-        Right = Right,
-        CutLeft = CutLeft,
-        Text = Text,
-    };
+        int n = Bars?.Length ?? Times.Length;
+        int skip = Math.Max(0, n - MaxSnapshotPoints);
+        return new DrawnLine
+        {
+            Times = Bars != null ? Bars.Skip(skip).Select(b => TimeAt(series, b)).ToArray() : Times.Skip(skip).ToArray(),
+            Prices = Prices.Skip(skip).ToArray(),
+            Color = Color,
+            Right = Right,
+            CutLeft = CutLeft || skip > 0,
+            Text = Text,
+        };
+    }
 
     public DrawnLine Clone() => new()
     {
@@ -140,10 +148,12 @@ public sealed class DrawnLine
             }
             else
             {
-                // empieza fuera de la vista: tiene que pasar por el mismo precio donde se superponen
+                // empieza fuera de la vista: tiene que pasar por el mismo precio donde se superponen (una vela antes del
+                // final si se puede: la punta de una curva se mueve con el precio en vivo)
                 double at = Math.Max(lb[0], ob[0]), until = Math.Min(lb[^1], ob[^1]);
                 if (until < at - 0.01) continue;
-                if (l.ValueAt(series, until) is not { } a || old.ValueAt(series, until) is not { } b) continue;
+                double probe = Math.Max(at, until - 1);
+                if (l.ValueAt(series, probe) is not { } a || old.ValueAt(series, probe) is not { } b) continue;
                 d = Math.Abs(a - b);
                 if (oldRef != 0 && d / Math.Abs(oldRef) > 0.0005m) continue;
             }
@@ -168,10 +178,23 @@ internal sealed class DrawnLineCapture
     private readonly ChartLayout _layout;
     private readonly PanelLayout _panel;
     private readonly List<(PointF[] Pts, Color Color, decimal?[] Exact)> _raw = new();
+
+    // los tramos sueltos de DrawLine: una curva dibujada vela a vela son muchos tramos que se tocan, y se juntan en una
+    private readonly List<(PointF A, PointF B, uint Color, decimal? EA, decimal? EB)> _segments = new();
+    private const int MaxSegments = 40_000;
     private readonly List<(string Text, RectangleF Box)> _texts = new();
 
     /// <summary>El último precio que el indicador convirtió a cada Y (GetYByPrice): el precio exacto de una línea a esa altura.</summary>
-    public readonly Dictionary<int, decimal> YPrices = new();
+    private readonly Dictionary<int, decimal> _yPrices = new();
+
+    /// <summary>Las conversiones en orden: los puntos de una línea son las que pidió justo antes de dibujarla.</summary>
+    private readonly List<(int Y, decimal Price)> _log = new();
+
+    public void Convert(int y, decimal price)
+    {
+        _yPrices[y] = price;
+        if (_log.Count < 200_000) _log.Add((y, price));
+    }
 
     public DrawnLineCapture(ChartModel model, ChartLayout layout, PanelLayout panel)
     {
@@ -182,25 +205,96 @@ internal sealed class DrawnLineCapture
 
     public void Line(PointF[] pts, Color color)
     {
-        if (_raw.Count >= MaxLines || color.A < 40 || pts.Length < 2) return;
+        if (color.A < 40 || pts.Length < 2) return;
         float minX = float.MaxValue, maxX = float.MinValue;
         foreach (var p in pts)
         {
-            if (float.IsNaN(p.X) || float.IsNaN(p.Y)) return;
+            if (float.IsNaN(p.X) || float.IsNaN(p.Y) || float.IsInfinity(p.X) || float.IsInfinity(p.Y)) return;
             minX = Math.Min(minX, p.X);
             maxX = Math.Max(maxX, p.X);
         }
 
-        if (maxX - minX < MinWidth) return; // verticales, marcas y cruces chicas
-        var exact = new decimal?[pts.Length];
-        for (int i = 0; i < pts.Length; i++)
+        if (maxX - minX < 0.5f) return; // verticales
+        if (pts.Length == 2)
+        {
+            // un tramo: puede ser una línea entera o un pedazo de una curva (se juntan al terminar)
+            if (_segments.Count >= MaxSegments) return;
+            var ex = ExactFor(pts);
+            if (pts[0].X <= pts[1].X) _segments.Add((pts[0], pts[1], (uint)color.ToArgb(), ex[0], ex[1]));
+            else _segments.Add((pts[1], pts[0], (uint)color.ToArgb(), ex[1], ex[0]));
+            return;
+        }
+
+        if (_raw.Count >= MaxLines || maxX - minX < MinWidth) return;
+        _raw.Add((pts, color, ExactFor(pts)));
+    }
+
+    /// <summary>
+    /// El precio exacto de cada punto: el que el indicador convirtió a esa Y justo antes de dibujar (de atrás para adelante,
+    /// así dos puntos a la misma altura con precios distintos no se confunden); si no, el último convertido a esa Y.
+    /// </summary>
+    private decimal?[] ExactFor(PointF[] pts)
+    {
+        var res = new decimal?[pts.Length];
+        int cursor = _log.Count - 1;
+        for (int i = pts.Length - 1; i >= 0; i--)
         {
             float y = pts[i].Y;
             int iy = (int)MathF.Round(y);
-            if (MathF.Abs(y - iy) < 0.01f && YPrices.TryGetValue(iy, out var price)) exact[i] = price;
+            if (MathF.Abs(y - iy) >= 0.01f) continue;
+            int found = -1;
+            for (int k = cursor, n = 0; k >= 0 && n < 3; k--, n++)
+            {
+                if (_log[k].Y != iy) continue;
+                found = k;
+                break;
+            }
+
+            if (found >= 0)
+            {
+                res[i] = _log[found].Price;
+                cursor = found - 1;
+            }
+            else if (_yPrices.TryGetValue(iy, out var price)) res[i] = price;
         }
 
-        _raw.Add((pts, color, exact));
+        return res;
+    }
+
+    /// <summary>Junta los tramos que se tocan punta con punta (del mismo color) en polilíneas.</summary>
+    private void ChainSegments()
+    {
+        static (int, int) Key(PointF p) => ((int)MathF.Round(p.X * 2), (int)MathF.Round(p.Y * 2));
+        foreach (var group in _segments.GroupBy(sg => sg.Color))
+        {
+            var chains = new List<(List<PointF> Pts, List<decimal?> Exact)>();
+            var byEnd = new Dictionary<(int, int), int>();
+            var seen = new HashSet<((int, int), (int, int))>();
+            foreach (var sg in group.OrderBy(sg => sg.A.X).ThenBy(sg => sg.B.X))
+            {
+                if (!seen.Add((Key(sg.A), Key(sg.B)))) continue; // el mismo tramo dos veces
+                if (byEnd.Remove(Key(sg.A), out int c))
+                {
+                    chains[c].Pts.Add(sg.B);
+                    chains[c].Exact.Add(sg.EB);
+                }
+                else
+                {
+                    c = chains.Count;
+                    chains.Add((new List<PointF> { sg.A, sg.B }, new List<decimal?> { sg.EA, sg.EB }));
+                }
+
+                byEnd[Key(sg.B)] = c;
+            }
+
+            var color = System.Drawing.Color.FromArgb((int)group.Key);
+            foreach (var (pts, exact) in chains)
+            {
+                if (_raw.Count >= MaxLines) return;
+                if (pts[^1].X - pts[0].X < MinWidth) continue; // marcas y cruces chicas
+                _raw.Add((pts.ToArray(), color, exact.ToArray()));
+            }
+        }
     }
 
     public void Text(string text, RectangleF box)
@@ -210,6 +304,7 @@ internal sealed class DrawnLineCapture
 
     public List<DrawnLine> Finish()
     {
+        ChainSegments();
         var res = new List<DrawnLine>();
         var seen = new HashSet<(uint, int, int, int, int)>();
         var series = _model.Series;

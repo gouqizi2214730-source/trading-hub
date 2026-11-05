@@ -138,12 +138,12 @@ public sealed class PanelLayout : IChartContainer
         float y = RowCenterOf != null && price % main.RowSize == 0 ? main.Y(RowCenterOf(price)) : main.Y(price);
         if (isStartOfPrice) y -= (float)(main.RowHeight / 2);
         int r = (int)Math.Round(y);
-        if (YPrices != null) YPrices[r] = price;
+        YRecorder?.Invoke(r, price);
         return r;
     }
 
-    /// <summary>Mientras se dibuja un indicador: el último precio que pidió convertir a cada Y (el precio exacto de sus líneas).</summary>
-    internal Dictionary<int, decimal>? YPrices;
+    /// <summary>Mientras se dibuja un indicador: cada precio que pide convertir a Y (el precio exacto de sus líneas).</summary>
+    internal Action<int, decimal>? YRecorder;
 
     /// <summary>Convierte un precio de nivel al centro de su fila (lo asigna el renderer).</summary>
     public Func<decimal, decimal>? RowCenterOf { get; set; }
@@ -155,7 +155,7 @@ public sealed class PanelLayout : IChartContainer
     public int GetYByValue(decimal value)
     {
         int r = (int)Math.Round(Y(value));
-        if (YPrices != null) YPrices[r] = value;
+        YRecorder?.Invoke(r, value);
         return r;
     }
 

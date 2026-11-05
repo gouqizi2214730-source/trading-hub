@@ -380,7 +380,7 @@ public sealed class ChartRenderer
             {
                 ctx.LineRecorder = capture.Line;
                 ctx.TextRecorder = capture.Text;
-                panel.YPrices = capture.YPrices;
+                panel.YRecorder = capture.Convert;
             }
 
             try
@@ -399,7 +399,7 @@ public sealed class ChartRenderer
             }
             finally
             {
-                panel.YPrices = null;
+                panel.YRecorder = null;
             }
 
             if (capture != null)

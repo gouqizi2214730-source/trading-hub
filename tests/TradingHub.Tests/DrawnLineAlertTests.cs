@@ -28,6 +28,8 @@ public class PlainLinesIndicator : Indicator
 
     protected override void OnCalculate(int bar, decimal value) { }
 
+    public decimal Curve(int bar) => Math.Round(Level - 700 + 60 * (decimal)Math.Sin(bar / 3.0), 1);
+
     protected override void OnRender(RenderContext context, DrawingLayouts layout)
     {
         if (ChartInfo == null || CurrentBar < 40 || !Draw) return;
@@ -44,6 +46,12 @@ public class PlainLinesIndicator : Indicator
         // una caja con borde (zona) que sigue a la derecha
         int yt = ChartInfo.GetYByPrice(Level + 300, false), yb = ChartInfo.GetYByPrice(Level + 200, false);
         context.DrawRectangle(new RenderPen(Color.Magenta, 1), new Rectangle(ChartInfo.GetXByBar(last - 15), yt, pc.Region.Right - ChartInfo.GetXByBar(last - 15), yb - yt));
+        // una curva dibujada vela a vela con DrawLine (muchos tramos que se tocan) y otra de una vez con DrawLines
+        for (int b = last - 25; b < last; b++)
+            context.DrawLine(new RenderPen(Color.Lime, 1), ChartInfo.GetXByBar(b, false), ChartInfo.GetYByPrice(Curve(b), false),
+                ChartInfo.GetXByBar(b + 1, false), ChartInfo.GetYByPrice(Curve(b + 1), false));
+        var pts = Enumerable.Range(last - 25, 26).Select(b => new Point(ChartInfo.GetXByBar(b, false), ChartInfo.GetYByPrice(Curve(b) - 400, false))).ToArray();
+        context.DrawLines(new RenderPen(Color.Yellow, 1), pts);
         // una etiqueta con recuadro (no es una línea de precio) y una marca chica
         context.DrawString("etiqueta", font, Color.White, ChartInfo.GetXByBar(last - 5), y + 30);
         context.DrawRectangle(new RenderPen(Color.White, 1), new Rectangle(ChartInfo.GetXByBar(last - 5) - 3, y + 28, 50, 16));
@@ -90,6 +98,10 @@ public class DrawnLineAlertTests
         // la inclinada y los dos bordes de la caja
         Assert.Single(lines, l => l.Color == cyan);
         Assert.Equal(2, lines.Count(l => l.Color == magenta));
+        // cada curva es una sola línea (no un pedazo por vela) con un punto por vela
+        var lime = Assert.Single(lines, l => l.Color == (uint)Color.Lime.ToArgb());
+        Assert.Equal(26, lime.Prices.Length);
+        Assert.Single(lines, l => l.Color == (uint)Color.Yellow.ToArgb());
         // ni el recuadro de la etiqueta ni la marca chica
         Assert.DoesNotContain(lines, l => l.Color == (uint)Color.White.ToArgb());
         Assert.DoesNotContain(lines, l => l.Color == (uint)Color.Red.ToArgb());
@@ -97,7 +109,7 @@ public class DrawnLineAlertTests
         // en el diálogo de alertas
         var ops = ChartAlertEngine.Lines(model).Where(o => o.Line != null).ToList();
         Assert.Contains(ops, o => o.Label.Contains("Mi nivel"));
-        Assert.Equal(4, ops.Count);
+        Assert.Equal(6, ops.Count);
     }
 
     [Fact]
@@ -125,6 +137,17 @@ public class DrawnLineAlertTests
         Assert.True(ChartAlertEngine.TryValue(model, slope, last - 10, out var mid));
         Assert.True(ChartAlertEngine.TryValue(model, slope, last, out var end));
         Assert.True(end > mid);
+
+        // las curvas: el valor de la curva en cada vela
+        foreach (var color in new[] { Color.Lime, Color.Yellow })
+        {
+            var curve = ChartAlertEngine.Lines(model).First(o => o.Line?.Color == (uint)color.ToArgb());
+            for (int b = last - 25; b <= last; b += 5)
+            {
+                Assert.True(ChartAlertEngine.TryValue(model, curve, b, out var cv));
+                Assert.Equal(ind.Curve(b) - (color == Color.Yellow ? 400 : 0), cv);
+            }
+        }
 
         // una alerta que toca, con su copia guardada en JSON
         var alert = new ChartAlert { Left = AlertOperand.Price(), Condition = AlertCondition.Crossing, Right = hit.Copy() };
