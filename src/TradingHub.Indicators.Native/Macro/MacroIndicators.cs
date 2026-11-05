@@ -196,7 +196,7 @@ public class MarketHud : SceneIndicator
     private int _ema = 50, _rsi = 14, _atr = 14, _flow = 20;
     private decimal _mid = 50;
     private readonly DerivFeed _deriv;
-    private string _trend = "Mixta";
+    private string _trend = "Tendencia mixta";
     private Color _trendColor = Pal.Muted;
     private double _rsiNow = double.NaN, _buyShare = double.NaN, _volRatio = double.NaN, _atrPct = double.NaN, _oiChange = double.NaN, _emaDist = double.NaN;
     private List<double> _oiLine = new();
@@ -270,7 +270,7 @@ public class MarketHud : SceneIndicator
         _emaDist = double.IsFinite(ema[last]) && ema[last] > 0 ? (c / ema[last] - 1) * 100 : double.NaN;
         _atrPct = double.IsFinite(atr[last]) && c > 0 ? atr[last] / c * 100 : double.NaN;
         bool above = c > ema[last], hot = _rsiNow > (double)_mid;
-        (_trend, _trendColor) = above && hot ? ("Alcista", Pal.Bull) : !above && !hot ? ("Bajista", Pal.Bear) : ("Mixta", Pal.Muted);
+        (_trend, _trendColor) = above && hot ? ("Tendencia alcista", Pal.Bull) : !above && !hot ? ("Tendencia bajista", Pal.Bear) : ("Tendencia mixta", Pal.Muted);
 
         // parte comprada por agresores en la ventana y volumen de esta vela contra el promedio de la ventana
         double buy = 0, vol = 0, avg = 0;
@@ -318,7 +318,7 @@ public class MarketHud : SceneIndicator
         var rings = new (string Name, double Frac, string Text, Color Color)[]
         {
             ("RSI", _rsiNow / 100, PaneCard.Num(_rsiNow, "0"), _rsiNow > (double)_mid ? Pal.Bull : Pal.Bear),
-            ("Compras", _buyShare, double.IsFinite(_buyShare) ? (_buyShare * 100).ToString("0", CultureInfo.InvariantCulture) + " %" : "—", _buyShare >= 0.5 ? Pal.Bull : Pal.Bear),
+            ("Compra agresora", _buyShare, double.IsFinite(_buyShare) ? (_buyShare * 100).ToString("0", CultureInfo.InvariantCulture) + " %" : "—", _buyShare >= 0.5 ? Pal.Bull : Pal.Bear),
             ("Volumen", _volRatio / 3, double.IsFinite(_volRatio) ? _volRatio.ToString("0.0", CultureInfo.InvariantCulture) + "×" : "—", _volRatio >= 1 ? Pal.Amber : Pal.Muted),
         };
         for (int k = 0; k < rings.Length; k++)

@@ -183,7 +183,7 @@ public abstract class OptionsScene : SceneIndicator
     protected OptionsChain? GetChain()
     {
         var c = OptionsData.Chain(Underlying, ChainAge);
-        if (c == null) Status = OptionsData.LastError is { } e ? "Opciones: " + e : UiText.Tr("Trayendo la cadena de opciones de") + " " + Underlying + "…";
+        if (c == null) Status = OptionsData.LastError is { } e ? "Opciones: " + e : $"Trayendo la cadena de opciones de {Underlying}…";
         return c;
     }
 

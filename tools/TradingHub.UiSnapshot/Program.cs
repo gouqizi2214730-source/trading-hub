@@ -281,6 +281,12 @@ foreach (var page in pages)
         continue;
     }
 
+    if (page == "datos-externos")
+    {
+        exitCode += ExternalDataScene.Run(window, Pump, outDir);
+        continue;
+    }
+
 
     if (page == "panel")
     {

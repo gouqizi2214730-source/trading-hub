@@ -58,8 +58,9 @@ public class DealerPositioning : OptionsScene
         s.DashTitle = UiText.Tr("Creadores de mercado") + " · " + Underlying;
         s.Row("Gamma total (por 1 %)", Opt.SignedUsd(gex), Opt.BiasColor(gex));
         s.Row("Régimen", gex >= 0 ? "gamma positiva: amortiguan" : "gamma negativa: amplifican", gex >= 0 ? Opt.Call : Opt.Put);
-        s.Row("Si sube 1 %", (gex >= 0 ? UiText.Tr("venden") : UiText.Tr("compran")) + " ≈ " + Opt.Usd(Math.Abs(gex)), default);
-        s.Row("Si baja 1 %", (gex >= 0 ? UiText.Tr("compran") : UiText.Tr("venden")) + " ≈ " + Opt.Usd(Math.Abs(gex)), default);
+        string amount = Opt.Usd(Math.Abs(gex));
+        s.Row("Si sube 1 %", gex >= 0 ? $"venden ≈ {amount}" : $"compran ≈ {amount}", default);
+        s.Row("Si baja 1 %", gex >= 0 ? $"compran ≈ {amount}" : $"venden ≈ {amount}", default);
         if (double.IsFinite(flip)) s.Row("Cambio de gamma", Price(flip) + "  (" + Opt.Pct((flip / c.Spot - 1) * 100, "+0.0;-0.0") + ")", Opt.Flip);
         s.Row("Foto", c.Time.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture), default);
     }
@@ -517,7 +518,7 @@ public class ExpectedMove : OptionsScene
             }
         }
 
-        if (s.Lines.Count == 0) Status = OptionsData.LastError is { } err ? "Opciones: " + err : UiText.Tr("Trayendo la volatilidad implícita de") + " " + Underlying + "…";
+        if (s.Lines.Count == 0) Status = OptionsData.LastError is { } err ? "Opciones: " + err : $"Trayendo la volatilidad implícita de {Underlying}…";
     }
 
     private int NextDayStart(int st)
@@ -798,7 +799,7 @@ public class OiChanges : OptionsScene
         var old = OptionsData.Snapshots(Underlying).Where(x => x.Time <= c.Time.AddHours(-Hours)).OrderByDescending(x => x.Time).FirstOrDefault();
         if (old == null)
         {
-            Status = $"{UiText.Tr("Hace falta una foto de hace")} {Hours} h: {UiText.Tr("se guarda una cada 30 minutos con el indicador abierto.")}";
+            Status = $"Hace falta una foto de hace {Hours} h: se guarda una cada 30 minutos con el indicador abierto.";
             return;
         }
 
@@ -992,7 +993,7 @@ public class DayType : SceneIndicator
         s.Row("Firmeza (1 h)", !double.IsFinite(strong) ? "pocos casos" : strong >= 75 ? "firme" : strong >= 50 ? "media" : "débil", strong >= 75 ? Opt.Call : default);
         string[] hn = { "30 min", "1 h", "1 h 30", "2 h" };
         for (int h = 0; h < 4; h++)
-            s.Row(UiText.Tr("Sigue a") + " " + hn[h], double.IsFinite(odds[h]) ? Opt.Pct(odds[h], "0") + " · ±" + Opt.Pct(moves[h], "0.00") : $"— ({counts[h]})", default);
+            s.Row($"Sigue a {hn[h]}", double.IsFinite(odds[h]) ? Opt.Pct(odds[h], "0") + " · ±" + Opt.Pct(moves[h], "0.00") : $"— ({counts[h]})", default);
         s.Row("Volatilidad", chain != null && double.IsFinite(liveIv) ? "IV de opciones" : "realizada", default);
     }
 

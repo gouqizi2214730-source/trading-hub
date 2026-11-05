@@ -241,7 +241,8 @@ internal sealed class ConnectionsView : UserControl, IPage
         var dataSection = Ui.V(14,
             Ui.H2("Datos de mercado"),
             Ui.Field("Historia al abrir un gráfico", history, "Lo grabado o descargado en Datos carga al instante; el resto se pide a la conexión."));
-        sections.Children.Add(Ui.Card(dataSection));
+        var dataCard = Ui.Card(dataSection);
+        sections.Children.Add(dataCard);
         apply.Add(() => p.HistoryHours = (double)((ComboBoxItem)history.SelectedItem!).Tag!);
 
         switch (p.Kind)
@@ -280,7 +281,7 @@ internal sealed class ConnectionsView : UserControl, IPage
                 sections.Children.Add(Ui.Card(AlpacaSection(p, apply)));
                 break;
             case ConnectionKind.Databento:
-                dataSection.IsVisible = false;
+                dataCard.IsVisible = false;
                 sections.Children.Add(Ui.Card(DatabentoSection(p, apply)));
                 break;
             case ConnectionKind.Longbridge:
@@ -291,11 +292,11 @@ internal sealed class ConnectionsView : UserControl, IPage
                 sections.Children.Add(Ui.Card(AggregateSection(p, apply)));
                 break;
             case ConnectionKind.OptionsData:
-                dataSection.IsVisible = false;
+                dataCard.IsVisible = false;
                 sections.Children.Add(Ui.Card(OptionsDataSection(p, apply)));
                 break;
             case ConnectionKind.EtfFlows:
-                dataSection.IsVisible = false;
+                dataCard.IsVisible = false;
                 sections.Children.Add(Ui.Card(EtfFlowsSection(p, apply)));
                 break;
         }
@@ -352,6 +353,8 @@ internal sealed class ConnectionsView : UserControl, IPage
         };
 
         var kindBadge = new Border { Child = Ui.H(6, Ui.Icon(IconOf(p.Kind), 14, Ui.Accent), new TextBlock { Text = Ui.EnumName(p.Kind), FontSize = 12 }), Classes = { "pill" } };
+        // con el mismo nombre que el tipo, la etiqueta no agrega nada (y en las largas tapaba el interruptor)
+        kindBadge.IsVisible = p.Name != Ui.EnumName(p.Kind);
         var titleRow = new DockPanel();
         // el interruptor va con las acciones: en ventanas angostas no se superpone con «Eliminar»
         enabled.VerticalAlignment = VerticalAlignment.Center;

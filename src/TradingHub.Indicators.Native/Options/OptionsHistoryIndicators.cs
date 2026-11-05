@@ -38,7 +38,7 @@ public abstract class OptionsDailyPane : OptionsPane
     {
         int n = Days.Count(d => double.IsFinite(f(d)));
         if (n < 5)
-            Note(ctx, box, $"{UiText.Tr("Historia diaria:")} {n} {UiText.Tr("días (se completa con una foto por día mientras el indicador está abierto)")}");
+            Note(ctx, box, $"Historia diaria: {n} días (se completa con una foto por día mientras el indicador está abierto)");
     }
 }
 

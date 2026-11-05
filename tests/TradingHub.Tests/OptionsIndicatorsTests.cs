@@ -224,3 +224,59 @@ public class OptionsIndicatorsTests
         Assert.True(day.AtmIv > 0.3 && day.AtmIv < 1);
     }
 }
+
+/// <summary>Las API propias de opciones y de ETF contra un servidor de mentira: leen el JSON documentado y mandan la clave.</summary>
+public class ExternalApiTests
+{
+    [Fact]
+    public async Task La_api_propia_de_opciones_lee_el_formato_documentado()
+    {
+        using var s = new FakeHttpServer();
+        s.OnHttp = req =>
+        {
+            if (req.Headers.GetValueOrDefault("X-Api-Key") != "secreta") return (401, "{}");
+            return req.Route switch
+            {
+                "/api/chain" => (200, """{"time":"2026-11-05T10:00:00Z","spot":70000,"contracts":[{"symbol":"BTC-C","expiry":"2026-11-27T08:00:00Z","strike":72000,"right":"C","bid":900,"ask":950,"mark":925,"iv":0.52,"delta":0.4,"gamma":0.00003,"oi":120,"volume":30},{"symbol":"BTC-P","expiry":"2026-11-27T08:00:00Z","strike":68000,"right":"P","mark":800,"iv":0.58,"oi":200,"volume":50}]}"""),
+                "/api/trades" => (200, """[{"time":"2026-11-05T09:59:00Z","symbol":"BTC-C","expiry":"2026-11-27T08:00:00Z","strike":72000,"right":"C","price":930,"size":5,"side":"buy","iv":0.52,"spot":70000,"venue":"CBOE"}]"""),
+                "/api/daily" => (200, """[{"date":"2026-11-04","atmIv":0.5,"rr25":-2.1,"pcVolume":1.2,"gex":-1.5e8,"callWall":75000,"putWall":65000,"gammaFlip":69000}]"""),
+                _ => (404, "{}"),
+            };
+        };
+        var api = new JsonOptionsApi(s.Http + "/api/", "X-Api-Key", "secreta", new[] { "btc" });
+        Assert.True(api.Supports("BTC"));
+        Assert.False(api.Supports("ETH"));
+        var chain = await api.ChainAsync("BTC", CancellationToken.None);
+        Assert.NotNull(chain);
+        Assert.Equal(70000, chain!.Spot);
+        Assert.Equal(2, chain.Contracts.Count);
+        Assert.Equal(OptionRight.Put, chain.Contracts[1].Right);
+        Assert.Equal(1, chain.Contracts[1].ContractSize);
+        var trades = await api.TradesAsync("BTC", DateTime.UtcNow.AddDays(-1), DateTime.UtcNow, CancellationToken.None);
+        Assert.Single(trades);
+        Assert.Equal(1, trades[0].Aggressor);
+        Assert.Equal(1, trades[0].Bias);
+        Assert.Equal("CBOE", trades[0].Venue);
+        Assert.Equal(930 * 5, trades[0].Premium);
+        var daily = await api.DailyAsync("BTC", DateTime.UtcNow.AddDays(-10), DateTime.UtcNow, CancellationToken.None);
+        Assert.Equal(-2.1, Assert.Single(daily).Rr25);
+        // la gamma de la put sale de su IV (no vino del proveedor)
+        Assert.True(OptionsMath.GammaOf(chain.Contracts[1], chain.Spot, chain.Time) > 0);
+    }
+
+    [Fact]
+    public async Task La_api_de_etf_lee_dolares_o_millones()
+    {
+        using var s = new FakeHttpServer();
+        s.OnHttp = req => req.Headers.GetValueOrDefault("Authorization") != "Bearer k"
+            ? (401, "{}")
+            : (200, """{"data":[{"date":"2026-11-03","net":-123400000,"funds":{"IBIT":-80000000}},{"date":"2026-11-04","netMillions":55.5}]}""");
+        var api = new JsonEtfFlowsApi(s.Http, "Authorization", "k");
+        var days = await api.DailyAsync("BTC", new DateTime(2026, 11, 1), new DateTime(2026, 11, 5), CancellationToken.None);
+        Assert.Equal(2, days.Count);
+        Assert.Equal(-123400000, days[0].NetUsd);
+        Assert.Equal(-80000000, days[0].Funds!["IBIT"]);
+        Assert.Equal(55.5e6, days[1].NetUsd, 3);
+        Assert.Contains(s.Requests, r => r.Query("asset") == "BTC" && r.Query("from") == "2026-11-01");
+    }
+}
