@@ -9,7 +9,7 @@
 # Optimizations over the upstream build-windows.sh:
 #   - ReadyToRun: the app's code is precompiled, so it opens noticeably faster (no JIT on first use of each screen).
 #   - Tiered PGO stays on (default) so hot paths are still re-optimized while running.
-#   - SHA-256 of each installer next to it (the in-app updater also checks GitHub's digest).
+#   - Only KVP-Setup-<arch>.exe is published; the in-app updater checks GitHub's SHA-256 digest of it.
 #
 # Needs the .NET 10 SDK and NSIS (apt install nsis / brew install makensis / winget install NSIS.NSIS).
 set -euo pipefail
@@ -58,9 +58,7 @@ for ARCH in $ARCHES; do
   } >"$FILES"
   "$MAKENSIS" -V2 -DVERSION="$VERSION" -DVIVERSION="$VIVERSION" -DARCH="$ARCH" -DSRC="$PWD/$OUT" -DOUT="$PWD/$SETUP" \
     -DFILELIST="$PWD/$FILES" installer/TradingHub.nsi
-  (cd dist && sha256sum "$(basename "$SETUP")" >"$(basename "$SETUP").sha256")
-  # con el nombre de la edición anterior: las Trading Hub ya instaladas buscan ese archivo para actualizarse a KVP
-  cp "$SETUP" "dist/TradingHub-Setup-$ARCH.exe"
-  (cd dist && sha256sum "TradingHub-Setup-$ARCH.exe" >"TradingHub-Setup-$ARCH.exe.sha256")
+  # el SHA-256 lo da GitHub en cada archivo publicado (el actualizador de la app lo verifica): solo se publica el instalador
+  (cd dist && echo "   SHA-256 $(sha256sum "$(basename "$SETUP")" | cut -d' ' -f1)")
   echo "OK: $SETUP ($(du -h "$SETUP" | cut -f1))"
 done

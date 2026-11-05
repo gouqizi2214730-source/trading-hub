@@ -109,15 +109,14 @@ jobs:
           cat > notes.md <<EOF
           KVP $V para Windows (basada en la ${{ steps.v.outputs.base }} de [ralphtradesz/trading-hub](https://github.com/ralphtradesz/trading-hub), commit $UP).
 
-          - **KVP-Setup-x64.exe**: el instalador (PC con Intel o AMD; en Windows en ARM también funciona).
-          - `TradingHub-Setup-x64.exe` es el mismo instalador con el nombre anterior (para que las Trading Hub ya instaladas se actualicen a KVP).
+          - **KVP-Setup-x64.exe**: el instalador (PC con Intel o AMD; en Windows en ARM también funciona). Su SHA-256 está junto al archivo.
 
           Si ya la tenés, KVP te avisa sola (Ajustes → Actualizaciones) y se actualiza sin tocar tus datos.
           EOF
           sed -i 's/^          //' notes.md
           if gh release view "v$V" >/dev/null 2>&1; then
-            gh release upload "v$V" dist/*.exe dist/*.sha256 --clobber
+            gh release upload "v$V" dist/KVP-Setup-*.exe --clobber
           else
-            gh release create "v$V" dist/*.exe dist/*.sha256 --target "${{ steps.v.outputs.sha }}" \
+            gh release create "v$V" dist/KVP-Setup-*.exe --target "${{ steps.v.outputs.sha }}" \
               --title "KVP $V" --notes-file notes.md --latest
           fi
