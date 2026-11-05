@@ -848,6 +848,29 @@ public class PositioningNlNs : Indicator
     [Display(Name = "Mostrar la línea del posicionamiento neto", GroupName = "Visualización", Order = 10)]
     public bool ShowLine { get; set; } = true;
 
+    public enum Classify
+    {
+        [Display(Name = "Por el delta (quién operó a mercado, LMF)")] ByDelta,
+        [Display(Name = "Por el precio (estados de openmarket)")] ByPrice,
+    }
+
+    private Classify _by = Classify.ByDelta;
+    private int _smooth = 1;
+
+    [Display(Name = "Clasificar", GroupName = "Cálculo", Order = 15)]
+    public Classify ClassifyBy { get => _by; set { _by = value; RecalculateValues(); } }
+
+    [Display(Name = "Suavizado (velas; con el precio)", GroupName = "Cálculo", Order = 16)]
+    [Range(1, 50)]
+    public int Smoothing { get => _smooth; set { _smooth = Math.Clamp(value, 1, 50); RecalculateValues(); } }
+
+    [Display(Name = "Velas del cuadro de estados", GroupName = "Visualización", Order = 11)]
+    [Range(2, 500)]
+    public int KeyWindow { get; set; } = 24;
+
+    // estado de cada vela con el precio: 1 largos nuevos, 2 cortos nuevos, 3 cortos cubren, 4 largos cierran
+    private readonly Dictionary<int, int> _regime = new();
+
     [Display(Name = "Reiniciar la suma cada día", GroupName = "Cálculo", Order = 20)]
     public bool ResetDaily { get; set; }
 
@@ -871,6 +894,7 @@ public class PositioningNlNs : Indicator
     protected override void OnRecalculate()
     {
         _acc = 0;
+        _regime.Clear();
         _line.VisualType = ShowLine ? VisualMode.Line : VisualMode.Hide;
         if (CurrentBar <= 0 || Symbol.Length == 0) return;
         string sym = Symbol;
@@ -943,6 +967,29 @@ public class PositioningNlNs : Indicator
         if (ResetDaily && bar > 0 && GetCandle(bar - 1).Time.Date != c.Time.Date) _acc = 0;
         if (OiAt(end) is not { } now || OiAt(c.Time) is not { } before) return;
         double d = now - before;
+        if (_by == Classify.ByPrice)
+        {
+            // estados de openmarket: el precio sube y el OI sube = largos nuevos, etc. (promediado en N velas)
+            int from = Math.Max(0, bar - _smooth + 1);
+            var first = GetCandle(from);
+            double dOi = (OiAt(end) ?? now) - (OiAt(first.Time) ?? before), dPx = (double)(c.Close - (from > 0 ? GetCandle(from - 1).Close : first.Open));
+            dOi /= bar - from + 1;
+            int reg = dOi >= 0 ? (dPx >= 0 ? 1 : 2) : (dPx >= 0 ? 3 : 4);
+            _regime[bar] = reg;
+            _bars[bar] = (decimal)d;
+            _bars.Colors[bar] = reg switch
+            {
+                1 => Color.FromArgb(230, 38, 194, 129),
+                2 => Color.FromArgb(230, 240, 82, 90),
+                3 => Color.FromArgb(110, 38, 194, 129),
+                _ => Color.FromArgb(110, 240, 82, 90),
+            };
+            double accP = _acc + d;
+            _line[bar] = (decimal)accP;
+            if (bar < CurrentBar - 1) _acc = accP;
+            return;
+        }
+
         double delta = (double)c.Delta;
         if (d == 0 || delta == 0)
         {
@@ -974,5 +1021,48 @@ public class PositioningNlNs : Indicator
         var font = new RenderFont("Arial", 8);
         context.DrawString(UiText.Tr("lleno: abren · tenue: cierran (estimación)"), font, FlowText.Dim, r.Left + 8, r.Top + 16);
         if (msg != null) context.DrawString(msg, font, FlowText.Dim, r.Left + 8, r.Top + 29);
+        if (_by != Classify.ByPrice || CurrentBar < 2) return;
+        // el cuadro de estados (qué parte de las últimas N velas fue cada uno)
+        var counts = new int[5];
+        int n = 0;
+        for (int b = Math.Max(0, CurrentBar - KeyWindow); b < CurrentBar; b++)
+            if (_regime.TryGetValue(b, out var g))
+            {
+                counts[g]++;
+                n++;
+            }
+
+        if (n == 0) return;
+        string[] names = { "", "Largos nuevos", "Cortos nuevos", "Cortos cubren", "Largos cierran" };
+        Color[] cols = { Color.Empty, Color.FromArgb(230, 38, 194, 129), Color.FromArgb(230, 240, 82, 90), Color.FromArgb(150, 38, 194, 129), Color.FromArgb(150, 240, 82, 90) };
+        int w = 150, x = r.Right - w - 8, y = r.Top + 16;
+        context.FillRectangle(Color.FromArgb(215, 18, 20, 26), new Rectangle(x, y, w, 4 * 13 + 8), 4);
+        for (int k = 1; k <= 4; k++)
+        {
+            context.FillRectangle(cols[k], new Rectangle(x + 6, y + 6 + (k - 1) * 13, 8, 8));
+            context.DrawString($"{UiText.Tr(names[k])} {100.0 * counts[k] / n:0} %", font, FlowText.Dim, x + 18, y + 3 + (k - 1) * 13);
+        }
+
+        // donde cambió el estado que manda en la ventana y se sostuvo tres velas
+        int Leader(int end)
+        {
+            var c2 = new int[5];
+            for (int b = Math.Max(0, end - KeyWindow + 1); b <= end; b++)
+                if (_regime.TryGetValue(b, out var g)) c2[g]++;
+            int best = 1;
+            for (int k = 2; k <= 4; k++)
+                if (c2[k] > c2[best]) best = k;
+            return best;
+        }
+
+        int first = Math.Max(KeyWindow + 3, FirstVisibleBarNumber), last = Math.Min(CurrentBar - 1, LastVisibleBarNumber);
+        for (int b = first; b <= last; b++)
+        {
+            int l0 = Leader(b - 3), l1 = Leader(b - 2);
+            if (l1 == l0 || Leader(b - 1) != l1 || Leader(b) != l1) continue;
+            bool buying = l1 is 1 or 3;
+            int xx = ChartInfo!.GetXByBar(b - 2, false);
+            context.FillEllipse(buying ? cols[1] : cols[2], new Rectangle(xx - 4, r.Bottom - 12, 8, 8));
+        }
     }
 }

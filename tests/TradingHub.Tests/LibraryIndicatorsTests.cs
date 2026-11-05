@@ -20,6 +20,9 @@ public class LibraryIndicatorsTests
         typeof(TradingHub.Indicators.Native.Flow.FootprintAlerts), typeof(TradingHub.Indicators.Native.BigTrades), typeof(TradingHub.Indicators.Native.Flow.BarStatsStrip),
         typeof(ValueAreaReversion), typeof(ProfileLevelAlerts), typeof(ProfileTails), typeof(VolumeProfileValueArea), typeof(VolumeHeatHours),
         typeof(SlidingVolumeProfile), typeof(CalendarAnchoredVwap), typeof(ExecutionBenchmarks),
+        typeof(TradingHub.Indicators.Native.Flow.LiquidityImbalanceOscillator), typeof(TradingHub.Indicators.Native.Flow.OrderBookPressure),
+        typeof(TradingHub.Indicators.Native.Flow.LiquidationBands), typeof(TradingHub.Indicators.Native.Flow.LiquidationMap), typeof(TradingHub.Indicators.Native.Flow.LiquidationBursts),
+        typeof(TradingHub.Indicators.Native.Flow.PositioningNlNs),
         typeof(MarketSessions), typeof(SessionMap), typeof(AsianSessionSweeps), typeof(SessionSweeps), typeof(SessionGapFill),
         typeof(StructureShiftSweeps), typeof(AnchoredMarketStructure), typeof(StructureRegimeOscillator), typeof(StructureScatterPanel), typeof(StructureTrendPanel), typeof(WaveExtensions),
     }.Select(t => new object[] { t });
