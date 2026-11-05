@@ -4514,5 +4514,8 @@
  "original actualizado": "原版有更新",
  "El original se actualizó: volver al original nuevo (descarta tus cambios)…": "原版已更新：换回新版原版（放弃你的修改）…",
  "Usás una copia editada de «{0}» hecha con una versión anterior: el original se actualizó y la copia no trae lo nuevo. En el indicador → clic derecho en la biblioteca → «Volver al original».": "你正在用「{0}」的编辑副本，它是用旧版本做的：原版已经更新，副本里没有新功能。到指标库里右键它 →「恢复原版」。",
- "Copias editadas sin cambios actualizadas al original nuevo: {0}": "没改动过的编辑副本已更新为新版原版：{0}"
+ "Copias editadas sin cambios actualizadas al original nuevo: {0}": "没改动过的编辑副本已更新为新版原版：{0}",
+ "Ejemplo: delta % por vela": "示例：每根 K 线的 delta %",
+ "Umbral para resaltar (%)": "高亮阈值（%）",
+ "Delta %": "Delta %"
 }

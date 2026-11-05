@@ -100,10 +100,25 @@ public sealed class UserScripts : IDisposable
         return res;
     }
 
+    /// <summary>
+    /// El ejemplo se escribe una sola vez (la primera vez que la carpeta está vacía): si se borra, no vuelve. Una marca
+    /// oculta en la carpeta lo recuerda.
+    /// </summary>
     private void WriteExampleIfEmpty()
     {
-        if (Directory.EnumerateFiles(Folder, "*.cs", SearchOption.AllDirectories).Any()) return;
-        File.WriteAllText(Path.Combine(Folder, "EjemploDeltaPorcentual.cs"), ExampleSource);
+        var mark = Path.Combine(Folder, ".ejemplo-creado");
+        if (File.Exists(mark)) return;
+        try
+        {
+            if (!Directory.EnumerateFiles(Folder, "*.cs", SearchOption.AllDirectories).Any())
+                File.WriteAllText(Path.Combine(Folder, "EjemploDeltaPorcentual.cs"), ExampleSource);
+            File.WriteAllText(mark, "");
+            File.SetAttributes(mark, File.GetAttributes(mark) | FileAttributes.Hidden);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // sin ejemplo esta vez
+        }
     }
 
     public const string ExampleSource = """
