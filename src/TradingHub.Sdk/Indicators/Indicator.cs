@@ -22,6 +22,13 @@ namespace TradingHub.Indicators
     public sealed record IndicatorMenuItem(string Text, Action Run, bool Checked = false);
 
     /// <summary>
+    /// Una línea horizontal que un indicador dibuja a mano (un POC virgen, un nivel clave, el cierre de un VWAP…) y a la que se
+    /// le puede poner una alerta: su Id tiene que ser el mismo en cada cálculo. Existe entre las velas <see cref="FromBar"/> y
+    /// <see cref="ToBar"/> (incluidas; ToBar = int.MaxValue: sigue hacia la derecha).
+    /// </summary>
+    public readonly record struct IndicatorLevel(string Id, string Name, decimal Price, int FromBar = 0, int ToBar = int.MaxValue);
+
+    /// <summary>
     /// Ajuste que se guarda con el gráfico aunque no se muestre en el editor (marcado además con [Browsable(false)]).
     /// </summary>
     [AttributeUsage(AttributeTargets.Property)]
@@ -455,6 +462,18 @@ namespace TradingHub.Indicators
         /// (por ejemplo «unir perfiles desde acá»). Vacío = ninguna.
         /// </summary>
         public virtual IReadOnlyList<IndicatorMenuItem> GetMenuItems(int x, int y) => Array.Empty<IndicatorMenuItem>();
+
+        /// <summary>
+        /// Las líneas horizontales que dibuja el indicador a mano, para que se les pueda poner una alerta como a una serie (clic
+        /// derecho sobre la línea). Por defecto, las de los indicadores hijos (<see cref="Add"/>), con su Id precedido por el
+        /// número de hijo.
+        /// </summary>
+        public virtual IEnumerable<IndicatorLevel> GetAlertLevels()
+        {
+            for (int i = 0; i < _children.Count; i++)
+                foreach (var l in _children[i].GetAlertLevels())
+                    yield return l with { Id = i + "." + l.Id };
+        }
 
         // ================================================================ servicios para los indicadores
 

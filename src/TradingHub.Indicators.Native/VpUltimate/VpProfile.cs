@@ -885,6 +885,46 @@ public class VpProfile : VpIndicator
         }
     }
 
+    /// <summary>
+    /// Las líneas del perfil para las alertas: POC (o POC alcista / bajista), VAH y VAL de los últimos perfiles y del que se
+    /// está formando, y los POC vírgenes. El Id va con el inicio del perfil, así sigue siendo el mismo al recalcular.
+    /// </summary>
+    public override IEnumerable<IndicatorLevel> GetAlertLevels()
+    {
+        int last = Math.Max(0, CurrentBar - 1);
+        int pocFrom = Math.Max(0, _done.Count - PocCount);
+        string DateOf(int bar) => bar >= 0 && bar < CurrentBar ? GetCandle(bar).Time.ToString("dd/MM HH:mm") : "";
+        IEnumerable<IndicatorLevel> Of(Result r, bool final, int index)
+        {
+            string id = (final ? "p" : "dev") + (r.StartBar >= 0 && r.StartBar < CurrentBar ? GetCandle(r.StartBar).Time.Ticks : 0);
+            string when = final ? DateOf(r.StartBar) : UiText.Tr("en formación");
+            int to = ExtendPoc ? int.MaxValue : r.EndBar;
+            if (ShowPoc && (index >= pocFrom || !final))
+            {
+                if (PocType == PocKind.Regular)
+                {
+                    if (!(final && r.PocDead && _deletePoc)) yield return new IndicatorLevel(id + ".poc", "POC " + when, r.Poc, r.StartBar, final && r.PocDead ? r.PocEnd : to);
+                }
+                else
+                {
+                    if (!(final && r.PocUpDead && _deletePoc)) yield return new IndicatorLevel(id + ".pocu", UiText.Tr("POC alcista ") + when, r.PocUp, r.StartBar, final && r.PocUpDead ? r.PocUpEnd : to);
+                    if (!(final && r.PocDnDead && _deletePoc)) yield return new IndicatorLevel(id + ".pocd", UiText.Tr("POC bajista ") + when, r.PocDn, r.StartBar, final && r.PocDnDead ? r.PocDnEnd : to);
+                }
+            }
+
+            if (ShowVah) yield return new IndicatorLevel(id + ".vah", "VAH " + when, r.Vah, r.StartBar, final ? r.EndBar : last);
+            if (ShowVal) yield return new IndicatorLevel(id + ".val", "VAL " + when, r.Val, r.StartBar, final ? r.EndBar : last);
+        }
+
+        // los perfiles cercanos al final (los que se ven y se alertan; no toda la historia)
+        for (int i = Math.Max(0, _done.Count - Math.Max(PocCount, 5)); i < _done.Count; i++)
+            foreach (var l in Of(_done[i], true, i)) yield return l;
+        if (Developing && _developing != null)
+            foreach (var l in Of(_developing, false, _done.Count)) yield return l;
+        if (_naked.Enabled.Any(e => e))
+            foreach (var l in VpNakedPoc.Levels(this, _naked, NakedShowTouched, 50)) yield return l with { Id = "n." + l.Id };
+    }
+
     private void DrawPoc(RenderContext ctx, decimal price, int x0, int x1, int end, bool dead, Color color, bool final)
     {
         if (final && dead && _deletePoc) return;

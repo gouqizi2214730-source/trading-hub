@@ -4455,5 +4455,10 @@
  "Falta cerrar un bloque con «}»": "有一个代码块没有用「}」闭合",
  "Las opciones van entre llaves: { clave: valor, … }": "选项要写在大括号里：{ 键: 值, … }",
  "Entrada «{0}»: ohlcv.open/high/low/close/volume/hl2/hlc3/ohlc4/time, trades.volume/buy/sell/delta/count o book.bid/ask/delta": "输入「{0}」：ohlcv.open/high/low/close/volume/hl2/hlc3/ohlc4/time、trades.volume/buy/sell/delta/count 或 book.bid/ask/delta",
- "No conozco la función «{0}» (ema, sma, rma, wma, stdev, highest, lowest, sum, change, cum, crossover, crossunder, abs, min, max, sqrt, log, pow, round, nz…)": "不认识函数「{0}」（ema、sma、rma、wma、stdev、highest、lowest、sum、change、cum、crossover、crossunder、abs、min、max、sqrt、log、pow、round、nz…）"
+ "No conozco la función «{0}» (ema, sma, rma, wma, stdev, highest, lowest, sum, change, cum, crossover, crossunder, abs, min, max, sqrt, log, pow, round, nz…)": "不认识函数「{0}」（ema、sma、rma、wma、stdev、highest、lowest、sum、change、cum、crossover、crossunder、abs、min、max、sqrt、log、pow、round、nz…）",
+ "Alerta en «{0}»": "在「{0}」上设警报",
+ "en formación": "形成中",
+ "POC alcista ": "看涨 POC ",
+ "POC bajista ": "看跌 POC ",
+ "cierre": "收盘"
 }

@@ -391,6 +391,10 @@ public sealed class ChartDrawing
         DrawingKind.HorizontalLine or DrawingKind.HorizontalRay or DrawingKind.TrendLine or DrawingKind.Ray or DrawingKind.ExtendedLine => new[] { ("line", "línea") },
         DrawingKind.Rectangle => new[] { ("top", "borde de arriba"), ("bottom", "borde de abajo") },
         DrawingKind.ParallelChannel => new[] { ("upper", "borde de arriba"), ("middle", "línea del medio"), ("lower", "borde de abajo") },
+        DrawingKind.AnchoredVwap => new[] { ("vwap", "VWAP") }
+            .Concat(Band1 > 0 ? new[] { ("u1", "+" + Band1.ToString("0.##", CultureInfo.InvariantCulture) + "σ"), ("d1", "−" + Band1.ToString("0.##", CultureInfo.InvariantCulture) + "σ") } : Array.Empty<(string, string)>())
+            .Concat(Band2 > 0 ? new[] { ("u2", "+" + Band2.ToString("0.##", CultureInfo.InvariantCulture) + "σ"), ("d2", "−" + Band2.ToString("0.##", CultureInfo.InvariantCulture) + "σ") } : Array.Empty<(string, string)>())
+            .ToArray(),
         DrawingKind.FibRetracement => EffectiveLevels.Where(l => l.Visible).Select(l => ("fib:" + l.Value.ToString(CultureInfo.InvariantCulture), "nivel " + l.Value.ToString("0.###", CultureInfo.InvariantCulture))).ToArray(),
         _ => Array.Empty<(string, string)>(),
     };

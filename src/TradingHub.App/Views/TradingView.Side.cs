@@ -1139,7 +1139,12 @@ public sealed partial class TradingView
             bool onPrice = layout.Main.Rect.Contains(x, y);
             var left = onPrice ? AlertOperand.Price("close", "Precio (cierre)") : line;
             var right = onPrice ? line : AlertOperand.Fixed((decimal)(layout.PanelAt(y)?.ValueAt(y) ?? 0));
-            items.Add(Item($"Alerta en «{line.Label}»…", MaterialIconKind.BellPlusOutline, () => _ = OpenAlertsAsync(tab, left, right)));
+            var lineMenu = new MenuItem { Header = $"Alerta en «{line.Label}»", Icon = Ui.Icon(MaterialIconKind.BellPlusOutline, 16) };
+            lineMenu.Items.Add(Item("Cruza la línea…", null, () => _ = OpenAlertsAsync(tab, left, right, null, AlertCondition.Crossing)));
+            lineMenu.Items.Add(Item("Cruza hacia arriba…", null, () => _ = OpenAlertsAsync(tab, left, right, null, AlertCondition.CrossingUp)));
+            lineMenu.Items.Add(Item("Cruza hacia abajo…", null, () => _ = OpenAlertsAsync(tab, left, right, null, AlertCondition.CrossingDown)));
+            lineMenu.Items.Add(Item("Toca la línea…", null, () => _ = OpenAlertsAsync(tab, left, right, null, AlertCondition.Touching)));
+            items.Add(lineMenu);
         }
 
         if (layout != null && layout.PanelAt(y) is { } anyPanel)

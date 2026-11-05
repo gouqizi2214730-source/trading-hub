@@ -4455,5 +4455,10 @@
  "Falta cerrar un bloque con «}»": "A block is missing its closing «}»",
  "Las opciones van entre llaves: { clave: valor, … }": "Options go in braces: { key: value, … }",
  "Entrada «{0}»: ohlcv.open/high/low/close/volume/hl2/hlc3/ohlc4/time, trades.volume/buy/sell/delta/count o book.bid/ask/delta": "Input «{0}»: ohlcv.open/high/low/close/volume/hl2/hlc3/ohlc4/time, trades.volume/buy/sell/delta/count or book.bid/ask/delta",
- "No conozco la función «{0}» (ema, sma, rma, wma, stdev, highest, lowest, sum, change, cum, crossover, crossunder, abs, min, max, sqrt, log, pow, round, nz…)": "Unknown function «{0}» (ema, sma, rma, wma, stdev, highest, lowest, sum, change, cum, crossover, crossunder, abs, min, max, sqrt, log, pow, round, nz…)"
+ "No conozco la función «{0}» (ema, sma, rma, wma, stdev, highest, lowest, sum, change, cum, crossover, crossunder, abs, min, max, sqrt, log, pow, round, nz…)": "Unknown function «{0}» (ema, sma, rma, wma, stdev, highest, lowest, sum, change, cum, crossover, crossunder, abs, min, max, sqrt, log, pow, round, nz…)",
+ "Alerta en «{0}»": "Alert on «{0}»",
+ "en formación": "developing",
+ "POC alcista ": "Bullish POC ",
+ "POC bajista ": "Bearish POC ",
+ "cierre": "close"
 }

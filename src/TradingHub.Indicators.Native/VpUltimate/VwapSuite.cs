@@ -63,6 +63,10 @@ public class VwapSuite : Indicator
     [Display(Name = "Cierres del VWAP (líneas hacia la derecha)", GroupName = "Partes", Order = 6)]
     public bool UseCloses { get => _closes; set { _closes = value; RecalculateValues(); } }
 
+    /// <summary>Para las alertas: los cierres de VWAP (lo único de las partes que se dibuja como niveles), si están encendidos.</summary>
+    public override IEnumerable<IndicatorLevel> GetAlertLevels() =>
+        _closes ? Closes.GetAlertLevels().Select(l => l with { Id = "X." + l.Id }) : Enumerable.Empty<IndicatorLevel>();
+
     [Display(Name = "VWAP por sesión (Asia / Londres / Nueva York)", GroupName = "Partes", Order = 7)]
     public bool UseSessions { get => _sessions; set { _sessions = value; RecalculateValues(); } }
 

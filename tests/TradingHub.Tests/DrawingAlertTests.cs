@@ -79,3 +79,46 @@ public class DrawingAlertTests
         Assert.Contains(Enumerable.Range(1, n - 1), b => ChartAlertEngine.Check(m, up, b) == true);
     }
 }
+
+/// <summary>Alertas sobre lo que los indicadores dibujan a mano: POC vírgenes, cierres de VWAP, niveles del perfil.</summary>
+public class IndicatorLevelAlertTests
+{
+    [Fact]
+    public void Un_poc_virgen_se_puede_elegir_con_el_mouse_y_alertar()
+    {
+        var data = VpUltimateTests.Market(8);
+        var model = new ChartModel(data, ChartPeriod.Parse("M15"), new ChartSettings { TimeZoneId = "UTC" });
+        var npoc = new TradingHub.Indicators.Native.VpUltimate.VpNakedPoc { ShowTouched = true };
+        model.AddIndicator(npoc);
+        model.AddIndicator(new TradingHub.Indicators.Native.VpUltimate.VpProfile());
+        model.Update();
+        var levels = npoc.GetAlertLevels().ToList();
+        Assert.NotEmpty(levels);
+        var ops = ChartAlertEngine.Lines(model).Where(o => o.Series!.StartsWith(ChartAlertEngine.LevelPrefix)).ToList();
+        Assert.Contains(ops, o => o.Label.Contains("NPOC"));
+        Assert.Contains(ops, o => o.Label.Contains("POC") && o.Indicator!.Contains("VpProfile"));
+
+        var lv = levels[0];
+        var op = ops.First(o => o.Series == ChartAlertEngine.LevelPrefix + lv.Id && o.Indicator!.Contains("VpNakedPoc"));
+        int bar = Math.Max(lv.FromBar, 0);
+        Assert.True(ChartAlertEngine.TryValue(model, op, bar, out var v));
+        Assert.Equal(lv.Price, v);
+
+        // el clic derecho sobre la línea la encuentra
+        using var surface = SkiaSharp.SKSurface.Create(new SkiaSharp.SKImageInfo(1200, 700));
+        model.Viewport.AutoScale = false;
+        model.Viewport.PriceTop = (double)lv.Price + 50;
+        model.Viewport.PriceBottom = (double)lv.Price - 50;
+        new TradingHub.Charting.Rendering.ChartRenderer().Render(surface.Canvas, model, 1200, 700, new TradingHub.Charting.Rendering.ChartRenderState());
+        var layout = model.LastLayout!;
+        int at = lv.ToBar == int.MaxValue ? model.Series.Count - 1 : Math.Min(lv.ToBar, model.Series.Count - 1);
+        float x = layout.CenterX(Math.Max(lv.FromBar, at)), y = layout.Main.Y(lv.Price);
+        var hit = ChartAlertEngine.LineAt(model, x, y);
+        Assert.NotNull(hit);
+        Assert.StartsWith(ChartAlertEngine.LevelPrefix, hit!.Series);
+
+        // y la alerta «toca» se evalúa
+        var a = new ChartAlert { Left = AlertOperand.Price(), Condition = AlertCondition.Touching, Right = op };
+        Assert.NotNull(ChartAlertEngine.Check(model, a, Math.Max(bar, 1)));
+    }
+}

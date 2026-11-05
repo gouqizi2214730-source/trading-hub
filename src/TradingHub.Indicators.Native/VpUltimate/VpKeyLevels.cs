@@ -431,4 +431,11 @@ public class VpKeyLevels : VpSessionBase
             Text(context, text, color, tx, y - 1);
         }
     }
+
+    /// <summary>Los niveles clave dibujados, para las alertas.</summary>
+    public override IEnumerable<IndicatorLevel> GetAlertLevels()
+    {
+        foreach (var k in _history.Concat(_current))
+            yield return new IndicatorLevel(k.Id + "@" + (k.StartBar >= 0 && k.StartBar < CurrentBar ? GetCandle(k.StartBar).Time.Ticks : 0), UiText.Tr(k.Name), k.Price, Style == Placement.Right ? 0 : k.StartBar);
+    }
 }

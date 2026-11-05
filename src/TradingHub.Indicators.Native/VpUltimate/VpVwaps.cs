@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Drawing;
@@ -460,6 +461,41 @@ public class VpVwapCloses : VpPeriodVwapBase
             {
                 int y = Y(list[k].Price);
                 context.DrawLine(pen, X(list[k].Bar), y, Math.Max(X(list[k].Bar) + 1, xEnd), y);
+            }
+        }
+    }
+
+    /// <summary>Los cierres de VWAP que se ven, para las alertas.</summary>
+    public override IEnumerable<IndicatorLevel> GetAlertLevels()
+    {
+        var on = new[] { Daily, Weekly, Monthly, Yearly };
+        string[] code = { "D", "W", "M", "Y" };
+        int perPeriod = (_vwap ? 1 : 0) + (_std1 ? 2 : 0) + (_std2 ? 2 : 0);
+        if (perPeriod == 0) yield break;
+        var names = new List<string>();
+        if (_vwap) names.Add("VWAP");
+        if (_std1)
+        {
+            names.Add("+" + _m1.ToString("0.##", CultureInfo.InvariantCulture) + "σ");
+            names.Add("−" + _m1.ToString("0.##", CultureInfo.InvariantCulture) + "σ");
+        }
+
+        if (_std2)
+        {
+            names.Add("+" + _m2.ToString("0.##", CultureInfo.InvariantCulture) + "σ");
+            names.Add("−" + _m2.ToString("0.##", CultureInfo.InvariantCulture) + "σ");
+        }
+
+        for (int i = 0; i < 4; i++)
+        {
+            if (!on[i]) continue;
+            var list = _levels[i];
+            for (int k = Math.Max(0, list.Count - Keep * perPeriod); k < list.Count; k++)
+            {
+                var lv = list[k];
+                string part = names[(k % perPeriod + perPeriod) % perPeriod];
+                string date = lv.Bar > 0 && lv.Bar - 1 < CurrentBar ? GetCandle(lv.Bar - 1).Time.ToString("dd/MM") : "";
+                yield return new IndicatorLevel($"{code[i]}{GetCandle(Math.Min(lv.Bar, CurrentBar - 1)).Time.Ticks}.{k % perPeriod}", $"{code[i]} {TradingHub.Rendering.UiText.Tr("cierre")} {part} {date}", lv.Price, lv.Bar);
             }
         }
     }

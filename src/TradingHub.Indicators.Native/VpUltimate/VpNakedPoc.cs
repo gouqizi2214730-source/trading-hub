@@ -270,4 +270,25 @@ public class VpNakedPoc : VpIndicator
 
     protected override void OnRender(RenderContext context, DrawingLayouts layout) =>
         Render(this, context, _engine, new[] { DailyColor, WeeklyColor, MonthlyColor, YearlyColor }, ShowTouched, Width, Style, ShowLabel, MaxPerPeriod);
+
+    /// <summary>Los POC vírgenes que se ven (los mismos que dibuja), para poner alertas sobre ellos.</summary>
+    public static IEnumerable<IndicatorLevel> Levels(VpIndicator owner, NakedPocEngine engine, bool showTouched, int maxPerPeriod)
+    {
+        var periods = new[] { VpPeriod.Day, VpPeriod.Week, VpPeriod.Month, VpPeriod.Year };
+        var shown = new int[4];
+        int last = Math.Max(0, owner.CurrentBar - 1);
+        for (int i = engine.Levels.Count - 1; i >= 0; i--)
+        {
+            var lv = engine.Levels[i];
+            int k = Array.IndexOf(periods, lv.Period);
+            if (k < 0 || !engine.Enabled[k] || (lv.Touched && !showTouched)) continue;
+            if (shown[k] >= maxPerPeriod) continue;
+            shown[k]++;
+            string code = NakedPocEngine.Code(lv.Period);
+            string date = lv.Start.ToString(lv.Period is VpPeriod.Day or VpPeriod.Week ? "dd/MM" : lv.Period == VpPeriod.Month ? "MM/yyyy" : "yyyy");
+            yield return new IndicatorLevel(code + lv.Start.Ticks, code + " NPOC " + date, lv.Price, Math.Min(lv.EndBar + 1, last), lv.Touched ? lv.TouchBar : int.MaxValue);
+        }
+    }
+
+    public override IEnumerable<IndicatorLevel> GetAlertLevels() => Levels(this, _engine, ShowTouched, MaxPerPeriod);
 }

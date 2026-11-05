@@ -161,9 +161,28 @@ public static class ChartAlertEngine
                 if (s is not ValueDataSeries v || v.IsHidden || v.VisualType == VisualMode.Hide) continue;
                 res.Add(new AlertOperand { Indicator = key, Series = s.Id, Label = $"{slot.Indicator.Name} · {s.Name}" });
             }
+
+            // las líneas horizontales que el indicador dibuja a mano (POC vírgenes, niveles clave, cierres de VWAP…)
+            foreach (var l in Levels(slot))
+                res.Add(new AlertOperand { Indicator = key, Series = LevelPrefix + l.Id, Label = $"{slot.Indicator.Name} · {l.Name}" });
         }
 
         return res;
+    }
+
+    /// <summary>Las series que son niveles dibujados a mano por el indicador (no una serie de datos).</summary>
+    public const string LevelPrefix = "level:";
+
+    private static List<IndicatorLevel> Levels(IndicatorSlot slot)
+    {
+        try
+        {
+            return slot.Indicator.GetAlertLevels().ToList();
+        }
+        catch (Exception)
+        {
+            return new List<IndicatorLevel>(); // un indicador propio con un error no deja sin alertas al resto
+        }
     }
 
     /// <summary>Las líneas de los dibujos del gráfico que se pueden alertar (líneas, rayos, rectángulos, canales, Fibonacci).</summary>
@@ -213,6 +232,18 @@ public static class ChartAlertEngine
                 bestD = d;
                 best = new AlertOperand { Indicator = key, Series = s.Id, Label = $"{slot.Indicator.Name} · {s.Name}" };
             }
+
+            if (!panel.IsPrice) continue;
+            // a la derecha de la última vela también: los niveles siguen hacia la derecha
+            double exact = layout.BarAtExact(x);
+            foreach (var l in Levels(slot))
+            {
+                if (exact < l.FromBar - 0.5 || (l.ToBar != int.MaxValue && exact > l.ToBar + 1)) continue;
+                float d = Math.Abs(panel.Y(l.Price) - y);
+                if (d > bestD) continue;
+                bestD = d;
+                best = new AlertOperand { Indicator = key, Series = LevelPrefix + l.Id, Label = $"{slot.Indicator.Name} · {l.Name}" };
+            }
         }
 
         return best;
@@ -231,6 +262,18 @@ public static class ChartAlertEngine
         if (op.Drawing != null)
         {
             var d = model.Drawings.FirstOrDefault(x => x.Id.ToString("N") == op.Drawing);
+            if (d is { Kind: Drawings.DrawingKind.AnchoredVwap })
+            {
+                // el VWAP anclado sale de las operaciones (el mismo cálculo que lo dibuja)
+                var (first, bars) = d.Calc.AnchoredVwap(model.Data.Trades, model.Series, d.Points[0].Time);
+                int k = bar - first;
+                if (k < 0 || k >= bars.Count || float.IsNaN(bars[k].Vwap)) return false;
+                var (vw, sd) = bars[k];
+                double m = op.Series switch { "u1" => d.Band1, "d1" => -d.Band1, "u2" => d.Band2, "d2" => -d.Band2, _ => 0 };
+                value = (decimal)(vw + sd * m);
+                return true;
+            }
+
             if (d?.ValueAt(model.Series, bar, op.Series ?? "line") is not { } v || double.IsNaN(v) || double.IsInfinity(v)) return false;
             value = (decimal)Math.Clamp(v, -7.9e27, 7.9e27);
             return true;
@@ -250,6 +293,20 @@ public static class ChartAlertEngine
         }
 
         var slot = SlotOf(model, op.Indicator);
+        if (slot != null && op.Series is { } ser && ser.StartsWith(LevelPrefix, StringComparison.Ordinal))
+        {
+            string id = ser[LevelPrefix.Length..];
+            foreach (var l in Levels(slot))
+            {
+                if (l.Id != id) continue;
+                if (bar < l.FromBar || bar > l.ToBar) return false;
+                value = l.Price;
+                return true;
+            }
+
+            return false; // el nivel ya no está (por ejemplo, un POC virgen que se tocó)
+        }
+
         if (slot?.Indicator.DataSeries.FindById(op.Series ?? "") is not ValueDataSeries s) return false;
         value = s[bar];
         return value != 0 || s.ShowZeroValue;
