@@ -4510,5 +4510,9 @@
  "Etiqueta: período (D / W / M / Y)": "Label: period (D / W / M / Y)",
  "Etiqueta: fecha": "Label: date",
  "Etiqueta: precio": "Label: price",
- "Etiqueta": "Label"
+ "Etiqueta": "Label",
+ "original actualizado": "original updated",
+ "El original se actualizó: volver al original nuevo (descarta tus cambios)…": "The original was updated: go back to the new original (discards your changes)…",
+ "Usás una copia editada de «{0}» hecha con una versión anterior: el original se actualizó y la copia no trae lo nuevo. En el indicador → clic derecho en la biblioteca → «Volver al original».": "You're using an edited copy of «{0}» made with an older version: the original was updated and the copy lacks what's new. In the library, right-click it → «Back to the original».",
+ "Copias editadas sin cambios actualizadas al original nuevo: {0}": "Unchanged edited copies updated to the new original: {0}"
 }

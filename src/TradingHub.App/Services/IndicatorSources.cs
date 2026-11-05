@@ -117,8 +117,107 @@ public static class IndicatorSources
         folder ??= EditedFolder;
         var path = Path.Combine(folder, t.Name + ".cs");
         if (File.Exists(path)) return path;
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(path, WithMarker(t, Generate(t)));
+        return path;
+    }
+
+    /// <summary>
+    /// Segunda línea de una copia editada: el hash del original del que salió y el de la copia tal como se generó. Con eso,
+    /// al actualizar KVP, una copia que nunca se tocó se rehace sola con el original nuevo (trae sus mejoras), y una que se
+    /// cambió avisa que el original se actualizó.
+    /// </summary>
+    public const string BaseMarker = "// kvp-base ";
+
+    public static string Hash(string s) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(s.Replace("\r\n", "\n"))))[..16];
+
+    private static string WithMarker(Type t, string generated)
+    {
+        int nl = generated.IndexOf('\n');
+        string marker = BaseMarker + Hash(EmbeddedSource(t) ?? "") + " " + Hash(generated);
+        return generated[..(nl + 1)] + marker + "\n" + generated[(nl + 1)..];
+    }
+
+    /// <summary>Las copias editadas cuyo original cambió después de editarlas (nombre completo del original).</summary>
+    public static HashSet<string> Stale { get; } = new();
+
+    /// <summary>
+    /// Al arrancar: las copias editadas que nunca se cambiaron se rehacen con el original actual; las cambiadas cuyo original
+    /// se actualizó quedan en <see cref="Stale"/> (la biblioteca lo dice y ofrece volver al original). Devuelve los nombres
+    /// de las rehechas y de las que quedaron viejas.
+    /// </summary>
+    public static (List<string> Refreshed, List<string> Stale) RefreshEdits(string? folder = null)
+    {
+        folder ??= EditedFolder;
+        var refreshed = new List<string>();
+        var stale = new List<string>();
+        Stale.Clear();
+        if (!Directory.Exists(folder)) return (refreshed, stale);
+        foreach (var file in Directory.EnumerateFiles(folder, "*.cs"))
+        {
+            try
+            {
+                string text = File.ReadAllText(file);
+                var m = Regex.Match(text, @"ReplacesIndicator\(""([^""]+)""\)");
+                if (!m.Success) continue;
+                var t = FindLibraryType(m.Groups[1].Value);
+                if (t == null || EmbeddedSource(t) == null) continue;
+                string gen = Generate(t);
+                var lines = text.Replace("\r\n", "\n").Split('\n').ToList();
+                int mi = lines.FindIndex(l => l.StartsWith(BaseMarker, StringComparison.Ordinal));
+                string body = mi >= 0 ? string.Join("\n", lines.Where((_, k) => k != mi)) : string.Join("\n", lines);
+                if (body == gen)
+                {
+                    if (mi < 0) File.WriteAllText(file, WithMarker(t, gen));
+                    continue;
+                }
+
+                if (mi >= 0)
+                {
+                    var parts = lines[mi][BaseMarker.Length..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    string origOld = parts.Length > 0 ? parts[0] : "", genOld = parts.Length > 1 ? parts[1] : "";
+                    if (Hash(body) == genOld)
+                    {
+                        // nunca se tocó: se rehace con el original nuevo
+                        File.WriteAllText(file, WithMarker(t, gen));
+                        refreshed.Add(Indicator.DefaultName(t));
+                        continue;
+                    }
+
+                    if (origOld == Hash(EmbeddedSource(t)!)) continue; // cambiada por el usuario, el original no cambió
+                }
+
+                // cambiada (o de una versión sin marca) y el original es otro: queda vieja
+                Stale.Add(t.FullName!);
+                stale.Add(Indicator.DefaultName(t));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // se revisa en el próximo arranque
+            }
+        }
+
+        return (refreshed, stale);
+    }
+
+    private static Type? FindLibraryType(string fullName)
+    {
+        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            if (asm.IsDynamic) continue;
+            var t = asm.GetType(fullName, false);
+            if (t != null && typeof(Indicator).IsAssignableFrom(t)) return t;
+        }
+
+        return null;
+    }
+
+    /// <summary>El texto de la copia editada de un indicador de la biblioteca (sin la línea de la marca).</summary>
+    public static string Generate(Type t)
+    {
         var src = EmbeddedSource(t) ?? throw new InvalidOperationException("Este indicador no trae su código fuente.");
-        string text = src;
+        string text = src.Replace("\r\n", "\n");
         // vive en un namespace hijo («.Editado»): ve los tipos de la biblioteca y sus clases auxiliares no chocan con las originales
         text = Regex.Replace(text, @"^(\s*namespace\s+[\w.]+)\s*;", "$1.Editado;", RegexOptions.Multiline);
         text = Regex.Replace(text, @"^(\s*namespace\s+[\w.]+)\s*\{", "$1.Editado {", RegexOptions.Multiline);
@@ -137,8 +236,6 @@ public static class IndicatorSources
         text = rx.Replace(text, m => $"{m.Groups[1].Value}[TradingHub.Indicators.ReplacesIndicator(\"{t.FullName}\")]\n{m.Groups[1].Value}{m.Groups[2].Value}", 1);
         text = "using System.IO;\nusing System.Threading;\nusing System.Threading.Tasks;\n" + text;
         text = "// " + Indicator.DefaultName(t) + " (biblioteca de KVP), editado. Se recompila solo al guardar; borrá este archivo para volver al original.\n" + text;
-        Directory.CreateDirectory(folder);
-        File.WriteAllText(path, text);
-        return path;
+        return text;
     }
 }

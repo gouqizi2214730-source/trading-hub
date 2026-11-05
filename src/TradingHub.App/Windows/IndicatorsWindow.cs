@@ -159,6 +159,8 @@ public sealed class IndicatorsWindow : Window
                 if (i.Source != "Trading Hub" && i.Source != "Técnicos")
                 {
                     string tag = i.Source == UserScripts.Source ? "propio" : "extra";
+                    // una copia editada de la biblioteca cuyo original se actualizó después
+                    if (IndicatorCatalog.ReplacedBy(i.Type) is { } orig && IndicatorSources.Stale.Contains(orig)) tag = "original actualizado";
                     var badge = new Border { Child = new TextBlock { Text = tag, FontSize = 10 }, Classes = { "pill" }, Padding = new Thickness(6, 1) };
                     DockPanel.SetDock(badge, Dock.Right);
                     row.Children.Add(badge);
@@ -192,7 +194,12 @@ public sealed class IndicatorsWindow : Window
             if (replaces != null)
             {
                 // un indicador de la biblioteca editado: borrar el archivo vuelve al original
-                var restore = new MenuItem { Header = "Volver al original de la biblioteca (descarta tus cambios)…", Icon = Ui.Icon(MaterialIconKind.Restore, 16) };
+                bool stale = IndicatorSources.Stale.Contains(replaces);
+                var restore = new MenuItem
+                {
+                    Header = stale ? "El original se actualizó: volver al original nuevo (descarta tus cambios)…" : "Volver al original de la biblioteca (descarta tus cambios)…",
+                    Icon = Ui.Icon(MaterialIconKind.Restore, 16),
+                };
                 restore.Click += async (_, _) =>
                 {
                     var file = IndicatorSources.UserFile(i.Type);

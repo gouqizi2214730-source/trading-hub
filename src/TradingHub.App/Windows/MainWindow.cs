@@ -102,6 +102,22 @@ public sealed class MainWindow : Window
         if (Os.IsWindows) SetUpWindows();
         Navigate("trading");
 
+        // copias editadas de indicadores de la biblioteca: las que nunca se tocaron se rehacen con el original de esta
+        // versión (traen sus mejoras); las cambiadas cuyo original se actualizó avisan (la biblioteca ofrece volver al original)
+        try
+        {
+            var (refreshed, stale) = IndicatorSources.RefreshEdits();
+            if (stale.Count > 0)
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => _svc.Alerts.Raise(AlertKind.System, "", "Indicadores",
+                    string.Format(TradingHub.Rendering.UiText.Tr("Usás una copia editada de «{0}» hecha con una versión anterior: el original se actualizó y la copia no trae lo nuevo. En el indicador → clic derecho en la biblioteca → «Volver al original»."), string.Join("», «", stale))),
+                    Avalonia.Threading.DispatcherPriority.Background);
+            if (refreshed.Count > 0) SetStatus(string.Format(TradingHub.Rendering.UiText.Tr("Copias editadas sin cambios actualizadas al original nuevo: {0}"), string.Join(", ", refreshed)));
+        }
+        catch (Exception ex)
+        {
+            this.LogWarn("No se pudieron revisar las copias editadas: " + ex.Message);
+        }
+
         _svc.Scripts = new UserScripts(_svc.Catalog);
         _svc.Scripts.Compiled += r =>
         {

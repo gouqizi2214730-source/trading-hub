@@ -75,4 +75,50 @@ public class IndicatorSourcesTests
             try { Directory.Delete(dir, true); } catch { }
         }
     }
+
+    [Fact]
+    public void Las_copias_sin_tocar_se_actualizan_y_las_cambiadas_avisan()
+    {
+        var t = typeof(TradingHub.Indicators.Native.VpUltimate.VpNakedPoc);
+        var dir = Path.Combine(Path.GetTempPath(), "th-refresh-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            var path = IndicatorSources.EditInPlace(t, dir);
+            Assert.Contains(IndicatorSources.BaseMarker, File.ReadAllText(path));
+            // recién hecha: nada que hacer
+            var (r0, s0) = IndicatorSources.RefreshEdits(dir);
+            Assert.Empty(r0);
+            Assert.Empty(s0);
+
+            // una copia vieja sin tocar (hecha de otro original): se rehace sola con el original de ahora
+            string gen = IndicatorSources.Generate(t);
+            string old = gen.Replace("Etiqueta: precio", "Etiqueta vieja");
+            int nl = old.IndexOf('\n');
+            File.WriteAllText(path, old[..(nl + 1)] + IndicatorSources.BaseMarker + "AAAA " + IndicatorSources.Hash(old) + "\n" + old[(nl + 1)..]);
+            var (r1, s1) = IndicatorSources.RefreshEdits(dir);
+            Assert.Single(r1);
+            Assert.Empty(s1);
+            Assert.Contains("Etiqueta: precio", File.ReadAllText(path));
+
+            // cambiada por el usuario y con el original actualizado: avisa, no se toca
+            string mine = gen.Replace("Etiqueta: precio", "Mi etiqueta");
+            nl = mine.IndexOf('\n');
+            File.WriteAllText(path, mine[..(nl + 1)] + IndicatorSources.BaseMarker + "AAAA " + IndicatorSources.Hash(gen) + "\n" + mine[(nl + 1)..]);
+            var (r2, s2) = IndicatorSources.RefreshEdits(dir);
+            Assert.Empty(r2);
+            Assert.Single(s2);
+            Assert.Contains(t.FullName!, IndicatorSources.Stale);
+            Assert.Contains("Mi etiqueta", File.ReadAllText(path));
+
+            // de una versión sin marca y distinta del original de ahora: avisa
+            File.WriteAllText(path, mine);
+            var (_, s3) = IndicatorSources.RefreshEdits(dir);
+            Assert.Single(s3);
+        }
+        finally
+        {
+            IndicatorSources.Stale.Clear();
+            try { Directory.Delete(dir, true); } catch { }
+        }
+    }
 }
