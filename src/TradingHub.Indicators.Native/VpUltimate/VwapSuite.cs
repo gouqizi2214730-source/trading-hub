@@ -12,7 +12,7 @@ namespace TradingHub.Indicators.Native.VpUltimate;
 /// se prende o apaga por separado y se configura en su propio grupo; las que están apagadas no se calculan.
 /// </summary>
 [DisplayName("VWAP (bandas σ · Claire · VP definitivo)")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.Vwap)]
 [Description("Un solo VWAP con todo: anclado al período con hasta tres bandas de desvío, rodantes de 30/90/365 días (Claire), varios períodos a la vez, el del período anterior, sus cierres, VWAP móvil y por sesión. Cada parte se activa por separado.")]
 public class VwapSuite : Indicator
 {

@@ -17,7 +17,7 @@ namespace TradingHub.Indicators.Native.Flow;
 /// calcula con las fotos del libro grabadas, así cambiar un ajuste recalcula toda la historia visible.
 /// </summary>
 [DisplayName("Liquidity Tracker (LT-Bid / LT-Ask)")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.OrderBook)]
 [Description("La liquidez de cada lado del libro pesada por la distancia al precio (vida media en puntos básicos), como el Liquidity Tracker de Bookmap y LiquidityMapperFast. Líneas o desequilibrio.")]
 public class LiquidityTracker : Indicator
 {
@@ -121,7 +121,7 @@ public class LiquidityTracker : Indicator
 /// tiene más («el otro lado tiene 1,13× más»). Alejar el mouse muestra cómo cambia el balance con la distancia.
 /// </summary>
 [DisplayName("Mirror: comparar el libro a igual distancia")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.OrderBook)]
 [Description("Al pasar el mouse, compara la liquidez del libro entre el precio y el mouse con la franja igual del otro lado.")]
 public class BookMirror : Indicator
 {
@@ -227,7 +227,7 @@ public class BookMirror : Indicator
 /// más fuerte. Un nivel desaparece cuando el precio pasó por él después de la foto. Fotos de más de 3 horas no se dibujan.
 /// </summary>
 [DisplayName("Niveles de liquidación (Hyperliquid · HyperTracker)")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.Derivatives)]
 [Description("Dónde se liquidarían las posiciones abiertas de BTC en Hyperliquid (fotos de HyperTracker, cada $10): largos abajo, cortos arriba, a la derecha de la última vela.")]
 public class LiquidationLevels : Indicator
 {

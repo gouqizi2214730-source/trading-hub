@@ -15,7 +15,7 @@ namespace TradingHub.Indicators.Native;
 /// llegan en vivo y se graban (hay desde que el gráfico estuvo abierto).
 /// </summary>
 [DisplayName("Derivados: financiación, interés abierto y liquidaciones")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.Derivatives)]
 [Description("Funding, open interest (nivel o cambio) y liquidaciones de Binance y Bybit, por exchange y agregados. Para cripto (BTCUSDT, ETHUSDT…).")]
 public class DerivativesIndicator : Indicator
 {

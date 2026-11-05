@@ -13,7 +13,7 @@ namespace TradingHub.Indicators.Native;
 /// El umbral puede ser fijo o adaptativo (percentil de las operaciones recientes).
 /// </summary>
 [DisplayName("Big Trades (grandes operaciones)")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.OrderFlow)]
 public class BigTrades : Indicator
 {
     public enum ThresholdMode

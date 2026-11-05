@@ -11,7 +11,7 @@ namespace TradingHub.Indicators.Native;
 /// en velas (sin operaciones) suman su delta solo al agregado.
 /// </summary>
 [DisplayName("CVD por mercado (cada exchange + agregado)")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.OrderFlow)]
 [Description("Una línea de CVD por exchange (Binance futuros, Bybit, Binance spot…) y el CVD agregado coloreado por signo, para ver qué mercado empuja. Funciona con la conexión «Agregado».")]
 public class CvdByMarket : Indicator
 {

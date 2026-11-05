@@ -29,7 +29,7 @@ public enum VpProfilePeriod
 /// Los períodos cerrados se guardan en disco: al volver a abrir no se recalculan.
 /// </summary>
 [DisplayName("Perfil de volumen (sesión / período · VP definitivo)")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.VolumeProfile)]
 [Description("Perfil de volumen por sesión, semana, mes… con POC, VAH / VAL, área exterior, colas, POC vírgenes y perfiles unidos (clic derecho en el primero y en el último, o automático si se superponen). Solo períodos terminados: no repinta.")]
 public class VpProfile : VpIndicator
 {

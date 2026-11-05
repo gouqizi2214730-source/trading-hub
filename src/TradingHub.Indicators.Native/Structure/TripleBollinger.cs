@@ -11,7 +11,7 @@ namespace TradingHub.Indicators.Native.Structure;
 /// las de los períodos mayores usan solo velas ya cerradas (escalones), así no se repintan.
 /// </summary>
 [DisplayName("Bollinger triple (tres períodos)")]
-[Category(IndicatorCategories.Trend)]
+[Category(IndicatorCategories.Volatility)]
 [Description("Bandas de Bollinger (20, 2) del período del gráfico y de dos períodos mayores, estas últimas con velas cerradas (sin repintar).")]
 public class TripleBollinger : Indicator
 {

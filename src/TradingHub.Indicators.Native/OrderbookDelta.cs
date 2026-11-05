@@ -11,7 +11,7 @@ namespace TradingHub.Indicators.Native;
 /// el mapa de calor de liquidez: hay datos desde que el gráfico estuvo abierto (en vivo), no en la historia bajada.
 /// </summary>
 [DisplayName("Profundidad y delta del libro (0 – X %)")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.OrderBook)]
 [Description("Liquidez en reposo cerca del precio por vela: bid, ask, su diferencia (delta del libro) y el desequilibrio en %. Usa las fotos del libro del mapa de calor (solo en vivo).")]
 public class OrderbookDelta : Indicator
 {

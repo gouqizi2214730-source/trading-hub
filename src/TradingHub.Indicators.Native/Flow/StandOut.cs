@@ -59,7 +59,7 @@ public static class StandOutRule
 /// El umbral es fijo en dólares o automático (media + k desvíos de las sumas de ventana recientes).
 /// </summary>
 [DisplayName("Absorción (marcas en el gráfico)")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.OrderFlow)]
 [Description("Marca dónde el libro absorbió mucho volumen a mercado de un lado en un mismo precio y en una ventana corta (como LiquidityMapperFast).")]
 public class AbsorptionMarks : Indicator
 {
@@ -221,7 +221,7 @@ public class AbsorptionMarks : Indicator
 /// qué ni está probado como señal.
 /// </summary>
 [DisplayName("Agresión rechazada (traders atrapados)")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.OrderFlow)]
 [Description("Marca en ámbar la mecha de una vela con mucha compra o venta agresiva que después el precio rechazó (cerró un ATR más allá).")]
 public class TrappedTraders : Indicator
 {
@@ -393,7 +393,7 @@ public class TrappedTraders : Indicator
 /// que aparece o se retira sin que el precio llegue, y el balance del libro que se da vuelta.
 /// </summary>
 [DisplayName("Destacados y avisos (volumen, delta, muros, balance)")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.OrderFlow)]
 [Description("Marca las velas con volumen o delta fuera de lo normal (media + k desvíos) y avisa estallidos de flujo, muros que aparecen o se retiran y el balance del libro que se da vuelta.")]
 public class HighlightsAndSounds : Indicator
 {

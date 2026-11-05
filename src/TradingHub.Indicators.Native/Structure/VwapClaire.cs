@@ -10,7 +10,7 @@ namespace TradingHub.Indicators.Native.Structure;
 /// </summary>
 [Browsable(false)] // forma parte de «VWAP (bandas σ · Claire · VP definitivo)»
 [DisplayName("VWAP Claire (rodantes 30 / 90 / 365 días + día / semana / mes)")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.Vwap)]
 [Description("VWAP rodantes de 30, 90 y 365 días (con velas diarias, sin repintar en el día) y VWAP anclados al día, la semana y el mes.")]
 public class VwapClaire : Indicator
 {

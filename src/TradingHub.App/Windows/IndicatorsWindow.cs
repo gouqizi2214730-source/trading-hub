@@ -1,7 +1,9 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
+using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.VisualTree;
 using Material.Icons;
 using TradingHub.App.Controls;
 using TradingHub.App.Services;
@@ -77,7 +79,17 @@ public sealed class IndicatorsWindow : Window
         add.Margin = new Thickness(0, 10, 0, 0);
         DockPanel.SetDock(add, Dock.Bottom);
         left.Children.Add(add);
-        _available.DoubleTapped += (_, _) => AddSelected();
+        _available.DoubleTapped += (_, e) =>
+        {
+            if (_available.SelectedItem is ListBoxItem { Tag: IndicatorInfo }) AddSelected();
+        };
+        _available.KeyDown += (_, e) =>
+        {
+            if (e.KeyModifiers != KeyModifiers.Alt || e.Key is not (Key.Up or Key.Down)) return;
+            if (_available.SelectedItem is not ListBoxItem { Tag: IndicatorInfo info } || (_search.Text ?? "").Trim().Length > 0) return;
+            ShiftSelected(info, e.Key == Key.Up ? -1 : +1);
+            e.Handled = true;
+        };
         _available.Margin = new Thickness(0, 8, 0, 0);
         left.Children.Add(Ui.Card(_available, 4));
         grid.Children.Add(left);
@@ -143,16 +155,37 @@ public sealed class IndicatorsWindow : Window
         _onChart.SelectedItem = _onChart.Items.OfType<ListBoxItem>().FirstOrDefault(i => i.Tag == s);
     }
 
+    private LibraryLayout Layout => _svc.Settings.Library;
+
+    /// <summary>Guarda cómo quedó la biblioteca y la vuelve a mostrar (en esta ventana y en las demás).</summary>
+    private void LibraryChanged()
+    {
+        _svc.Settings.Save();
+        _svc.Catalog.NotifyChanged();
+        _model.Invalidate();
+    }
+
+    private static bool Matches(IndicatorInfo i, string q) =>
+        q.Length == 0 || Indicator.DefaultName(i.Type).Contains(q, StringComparison.CurrentCultureIgnoreCase)
+                      || i.Name.Contains(q, StringComparison.CurrentCultureIgnoreCase) || i.Category.Contains(q, StringComparison.CurrentCultureIgnoreCase)
+                      || TradingHub.Rendering.UiText.Tr(i.Name).Contains(q, StringComparison.CurrentCultureIgnoreCase);
+
     private void FillAvailable()
     {
         var q = (_search.Text ?? "").Trim();
         _available.Items.Clear();
-        var items = _svc.Catalog.Items.Where(i => q.Length == 0 || i.Name.Contains(q, StringComparison.CurrentCultureIgnoreCase) || i.Category.Contains(q, StringComparison.CurrentCultureIgnoreCase)).ToList();
-        _count.Text = $"{items.Count}";
-        foreach (var g in items.GroupBy(i => i.Source == UserScripts.Source ? "★ " + UserScripts.Source : i.Category).OrderBy(g => g.Key.StartsWith('★') ? 0 : 1).ThenBy(g => g.Key))
+        var all = _svc.Catalog.Items;
+        var groups = IndicatorLibrary.Build(all, Layout);
+        int count = 0;
+        foreach (var g in groups)
         {
-            _available.Items.Add(new ListBoxItem { Content = g.Key.ToUpperInvariant(), IsEnabled = false }.Classes("header"));
-            foreach (var i in g)
+            var items = g.Items.Where(i => Matches(i, q)).ToList();
+            if (q.Length > 0 && items.Count == 0) continue; // buscando: solo los grupos con algo
+            count += items.Count;
+            bool collapsed = g.Collapsed && q.Length == 0;
+            _available.Items.Add(GroupHeader(g, collapsed, items.Count));
+            if (collapsed) continue;
+            foreach (var i in items)
             {
                 var row = new DockPanel();
                 // sin etiqueta de origen para los de la biblioteca (Trading Hub y los técnicos); solo los tuyos y los extra
@@ -166,23 +199,273 @@ public sealed class IndicatorsWindow : Window
                     row.Children.Add(badge);
                 }
 
-                row.Children.Add(new TextBlock { Text = i.Name, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
-                var item = new ListBoxItem { Content = row, Tag = i };
-                if (!string.IsNullOrWhiteSpace(i.Description)) ToolTip.SetTip(item, i.Description);
-                item.ContextMenu = LibraryMenu(i);
+                row.Children.Add(new TextBlock { Text = Indicator.DefaultName(i.Type), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
+                var item = new ListBoxItem { Content = row, Tag = i, Padding = new Thickness(18, 4, 8, 4) };
+                string? tip = Layout.Names.ContainsKey(i.Type.FullName!) ? $"{TradingHub.Rendering.UiText.Tr(i.Name)}\n{i.Description}".Trim() : i.Description;
+                if (!string.IsNullOrWhiteSpace(tip)) ToolTip.SetTip(item, tip);
+                item.ContextMenu = LibraryMenu(i, g);
+                if (q.Length == 0) Draggable(item, i);
                 _available.Items.Add(item);
             }
         }
+
+        _count.Text = $"{count}";
+    }
+
+    // ------------------------------------------------------------------ grupos
+
+    private ListBoxItem GroupHeader(LibraryGroup g, bool collapsed, int count)
+    {
+        var chevron = Ui.Icon(collapsed ? MaterialIconKind.ChevronRight : MaterialIconKind.ChevronDown, 15, Ui.Text2);
+        var name = new TextBlock { Text = g.Name.ToUpperInvariant(), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+        var n = new TextBlock { Text = count.ToString(), Classes = { "faint", "small" }, VerticalAlignment = VerticalAlignment.Center };
+        var row = new DockPanel();
+        DockPanel.SetDock(chevron, Dock.Left);
+        chevron.Margin = new Thickness(0, 0, 4, 0);
+        DockPanel.SetDock(n, Dock.Right);
+        row.Children.Add(chevron);
+        row.Children.Add(n);
+        row.Children.Add(name);
+        var header = new ListBoxItem { Content = row, Tag = g, Cursor = new Cursor(StandardCursorType.Hand) };
+        header.Classes.Add("header");
+        ToolTip.SetTip(header, "Clic: abrir o cerrar el grupo · clic derecho: renombrar, ordenar, grupos nuevos · arrastrá indicadores acá para moverlos");
+        header.PointerReleased += (_, e) =>
+        {
+            if (e.InitialPressMouseButton != MouseButton.Left || _dragging) return;
+            IndicatorLibrary.SetCollapsed(Layout, g.Id, !collapsed);
+            LibraryChanged();
+            e.Handled = true;
+        };
+        header.ContextMenu = GroupMenu(g);
+        return header;
+    }
+
+    private ContextMenu GroupMenu(LibraryGroup g)
+    {
+        var all = _svc.Catalog.Items;
+        var items = new List<Control>();
+        MenuItem Item(string text, MaterialIconKind icon, Action run, bool enabled = true)
+        {
+            var mi = new MenuItem { Header = text, Icon = Ui.Icon(icon, 16), IsEnabled = enabled };
+            mi.Click += (_, _) => run();
+            return mi;
+        }
+
+        items.Add(Item("Renombrar el grupo…", MaterialIconKind.RenameOutline, async () =>
+        {
+            var name = await PromptDialog.ShowAsync(this, "Renombrar el grupo", "Nombre del grupo (vacío = el de fábrica)", g.Name, "Renombrar");
+            if (name == null) return;
+            IndicatorLibrary.RenameGroup(Layout, g.Id, name);
+            LibraryChanged();
+        }));
+        items.Add(Item("Grupo nuevo…", MaterialIconKind.FolderPlusOutline, async () =>
+        {
+            var name = await PromptDialog.ShowAsync(this, "Grupo nuevo", "Nombre del grupo (va debajo de este)", "", "Crear");
+            if (string.IsNullOrWhiteSpace(name)) return;
+            IndicatorLibrary.CreateGroup(Layout, all, name, g.Id);
+            LibraryChanged();
+        }));
+        items.Add(new Separator());
+        items.Add(Item("Subir el grupo", MaterialIconKind.ArrowUp, () =>
+        {
+            IndicatorLibrary.ShiftGroup(Layout, all, g.Id, -1);
+            LibraryChanged();
+        }));
+        items.Add(Item("Bajar el grupo", MaterialIconKind.ArrowDown, () =>
+        {
+            IndicatorLibrary.ShiftGroup(Layout, all, g.Id, +1);
+            LibraryChanged();
+        }));
+        items.Add(Item("Ordenar por nombre (A → Z)", MaterialIconKind.SortAlphabeticalAscending, () =>
+        {
+            IndicatorLibrary.SortGroup(Layout, all, g.Id);
+            LibraryChanged();
+        }, g.Items.Count > 1));
+        if (g.IsUser)
+        {
+            items.Add(new Separator());
+            items.Add(Item("Borrar el grupo (sus indicadores vuelven a su grupo de fábrica)", MaterialIconKind.FolderRemoveOutline, () =>
+            {
+                IndicatorLibrary.DeleteGroup(Layout, g.Id);
+                LibraryChanged();
+            }));
+        }
+
+        items.Add(new Separator());
+        items.Add(Item("Volver la biblioteca a como viene de fábrica…", MaterialIconKind.Restore, async () =>
+        {
+            if (!await ConfirmDialog.ShowAsync(this, "Biblioteca de fábrica", "Se borran los grupos nuevos, el orden y los nombres que pusiste. Los indicadores de los gráficos no cambian.", "Volver a fábrica", danger: true)) return;
+            IndicatorLibrary.Reset(Layout);
+            LibraryChanged();
+        }));
+        return new ContextMenu { ItemsSource = items };
+    }
+
+    /// <summary>Lo de la biblioteca de un indicador: renombrarlo, moverlo a otro grupo, subirlo o bajarlo.</summary>
+    private List<Control> OrganizeItems(IndicatorInfo i, LibraryGroup current)
+    {
+        var all = _svc.Catalog.Items;
+        string type = i.Type.FullName!;
+        var res = new List<Control>();
+        var rename = new MenuItem { Header = "Renombrar…", Icon = Ui.Icon(MaterialIconKind.RenameOutline, 16) };
+        rename.Click += async (_, _) =>
+        {
+            var name = await PromptDialog.ShowAsync(this, "Renombrar indicador", $"Nombre en la biblioteca y en los gráficos (vacío = «{TradingHub.Rendering.UiText.Tr(i.Name)}»)", Indicator.DefaultName(i.Type), "Renombrar");
+            if (name == null) return;
+            IndicatorLibrary.Rename(Layout, type, name);
+            LibraryChanged();
+            FillOnChart();
+        };
+        res.Add(rename);
+        if (Layout.Names.ContainsKey(type))
+        {
+            var back = new MenuItem { Header = $"Volver al nombre de fábrica («{TradingHub.Rendering.UiText.Tr(i.Name)}»)", Icon = Ui.Icon(MaterialIconKind.Restore, 16) };
+            back.Click += (_, _) =>
+            {
+                IndicatorLibrary.Rename(Layout, type, null);
+                LibraryChanged();
+                FillOnChart();
+            };
+            res.Add(back);
+        }
+
+        var move = new MenuItem { Header = "Mover al grupo", Icon = Ui.Icon(MaterialIconKind.FolderMoveOutline, 16) };
+        var groups = new List<Control>();
+        foreach (var g in IndicatorLibrary.Build(all, Layout))
+        {
+            if (g.Id == current.Id) continue;
+            var mi = new MenuItem { Header = g.Name };
+            var id = g.Id;
+            mi.Click += (_, _) =>
+            {
+                IndicatorLibrary.Move(Layout, all, type, id, null);
+                LibraryChanged();
+            };
+            groups.Add(mi);
+        }
+
+        groups.Add(new Separator());
+        var fresh = new MenuItem { Header = "Grupo nuevo…", Icon = Ui.Icon(MaterialIconKind.FolderPlusOutline, 16) };
+        fresh.Click += async (_, _) =>
+        {
+            var name = await PromptDialog.ShowAsync(this, "Grupo nuevo", "Nombre del grupo nuevo", "", "Crear y mover");
+            if (string.IsNullOrWhiteSpace(name)) return;
+            var id = IndicatorLibrary.CreateGroup(Layout, all, name, current.Id);
+            IndicatorLibrary.Move(Layout, all, type, id, null);
+            LibraryChanged();
+        };
+        groups.Add(fresh);
+        move.ItemsSource = groups;
+        res.Add(move);
+        var up = new MenuItem { Header = "Subir", Icon = Ui.Icon(MaterialIconKind.ArrowUp, 16), InputGesture = new KeyGesture(Key.Up, KeyModifiers.Alt) };
+        up.Click += (_, _) => ShiftSelected(i, -1);
+        var down = new MenuItem { Header = "Bajar", Icon = Ui.Icon(MaterialIconKind.ArrowDown, 16), InputGesture = new KeyGesture(Key.Down, KeyModifiers.Alt) };
+        down.Click += (_, _) => ShiftSelected(i, +1);
+        res.Add(up);
+        res.Add(down);
+        return res;
+    }
+
+    private void ShiftSelected(IndicatorInfo i, int delta)
+    {
+        IndicatorLibrary.Shift(Layout, _svc.Catalog.Items, i.Type.FullName!, delta);
+        LibraryChanged();
+        _available.SelectedItem = _available.Items.OfType<ListBoxItem>().FirstOrDefault(x => ReferenceEquals(x.Tag, i));
+    }
+
+    // ------------------------------------------------------------------ arrastrar para ordenar
+
+    private IndicatorInfo? _dragFrom;
+    private Point _dragStart;
+    private bool _dragging;
+    private ListBoxItem? _dropOn;
+
+    private void Draggable(ListBoxItem item, IndicatorInfo info)
+    {
+        item.PointerPressed += (_, e) =>
+        {
+            if (!e.GetCurrentPoint(item).Properties.IsLeftButtonPressed) return;
+            _dragFrom = info;
+            _dragStart = e.GetPosition(_available);
+            _dragging = false;
+        };
+        item.PointerMoved += (_, e) =>
+        {
+            if (_dragFrom == null || !e.GetCurrentPoint(item).Properties.IsLeftButtonPressed) return;
+            var p = e.GetPosition(_available);
+            if (!_dragging && Math.Abs(p.Y - _dragStart.Y) + Math.Abs(p.X - _dragStart.X) < 7) return;
+            _dragging = true;
+            ShowDrop(TargetAt(p));
+        };
+        item.PointerReleased += (_, e) =>
+        {
+            var from = _dragFrom;
+            bool dragging = _dragging;
+            _dragFrom = null;
+            _dragging = false;
+            ShowDrop(null);
+            if (from == null || !dragging) return;
+            var target = TargetAt(e.GetPosition(_available));
+            e.Handled = true;
+            Drop(from, target);
+        };
+    }
+
+    private ListBoxItem? TargetAt(Point p)
+    {
+        var hit = _available.InputHitTest(p) as Visual;
+        return hit as ListBoxItem ?? hit?.GetVisualAncestors().OfType<ListBoxItem>().FirstOrDefault();
+    }
+
+    private void ShowDrop(ListBoxItem? target)
+    {
+        if (ReferenceEquals(_dropOn, target)) return;
+        if (_dropOn != null)
+        {
+            _dropOn.BorderThickness = new Thickness(0);
+            _dropOn.BorderBrush = null;
+        }
+
+        _dropOn = target;
+        if (target == null) return;
+        target.BorderBrush = Ui.Accent;
+        target.BorderThickness = new Thickness(0, 2, 0, 0); // se suelta antes de este
+    }
+
+    private void Drop(IndicatorInfo from, ListBoxItem? target)
+    {
+        var all = _svc.Catalog.Items;
+        string type = from.Type.FullName!;
+        switch (target?.Tag)
+        {
+            case IndicatorInfo before when !ReferenceEquals(before, from):
+            {
+                var g = IndicatorLibrary.Build(all, Layout).FirstOrDefault(x => x.Items.Contains(before));
+                if (g == null) return;
+                IndicatorLibrary.Move(Layout, all, type, g.Id, before.Type.FullName);
+                break;
+            }
+            case LibraryGroup g:
+                IndicatorLibrary.Move(Layout, all, type, g.Id, null);
+                break;
+            default:
+                return;
+        }
+
+        LibraryChanged();
+        _available.SelectedItem = _available.Items.OfType<ListBoxItem>().FirstOrDefault(x => ReferenceEquals(x.Tag, from));
     }
 
     /// <summary>Clic derecho en la biblioteca: ver el código, copiarlo como propio, editarlo o borrarlo.</summary>
-    private ContextMenu LibraryMenu(IndicatorInfo i)
+    private ContextMenu LibraryMenu(IndicatorInfo i, LibraryGroup group)
     {
         var menu = new ContextMenu();
         var items = new List<Control>();
         var add = new MenuItem { Header = "Agregar al gráfico", Icon = Ui.Icon(MaterialIconKind.Plus, 16) };
         add.Click += (_, _) => AddIndicator(i);
         items.Add(add);
+        items.Add(new Separator());
+        items.AddRange(OrganizeItems(i, group));
         items.Add(new Separator());
         bool own = i.Source == UserScripts.Source;
         string? replaces = IndicatorCatalog.ReplacedBy(i.Type);

@@ -105,7 +105,7 @@ public sealed class IndicatorCatalog
         {
             if (t.IsAbstract || !typeof(Indicator).IsAssignableFrom(t) || t.GetConstructor(Type.EmptyTypes) == null) continue;
             if (t.GetCustomAttribute<BrowsableAttribute>() is { Browsable: false }) continue;
-            string name = Indicator.DefaultName(t);
+            string name = Indicator.FactoryName(t);
             string cat = t.GetCustomAttribute<CategoryAttribute>()?.Category ?? IndicatorCategories.Other;
             string desc = "";
             try { desc = t.GetCustomAttribute<System.ComponentModel.DataAnnotations.DisplayAttribute>()?.GetDescription() ?? t.GetCustomAttribute<DescriptionAttribute>()?.Description ?? ""; }
@@ -168,6 +168,9 @@ public sealed class AppSettings
 
     /// <summary>Indicadores de la biblioteca quitados de la lista (tipo completo).</summary>
     public List<string> HiddenIndicators { get; set; } = new();
+
+    /// <summary>Cómo armó el usuario la biblioteca: grupos, orden y nombres de los indicadores.</summary>
+    public LibraryLayout Library { get; set; } = new();
 
     /// <summary>Plantilla con la que arranca cada indicador nuevo (tipo del indicador → nombre de la plantilla).</summary>
     public Dictionary<string, string> DefaultIndicatorTemplates { get; set; } = new();
@@ -490,6 +493,7 @@ public sealed class AppServices
         KlineHistory.EstimateDeltaFromShape = Settings.EstimateDeltaFromShape;
         StatsProvider.SetSource(Statistics);
         foreach (var h in Settings.HiddenIndicators) Catalog.Hidden.Add(h);
+        Indicator.SetRenamed(Settings.Library.Names);
         Catalog.Scan(typeof(TradingHub.Indicators.Native.BigTrades).Assembly, "Trading Hub");
         // los indicadores técnicos, si vienen en esta versión (la de código abierto no los trae)
         try

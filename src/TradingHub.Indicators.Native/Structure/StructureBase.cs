@@ -69,14 +69,21 @@ public abstract class StructureIndicator : Indicator
         try
         {
             Compute();
+            ComputeError = null;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // un cálculo que falla no tira el gráfico: queda lo anterior
+            ComputeError = ex.ToString();
         }
 
         RedrawChart();
     }
+
+    /// <summary>El error del último cálculo (null si anduvo).</summary>
+    [System.ComponentModel.Browsable(false)]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? ComputeError { get; private set; }
 
     /// <summary>Recalcula la estructura con <see cref="Bars"/>.</summary>
     protected abstract void Compute();

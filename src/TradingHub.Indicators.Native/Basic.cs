@@ -14,7 +14,7 @@ public enum MaType
 
 /// <summary>Media móvil simple, exponencial o ponderada.</summary>
 [DisplayName("Media móvil")]
-[Category(IndicatorCategories.Trend)]
+[Category(IndicatorCategories.MovingAverages)]
 public class MovingAverage : Indicator
 {
     private readonly ValueDataSeries _ma = new("MA", "Media") { Color = Color.FromArgb(255, 255, 196, 0), Width = 2 };
@@ -77,7 +77,7 @@ public enum VwapAnchor
 
 [Browsable(false)] // forma parte de «VWAP (bandas σ · Claire · VP definitivo)»
 [DisplayName("VWAP con desvíos")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.Vwap)]
 [Description("VWAP anclado a la sesión, la semana o el mes con hasta tres bandas de desvío estándar ponderado por volumen.")]
 public class SessionVwap : Indicator
 {
@@ -192,7 +192,7 @@ public class SessionVwap : Indicator
 
 /// <summary>Volumen por vela, coloreado según el delta.</summary>
 [DisplayName("Volumen")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.Volume)]
 public class VolumeBars : Indicator
 {
     private readonly ValueDataSeries _vol = new("Volume", "Volumen") { VisualType = VisualMode.Histogram, Color = Color.FromArgb(255, 110, 120, 140) };
@@ -223,7 +223,7 @@ public class VolumeBars : Indicator
 
 /// <summary>Delta por vela (compras agresivas − ventas agresivas).</summary>
 [DisplayName("Delta")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.OrderFlow)]
 public class DeltaBars : Indicator
 {
     public enum DeltaView
@@ -277,7 +277,7 @@ public class DeltaBars : Indicator
 
 /// <summary>Delta acumulado (CVD) en velas.</summary>
 [DisplayName("Delta acumulado (CVD)")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.OrderFlow)]
 public class CumulativeDeltaCandles : Indicator
 {
     private readonly CandleDataSeries _cvd = new("CVD", "Delta acumulado") { DrawCandleBorder = false };
@@ -394,7 +394,7 @@ public class Macd : Indicator
 
 /// <summary>Bandas de Bollinger.</summary>
 [DisplayName("Bandas de Bollinger")]
-[Category(IndicatorCategories.Trend)]
+[Category(IndicatorCategories.Volatility)]
 public class Bollinger : Indicator
 {
     private readonly ValueDataSeries _mid = new("Mid", "Media") { Color = Color.FromArgb(220, 200, 200, 210) };

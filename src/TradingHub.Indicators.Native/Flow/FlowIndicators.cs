@@ -147,7 +147,7 @@ internal static class FlowText
 /// qué mercado, nunca compra o venta. Funciona con la conexión «Agregado» (un exchange por fila).
 /// </summary>
 [DisplayName("Flujo por exchange (ranking, spot / perpetuos)")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.OrderFlow)]
 [Description("La columna de flujo de LiquidityMapperFast: flujo agresor acumulado de cada exchange (ordenados por volumen), spot y perpetuos por separado, la fila de todos y lámparas de 1/5/15/60 min y por tamaño de operación.")]
 public class FlowByExchange : Indicator
 {
@@ -549,7 +549,7 @@ public class FlowByExchange : Indicator
 /// abierto. Cada celda se sombrea por magnitud (escala log entre el 2 y el 99 % de lo visible).
 /// </summary>
 [DisplayName("Estadísticas por vela (tira de LMF)")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.OrderFlow)]
 [Description("Tabla bajo el gráfico con una columna por vela: volumen, delta, CVD, compras/ventas, desequilibrios, operaciones, minoristas y ballenas, rango.")]
 public class BarStatsStrip : Indicator
 {
@@ -737,7 +737,7 @@ public class BarStatsStrip : Indicator
 /// cerraron; la línea es la suma (el posicionamiento neto de los que operan a mercado). Es una estimación, no una señal.
 /// </summary>
 [DisplayName("NL/NS: largos y cortos nuevos (interés abierto + delta)")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.Derivatives)]
 [Description("Estima largos nuevos, cortos nuevos y cierres con el cambio del interés abierto (Binance + Bybit) y el delta de cada vela.")]
 public class PositioningNlNs : Indicator
 {

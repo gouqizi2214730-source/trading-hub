@@ -12,7 +12,7 @@ namespace TradingHub.Indicators.Native;
 /// </summary>
 [Browsable(false)]
 [DisplayName("Perfil de volumen por sesión")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.VolumeProfile)]
 public class SessionVolumeProfile : Indicator
 {
     public enum ProfilePeriod

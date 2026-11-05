@@ -158,14 +158,38 @@ namespace TradingHub.Indicators
         [JsonIgnore]
         public string Name
         {
-            get => _name ??= DefaultName(GetType());
+            // sin guardar el de fábrica: si se renombra en la biblioteca, cambia también en los gráficos abiertos
+            get => _name ?? DefaultName(GetType());
             set => _name = value;
         }
 
-        public static string DefaultName(Type t)
+        /// <summary>El nombre de fábrica (su DisplayName), sin el que le haya puesto el usuario.</summary>
+        public static string FactoryName(Type t)
         {
             var dn = t.GetCustomAttribute<DisplayNameAttribute>()?.DisplayName;
             return string.IsNullOrWhiteSpace(dn) ? t.Name : dn;
+        }
+
+        /// <summary>Los nombres que el usuario les puso en la biblioteca (nombre completo del tipo → nombre).</summary>
+        public static IReadOnlyDictionary<string, string> Renamed { get; private set; } = new Dictionary<string, string>();
+
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, string> FactoryNames = new();
+
+        /// <summary>Cambia los nombres puestos por el usuario (la biblioteca los guarda en sus ajustes).</summary>
+        public static void SetRenamed(IReadOnlyDictionary<string, string> names) => Renamed = new Dictionary<string, string>(names);
+
+        public static string DefaultName(Type t)
+        {
+            var renamed = Renamed;
+            if (renamed.Count > 0 && t.FullName is { } full)
+            {
+                if (renamed.TryGetValue(full, out var n) && !string.IsNullOrWhiteSpace(n)) return n;
+                // una copia editada de la biblioteca se llama como el original renombrado
+                var orig = t.GetCustomAttribute<ReplacesIndicatorAttribute>()?.FullName;
+                if (orig != null && renamed.TryGetValue(orig, out var o) && !string.IsNullOrWhiteSpace(o)) return o;
+            }
+
+            return FactoryNames.GetOrAdd(t, FactoryName);
         }
 
         [Browsable(false)]

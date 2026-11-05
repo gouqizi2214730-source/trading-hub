@@ -67,7 +67,7 @@ internal static class BookTools
 /// estuvo abierto en vivo).
 /// </summary>
 [DisplayName("Cambios del libro (agregado / retirado)")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.OrderBook)]
 [Description("Escalera de Order Book Changes: por precio, lo agregado y lo retirado del libro (bid y ask) en la ventana elegida, separando lo operado. Para detectar apilamientos, retiros (spoof) y absorción.")]
 public class OrderBookChanges : Indicator
 {
@@ -321,7 +321,7 @@ public class OrderBookChanges : Indicator
 /// como posible spoof (S) y las que se corrieron siguiendo al precio como chasing (C, con una flecha a donde se fueron).
 /// </summary>
 [DisplayName("Órdenes grandes del libro (spoof / chasing)")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.OrderBook)]
 [Description("Órdenes límite grandes del libro: cuándo aparecen y cuánto duran; marca las retiradas sin operarse (posible spoof) y las que persiguen al precio (chasing). Usa las fotos del libro del mapa de calor.")]
 public class LargeBookOrders : Indicator
 {

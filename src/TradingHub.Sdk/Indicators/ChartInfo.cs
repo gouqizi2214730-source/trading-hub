@@ -179,16 +179,47 @@ namespace TradingHub.Indicators
     /// <summary>Categorías de indicadores (para el listado de la UI).</summary>
     public static class IndicatorCategories
     {
-        public const string VolumeOrderFlow = "Volumen / Order flow";
+        // los grupos de la biblioteca, en su orden (01 a 15, como los de openmarket)
+        public const string MovingAverages = "Medias móviles";
+        public const string TrendStrength = "Seguimiento y fuerza de tendencia";
+        public const string Oscillators = "Osciladores";
+        public const string Volatility = "Volatilidad y canales";
+        public const string Volume = "Volumen";
+        public const string OrderFlow = "Order flow (delta, CVD, footprint)";
+        public const string VolumeProfile = "Perfil de volumen";
+        public const string Vwap = "VWAP";
         public const string OrderBook = "Libro de órdenes";
+        public const string Derivatives = "Derivados (interés abierto, liquidaciones, largos y cortos)";
+        public const string Options = "Opciones";
+        public const string Structure = "Estructura de mercado y niveles clave";
+        public const string Patterns = "Velas y patrones";
+        public const string Sessions = "Sesiones";
+        public const string Macro = "Macro y otras herramientas";
+
+        // de antes (los indicadores propios que ya los usan caen en el grupo nuevo que corresponde)
+        public const string VolumeOrderFlow = "Volumen / Order flow";
+        public const string Trend = "Tendencia";
+        public const string Levels = "Niveles";
         public const string Trading = "Trading";
         public const string Samples = "Ejemplos";
-        public const string Trend = "Tendencia";
-        public const string Oscillators = "Osciladores";
-        public const string Levels = "Niveles";
-        public const string Structure = "Estructura (SMC / ICT)";
         public const string Other = "Otros";
         public const string Custom = "Personalizados";
+
+        /// <summary>Los grupos en el orden de la biblioteca.</summary>
+        public static readonly string[] Order =
+        {
+            MovingAverages, TrendStrength, Oscillators, Volatility, Volume, OrderFlow, VolumeProfile, Vwap, OrderBook, Derivatives,
+            Options, Structure, Patterns, Sessions, Macro,
+        };
+
+        /// <summary>El grupo nuevo de una categoría de antes (o la misma).</summary>
+        public static string Normalize(string category) => category switch
+        {
+            VolumeOrderFlow => OrderFlow,
+            Trend => TrendStrength,
+            Levels or "Estructura (SMC / ICT)" => Structure,
+            _ => category,
+        };
     }
 
     /// <summary>Colores por defecto (paleta estándar).</summary>

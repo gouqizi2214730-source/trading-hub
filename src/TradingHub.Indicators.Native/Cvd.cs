@@ -13,7 +13,7 @@ namespace TradingHub.Indicators.Native;
 /// precio hace un máximo más alto y el CVD no, o al revés) marcadas en el panel.
 /// </summary>
 [DisplayName("CVD (delta acumulado)")]
-[Category(IndicatorCategories.VolumeOrderFlow)]
+[Category(IndicatorCategories.OrderFlow)]
 [Description("Delta acumulado como línea, área, velas, histograma o escalones; reinicio por sesión, semana o mes; media móvil y divergencias con el precio.")]
 public class Cvd : Indicator
 {
