@@ -117,6 +117,24 @@ public class IndicatorLevelAlertTests
         Assert.NotNull(hit);
         Assert.StartsWith(ChartAlertEngine.LevelPrefix, hit!.Series);
 
+        // donde la dibuja el indicador (un precio de nivel va al centro de su fila): ahí también la captura
+        float drawnY = ((TradingHub.Indicators.IChartContainer)layout.Main).GetYByPrice(lv.Price, false);
+        var hit2 = ChartAlertEngine.LineAt(model, x, drawnY, 10);
+        Assert.NotNull(hit2);
+        Assert.Equal(lv.Price, ChartAlertEngine.LevelOf(model, hit2!)!.Value.Price);
+
+        // resaltada como un dibujo elegido
+        model.HighlightedLine = hit2;
+        new TradingHub.Charting.Rendering.ChartRenderer().Render(surface.Canvas, model, 1200, 700, new TradingHub.Charting.Rendering.ChartRenderState());
+
+        // la etiqueta con las partes elegidas
+        npoc.LabelPeriod = false;
+        npoc.LabelDate = false;
+        npoc.LabelPrice = true;
+        Assert.True(npoc.ShowLabel);
+        npoc.ShowLabel = false;
+        Assert.False(npoc.LabelPrice);
+
         // y la alerta «toca» se evalúa
         var a = new ChartAlert { Left = AlertOperand.Price(), Condition = AlertCondition.Touching, Right = op };
         Assert.NotNull(ChartAlertEngine.Check(model, a, Math.Max(bar, 1)));

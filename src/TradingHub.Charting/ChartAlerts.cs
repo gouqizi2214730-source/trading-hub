@@ -239,7 +239,9 @@ public static class ChartAlertEngine
             foreach (var l in Levels(slot))
             {
                 if (exact < l.FromBar - 0.5 || (l.ToBar != int.MaxValue && exact > l.ToBar + 1)) continue;
-                float d = Math.Abs(panel.Y(l.Price) - y);
+                // donde la dibuja el indicador: un precio de nivel va al centro visual de su fila (GetYByPrice), no a Y(precio)
+                float ly = ((TradingHub.Indicators.IChartContainer)panel).GetYByPrice(l.Price, false);
+                float d = Math.Min(Math.Abs(ly - y), Math.Abs(panel.Y(l.Price) - y));
                 if (d > bestD) continue;
                 bestD = d;
                 best = new AlertOperand { Indicator = key, Series = LevelPrefix + l.Id, Label = $"{slot.Indicator.Name} · {l.Name}" };
@@ -247,6 +249,18 @@ public static class ChartAlertEngine
         }
 
         return best;
+    }
+
+    /// <summary>El nivel dibujado a mano de un operando («level:…»), o null si no es uno o ya no está.</summary>
+    public static IndicatorLevel? LevelOf(ChartModel model, AlertOperand op)
+    {
+        if (op.Indicator == null || op.Series is not { } ser || !ser.StartsWith(LevelPrefix, StringComparison.Ordinal)) return null;
+        var slot = SlotOf(model, op.Indicator);
+        if (slot == null) return null;
+        string id = ser[LevelPrefix.Length..];
+        foreach (var l in Levels(slot))
+            if (l.Id == id) return l;
+        return null;
     }
 
     public static bool TryValue(ChartModel model, AlertOperand op, int bar, out decimal value)

@@ -344,6 +344,15 @@ public class VpProfile : VpIndicator
     [Range(1, 6)]
     public int NakedWidth { get; set; } = 1;
 
+    [Display(Name = "Etiqueta: período (D / W / M / Y)", GroupName = "POC vírgenes (naked POC)", Order = 470)]
+    public bool NakedLabelPeriod { get; set; } = true;
+
+    [Display(Name = "Etiqueta: fecha", GroupName = "POC vírgenes (naked POC)", Order = 471)]
+    public bool NakedLabelDate { get; set; } = true;
+
+    [Display(Name = "Etiqueta: precio", GroupName = "POC vírgenes (naked POC)", Order = 472)]
+    public bool NakedLabelPrice { get; set; }
+
     // ------------------------------------------------------------------ períodos y uniones
 
     private bool Developing => _showDeveloping || _period == VpProfilePeriod.All;
@@ -784,7 +793,7 @@ public class VpProfile : VpIndicator
         for (int i = 0; i < _done.Count; i++) Draw(context, _done[i], first, last, true, i >= pocFrom, i >= tailFrom, tailRef);
         if (Developing && _developing != null) Draw(context, _developing, first, last, false, true, false, tailRef);
         if (_naked.Enabled.Any(e => e))
-            VpNakedPoc.Render(this, context, _naked, new[] { NakedDailyColor, NakedWeeklyColor, NakedMonthlyColor, NakedYearlyColor }, NakedShowTouched, NakedWidth, LineDashStyle.Solid, true, 50);
+            VpNakedPoc.Render(this, context, _naked, new[] { NakedDailyColor, NakedWeeklyColor, NakedMonthlyColor, NakedYearlyColor }, NakedShowTouched, NakedWidth, LineDashStyle.Solid, NakedLabelPeriod, NakedLabelDate, NakedLabelPrice, 50);
 
         // el inicio marcado para unir: recuadro punteado
         if (_head is { } head && CurrentBar > 0)

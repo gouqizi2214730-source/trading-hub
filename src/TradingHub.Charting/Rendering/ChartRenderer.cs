@@ -129,6 +129,7 @@ public sealed class ChartRenderer
         if (model.Strategies.Count > 0) DrawStrategySignals(canvas, model, layout);
         if (model.Settings.ShowTradeMarks) DrawTradeMarks(canvas, model, layout);
         if (model.FocusTrade != null) DrawFocusTrade(canvas, model, layout, state);
+        if (model.HighlightedLine != null) DrawHighlightedLine(canvas, model, layout);
         DrawTrading(canvas, model, layout, state);
         DrawTimeAxis(canvas, model, layout, timeTicks, state);
         DrawPanelTitles(canvas, model, layout, state);
@@ -1541,6 +1542,25 @@ public sealed class ChartRenderer
 
         canvas.DrawLine(cx + 6, cy - 5, cx + 6, cy + 5, p);
         state.GoLatestButton = r;
+    }
+
+    /// <summary>La línea de indicador elegida con el clic derecho (para una alerta): resaltada como un dibujo elegido.</summary>
+    private void DrawHighlightedLine(SKCanvas canvas, ChartModel model, ChartLayout layout)
+    {
+        if (ChartAlertEngine.LevelOf(model, model.HighlightedLine!) is not { } lv) return;
+        var main = layout.Main;
+        float y = ((TradingHub.Indicators.IChartContainer)main).GetYByPrice(lv.Price, false);
+        if (y < main.Rect.Top || y > main.Rect.Bottom) return;
+        float x0 = Math.Max(main.Rect.Left, layout.CenterX(Math.Max(0, lv.FromBar)) - (float)(model.Viewport.BarWidth / 2));
+        float x1 = lv.ToBar == int.MaxValue ? main.Rect.Right : Math.Min(main.Rect.Right, layout.CenterX(lv.ToBar) + (float)(model.Viewport.BarWidth / 2));
+        if (x1 <= x0) return;
+        using var glow = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 6, Color = new SKColor(242, 181, 58, 90) };
+        using var line = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f, Color = new SKColor(242, 181, 58, 255) };
+        canvas.DrawLine(x0, y, x1, y, glow);
+        canvas.DrawLine(x0, y, x1, y, line);
+        using var dot = new SKPaint { IsAntialias = true, Color = new SKColor(242, 181, 58) };
+        canvas.DrawCircle(x0, y, 3.5f, dot);
+        canvas.DrawCircle(x1 - 1, y, 3.5f, dot);
     }
 
     private void DrawCrosshair(SKCanvas canvas, ChartModel model, ChartLayout layout, ChartRenderState state)

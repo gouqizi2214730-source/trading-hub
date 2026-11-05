@@ -4506,5 +4506,9 @@
  "El DOM no opera: las órdenes van desde el Chart Trader o el gráfico.": "DOM 不能下单：下单请用 Chart Trader 或在图表上。",
  "Mostrar solo operaciones de al menos este tamaño (USD)": "只显示不小于这个金额的成交（USD）",
  "Alerta cuando el precio cruce «{0}»": "价格穿过「{0}」时警报",
- "Alerta creada: el precio cruza «{0}»": "已创建警报：价格穿过「{0}」"
+ "Alerta creada: el precio cruza «{0}»": "已创建警报：价格穿过「{0}」",
+ "Etiqueta: período (D / W / M / Y)": "标签：周期（D / W / M / Y）",
+ "Etiqueta: fecha": "标签：日期",
+ "Etiqueta: precio": "标签：价格",
+ "Etiqueta": "标签"
 }

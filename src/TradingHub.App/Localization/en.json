@@ -4506,5 +4506,9 @@
  "El DOM no opera: las órdenes van desde el Chart Trader o el gráfico.": "The DOM doesn't trade: orders go from the Chart Trader or the chart.",
  "Mostrar solo operaciones de al menos este tamaño (USD)": "Show only trades of at least this size (USD)",
  "Alerta cuando el precio cruce «{0}»": "Alert when the price crosses «{0}»",
- "Alerta creada: el precio cruza «{0}»": "Alert created: the price crosses «{0}»"
+ "Alerta creada: el precio cruza «{0}»": "Alert created: the price crosses «{0}»",
+ "Etiqueta: período (D / W / M / Y)": "Label: period (D / W / M / Y)",
+ "Etiqueta: fecha": "Label: date",
+ "Etiqueta: precio": "Label: price",
+ "Etiqueta": "Label"
 }

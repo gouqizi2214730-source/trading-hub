@@ -172,6 +172,10 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
     /// <summary>Dibujos del gráfico. Los gráficos del mismo instrumento comparten la misma lista (se sincronizan).</summary>
     public List<Drawings.ChartDrawing> Drawings { get; set; } = new();
 
+    /// <summary>Línea de indicador elegida con el clic derecho (se resalta mientras está abierto su menú).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public AlertOperand? HighlightedLine { get; set; }
+
     /// <summary>Alertas sobre el precio y las líneas de los indicadores de este gráfico (ver <see cref="ChartAlertEngine"/>).</summary>
     public List<ChartAlert> Alerts { get; set; } = new();
 

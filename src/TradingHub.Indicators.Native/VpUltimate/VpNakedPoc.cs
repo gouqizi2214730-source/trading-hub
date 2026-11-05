@@ -229,8 +229,26 @@ public class VpNakedPoc : VpIndicator
     [Display(Name = "Estilo", GroupName = "Visualización", Order = 70)]
     public LineDashStyle Style { get; set; } = LineDashStyle.Solid;
 
-    [Display(Name = "Etiqueta (período y fecha)", GroupName = "Visualización", Order = 80)]
-    public bool ShowLabel { get; set; } = true;
+    [Display(Name = "Etiqueta: período (D / W / M / Y)", GroupName = "Etiqueta", Order = 80)]
+    public bool LabelPeriod { get; set; } = true;
+
+    [Display(Name = "Etiqueta: fecha", GroupName = "Etiqueta", Order = 81)]
+    public bool LabelDate { get; set; } = true;
+
+    [Display(Name = "Etiqueta: precio", GroupName = "Etiqueta", Order = 82)]
+    public bool LabelPrice { get; set; }
+
+    /// <summary>Formato viejo (una sola casilla): apagada, apaga las tres partes de la etiqueta.</summary>
+    [Browsable(false)]
+    public bool ShowLabel
+    {
+        get => LabelPeriod || LabelDate || LabelPrice;
+        set
+        {
+            if (value) return;
+            LabelPeriod = LabelDate = LabelPrice = false;
+        }
+    }
 
     [Display(Name = "Máximo de líneas por período", GroupName = "Visualización", Order = 90)]
     [Range(1, 500)]
@@ -240,7 +258,25 @@ public class VpNakedPoc : VpIndicator
 
     protected override void Commit(int bar) => _engine.Commit(bar, NewPeriod, GetCandle, BarLength);
 
-    public static void Render(VpIndicator owner, RenderContext ctx, NakedPocEngine engine, Color[] colors, bool showTouched, int width, LineDashStyle style, bool label, int maxPerPeriod)
+    /// <summary>La etiqueta de un POC virgen con las partes elegidas (período, fecha, precio); vacía si no hay ninguna.</summary>
+    public static string Label(VpIndicator owner, NakedPocEngine.Level lv, bool period, bool date, bool price)
+    {
+        var parts = new List<string>();
+        if (period) parts.Add(NakedPocEngine.Code(lv.Period) + " NPOC");
+        else if (date || price) parts.Add("NPOC");
+        if (date) parts.Add(lv.Start.ToString(lv.Period is VpPeriod.Day or VpPeriod.Week ? "dd/MM" : lv.Period == VpPeriod.Month ? "MM/yyyy" : "yyyy"));
+        if (price)
+        {
+            decimal tick = owner.InstrumentInfo is { InstrumentTickSize: > 0 } ii ? ii.InstrumentTickSize : owner.InstrumentInfo?.TickSize ?? 0.01m;
+            int dec = (decimal.GetBits(tick / 1.0000000000000000000000000000m)[3] >> 16) & 0xFF;
+            parts.Add(lv.Price.ToString("N" + dec, System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        return string.Join(" ", parts);
+    }
+
+    public static void Render(VpIndicator owner, RenderContext ctx, NakedPocEngine engine, Color[] colors, bool showTouched, int width, LineDashStyle style,
+        bool labelPeriod, bool labelDate, bool labelPrice, int maxPerPeriod)
     {
         if (owner.ChartInfo == null) return;
         var info = owner.ChartInfo;
@@ -261,15 +297,15 @@ public class VpNakedPoc : VpIndicator
             int y = info.GetYByPrice(lv.Price, false);
             var color = lv.Touched ? Vp.Alpha(colors[k], 110) : colors[k];
             ctx.DrawLine(Vp.Pen(color, width, style), x0, y, x1, y);
-            if (!label) continue;
-            string text = NakedPocEngine.Code(lv.Period) + " NPOC " + lv.Start.ToString(lv.Period == VpPeriod.Day ? "dd/MM" : lv.Period == VpPeriod.Week ? "dd/MM" : lv.Period == VpPeriod.Month ? "MM/yyyy" : "yyyy");
+            string text = Label(owner, lv, labelPeriod, labelDate, labelPrice);
+            if (text.Length == 0) continue;
             var size = ctx.MeasureString(text, font);
             ctx.DrawString(text, font, color, Math.Min(x0 + 4, xRight - size.Width - 4), y - size.Height - 1);
         }
     }
 
     protected override void OnRender(RenderContext context, DrawingLayouts layout) =>
-        Render(this, context, _engine, new[] { DailyColor, WeeklyColor, MonthlyColor, YearlyColor }, ShowTouched, Width, Style, ShowLabel, MaxPerPeriod);
+        Render(this, context, _engine, new[] { DailyColor, WeeklyColor, MonthlyColor, YearlyColor }, ShowTouched, Width, Style, LabelPeriod, LabelDate, LabelPrice, MaxPerPeriod);
 
     /// <summary>Los POC vírgenes que se ven (los mismos que dibuja), para poner alertas sobre ellos.</summary>
     public static IEnumerable<IndicatorLevel> Levels(VpIndicator owner, NakedPocEngine engine, bool showTouched, int maxPerPeriod)
@@ -285,8 +321,7 @@ public class VpNakedPoc : VpIndicator
             if (shown[k] >= maxPerPeriod) continue;
             shown[k]++;
             string code = NakedPocEngine.Code(lv.Period);
-            string date = lv.Start.ToString(lv.Period is VpPeriod.Day or VpPeriod.Week ? "dd/MM" : lv.Period == VpPeriod.Month ? "MM/yyyy" : "yyyy");
-            yield return new IndicatorLevel(code + lv.Start.Ticks, code + " NPOC " + date, lv.Price, Math.Min(lv.EndBar + 1, last), lv.Touched ? lv.TouchBar : int.MaxValue);
+            yield return new IndicatorLevel(code + lv.Start.Ticks, Label(owner, lv, true, true, true), lv.Price, Math.Min(lv.EndBar + 1, last), lv.Touched ? lv.TouchBar : int.MaxValue);
         }
     }
 

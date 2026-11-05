@@ -1035,6 +1035,9 @@ public sealed partial class TradingView
         // alertas como en TradingView: la línea de un indicador bajo el mouse (un POC virgen, un VWAP…) se captura y la
         // alerta queda sobre esa línea, no sobre el precio del mouse
         var snapped = layout != null ? ChartAlertEngine.LineAt(model, x, y, 10) : null;
+        // como un dibujo elegido: la línea capturada se resalta mientras el menú está abierto
+        model.HighlightedLine = snapped;
+        model.Invalidate();
         if (layout != null && snapped is { } line)
         {
             bool onPrice = layout.Main.Rect.Contains(x, y);
@@ -1207,7 +1210,40 @@ public sealed partial class TradingView
             items.Add(Item("Pasar este gráfico a una pestaña nueva", MaterialIconKind.TabPlus, () => _ = MoveToNewPageAsync(tab)));
         }
         else if (tab.Window is { } window) items.Add(Item("Volver a la ventana principal", MaterialIconKind.DockWindow, () => DockBack(window)));
-        new ContextMenu { ItemsSource = items }.Open(tab.View);
+        var chartMenu = new ContextMenu { ItemsSource = items };
+        var highlighted = snapped;
+        chartMenu.Closed += (_, _) =>
+        {
+            // solo la de este menú (al abrir otro, el anterior se cierra después de elegir la línea nueva)
+            if (highlighted == null || !ReferenceEquals(model.HighlightedLine, highlighted)) return;
+            model.HighlightedLine = null;
+            model.Invalidate();
+        };
+        OpenMenu(chartMenu, tab.View);
+    }
+
+    private ContextMenu? _openMenu;
+
+    /// <summary>Abre un menú del gráfico cerrando el anterior (varios clics derechos seguidos dejaban varios menús abiertos).</summary>
+    private void OpenMenu(ContextMenu menu, Control target)
+    {
+        var prev = _openMenu;
+        _openMenu = null;
+        try
+        {
+            prev?.Close();
+        }
+        catch (InvalidOperationException)
+        {
+            // ya estaba cerrado
+        }
+
+        _openMenu = menu;
+        menu.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_openMenu, menu)) _openMenu = null;
+        };
+        menu.Open(target);
     }
 
     /// <summary>Zona horaria del gráfico (clic en la hora de la esquina): este gráfico o todos.</summary>
@@ -1225,7 +1261,7 @@ public sealed partial class TradingView
         items.Add(all);
         items.Add(Item("Más zonas horarias (Ajustes)…", MaterialIconKind.CogOutline, () => (TopLevel.GetTopLevel(this) as MainWindow)?.Navigate("settings")));
         menu.ItemsSource = items;
-        menu.Open(tab.View);
+        OpenMenu(menu, tab.View);
     }
 
     private static readonly (string Id, string Name)[] CommonTimeZones =
