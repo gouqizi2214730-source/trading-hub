@@ -10,7 +10,6 @@ const ICONS = {
   lmap: '<path d="M8 3.5v17M16 3.5v17M8 7.5h8M8 12h8M8 16.5h8"/><path d="M3 7.5h2.5M3 12h4M18.5 12h2.5M18.5 16.5h2.5"/>',
   derivs: '<path d="M4.5 20v-6M9.5 20v-9M14.5 20v-5M19.5 20V9"/><path d="M3 10l6.5-5 5 3.5L21 4"/>',
   options: '<path d="M3 18.5c4 0 5-13 9-13s5 13 9 13"/><path d="M12 3v18" stroke-dasharray="1.5 2.5"/>',
-  structure: '<path d="M3 17.5l5-6.5 4 4 5-8.5 4 3.5"/><rect x="13.5" y="13" width="7" height="4.5" rx="1"/>',
   tools: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8.5 7.5h7M8.5 12h1M12 12h0M15.5 12h0M8.5 16.5h1M12 16.5h0M15.5 16.5h0"/>',
 };
 

@@ -101,170 +101,102 @@ public sealed partial class TradingView
 
     private Control BuildDomSection()
     {
+        var ds = _svc.Settings.Dom;
+        // paso de las filas: automático (como el tick automático de Trading Hub) o a mano
         _domStep = new ChoiceButton<int>(MaterialIconKind.FormatLineSpacing,
-            new[] { 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000 }.Select(n => (n, $"{n} tick{(n > 1 ? "s" : "")}")),
-            "Agrupar precios del DOM", n => $"×{n}");
+            new[] { (0, "Automático") }.Concat(new[] { 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000 }.Select(n => (n, $"{n} tick{(n > 1 ? "s" : "")}"))),
+            "Agrupar precios del DOM (automático: el DOM abarca ± el rango elegido en Configurar DOM)", n => n == 0 ? "Auto" : $"×{n}");
         _domStep.MinHeight = 26;
         _domStep.Padding = new Thickness(8, 2);
+        _domStep.Select(ds.AutoStep ? 0 : Math.Max(1, ds.ManualStep));
         _domStep.Changed += n =>
         {
-            if (_dom.Dom == null) return;
-            _dom.Dom.Step = n;
-            _dom.Dom.ResetVolume();
+            var st = _svc.Settings.Dom;
+            st.AutoStep = n == 0;
+            if (n > 0) st.ManualStep = n;
+            _svc.Settings.Save();
+            if (_dom.Dom != null && n > 0) _dom.Dom.Step = n;
             _dom.Recenter();
         };
 
+        // unidad: cantidad o USD
+        var unit = new ChoiceButton<DomUnit>(MaterialIconKind.CurrencyUsd,
+            new[] { (DomUnit.Quantity, "Cantidad (monedas / contratos)"), (DomUnit.Usd, "USD (cantidad × precio)") },
+            "Unidad del libro y de lo operado", u => u == DomUnit.Usd ? "USD" : "Cant.");
+        unit.MinHeight = 26;
+        unit.Padding = new Thickness(8, 2);
+        unit.Select(ds.Unit);
+        unit.Changed += u =>
+        {
+            _svc.Settings.Dom.Unit = u;
+            _svc.Settings.Save();
+            if (_tape.Tape != null) _tape.Tape.Unit = u;
+            _dom.InvalidateVisual();
+            _tape.InvalidateVisual();
+        };
+
+        // ventana de los cambios del libro y de lo operado reciente
+        var window = new ChoiceButton<int>(MaterialIconKind.TimerOutline,
+            new[] { (15, "15 segundos"), (60, "1 minuto"), (300, "5 minutos"), (900, "15 minutos") },
+            "Ventana de «Cambios» (+ agregado / − retirado) y de «Operado»", w => w < 60 ? $"{w}s" : $"{w / 60}m");
+        window.MinHeight = 26;
+        window.Padding = new Thickness(8, 2);
+        window.Select(ds.ChangeWindowSeconds);
+        window.Changed += w =>
+        {
+            _svc.Settings.Dom.ChangeWindowSeconds = w;
+            _svc.Settings.Save();
+            _dom.InvalidateVisual();
+        };
+
         var help = new Button { Content = Ui.Icon(MaterialIconKind.HelpCircleOutline, 15) }.Classes("icon");
-        ToolTip.SetTip(help, "Cómo operar con el DOM");
+        ToolTip.SetTip(help, "Cómo leer el DOM");
         help.Flyout = new Flyout
         {
             Content = Ui.V(6,
-                Ui.H3("Operar con el DOM"),
-                Ui.Text("Clic en Bid: compra límite (o stop si es encima del precio)."),
-                Ui.Text("Clic en Ask: venta límite (o stop si es debajo del precio)."),
-                Ui.Text(Os.IsWindows ? "Clic derecho o Alt+clic: cancela las órdenes de ese precio." : "Clic derecho o ⌥ clic: cancela las órdenes de ese precio."),
-                Ui.Text("Arrastrá una orden propia para moverla."),
-                Ui.Text("Rueda: desplazar · botón de centrar: volver al precio."),
-                Ui.Faint("En Configurar DOM elegís columnas, tamaños, colores y si hace falta doble clic.")).Also(v => v.Margin = new Thickness(12)),
+                Ui.H3("Leer el DOM"),
+                Ui.Text("Cantidad: lo que espera en cada precio (ask arriba, bid abajo); las marcas 0,5 / 1 / 2,5 / 5 % son la distancia al precio."),
+                Ui.Text("Total: lo acumulado desde el mejor precio hasta esa fila."),
+                Ui.Text("Cambios: cuánto se agregó (+) o se retiró (−) del libro en la ventana elegida."),
+                Ui.Text("Operado: lo que se operó a mercado en esa fila en la ventana; Volumen: en la sesión."),
+                Ui.Text("Arriba: spread y la liquidez de cada lado a 0,5 / 2 / 10 %. Mouse sobre una fila: lo que hay hasta ahí contra el otro lado (Mirror)."),
+                Ui.Text("Rueda: desplazar · doble clic o el botón de centrar: volver al precio."),
+                Ui.Faint("El DOM no opera: las órdenes van desde el Chart Trader o el gráfico.")).Also(v => v.Margin = new Thickness(12)),
         };
 
-        var buttonsToggle = Ui.IconButton(MaterialIconKind.GestureTapButton, "Mostrar u ocultar los botones de ejecución (mercado, límites, cancelar, cerrar)", ToggleDomButtons, 15);
-        _domLock = new Button().Classes("icon");
-        _domLock.Click += (_, _) => ToggleDomTrading();
         var header = SectionHeader("DOM", () => SetPanel("dom", false),
             _domStep,
-            _domLock,
-            buttonsToggle,
+            unit,
+            window,
             Ui.IconButton(MaterialIconKind.ImageFilterCenterFocus, "Centrar en el precio", () => _dom.Recenter(), 15),
             Ui.IconButton(MaterialIconKind.Tune, "Configurar DOM (columnas, tamaños, colores)", () => OpenDomSettings(), 15),
             BuildDetachButton("dom"),
             help);
-        _dom.OrderRequested += OnDomOrder;
-        _dom.Message += msg => _status(msg);
-        _dom.OrderMoved += (o, price) => _ = MoveOrderAsync(_active, o, price);
         _dom.MinHeight = 80;
-        _domButtons = BuildDomButtons();
-        _domButtons.IsVisible = _svc.Settings.ShowDomButtons;
-        ApplyDomTrading();
         var box = new DockPanel();
         DockPanel.SetDock(header, Dock.Top);
         box.Children.Add(header);
-        DockPanel.SetDock(_domButtons, Dock.Bottom);
-        box.Children.Add(_domButtons);
         box.Children.Add(_dom);
         return new Border { Child = box, BorderBrush = Ui.Line, BorderThickness = new Thickness(0, 1, 0, 0) };
     }
 
-    private Control? _domButtons;
-    private Button _domLock = null!;
-
-    /// <summary>Prende o apaga operar desde el DOM (independiente de operar en el gráfico).</summary>
-    private void ToggleDomTrading()
-    {
-        _svc.Settings.DomTrading = !_svc.Settings.DomTrading;
-        _svc.Settings.Save();
-        ApplyDomTrading();
-        _status(_svc.Settings.DomTrading ? "Operar desde el DOM: prendido" : "Operar desde el DOM: apagado (solo muestra el libro)");
-    }
-
-    private void ApplyDomTrading()
-    {
-        bool on = _svc.Settings.DomTrading;
-        _dom.TradingEnabled = on;
-        _domLock.Content = Ui.Icon(on ? MaterialIconKind.LockOpenVariantOutline : MaterialIconKind.LockOutline, 15, on ? null : Ui.Accent);
-        ToolTip.SetTip(_domLock, on
-            ? "Operar desde el DOM: prendido. Tocá para apagarlo (el DOM solo muestra; el gráfico sigue operando como esté)."
-            : "Operar desde el DOM: apagado. Tocá para prenderlo.");
-        if (_domButtons != null) _domButtons.IsEnabled = on;
-        _dom.InvalidateVisual();
-    }
-
-    private void ToggleDomButtons()
-    {
-        var s = _svc.Settings;
-        s.ShowDomButtons = !s.ShowDomButtons;
-        s.Save();
-        if (_domButtons != null) _domButtons.IsVisible = s.ShowDomButtons;
-        _sideSig = ""; // cambia el alto mínimo de la sección
-        ApplyPanelVisibility();
-    }
-
-    /// <summary>
-    /// Botones de ejecución del DOM (operan el gráfico activo, como el DOM): cantidad, compra y venta a mercado, límites
-    /// en el bid y en el ask, cancelar, revertir y cerrar. Alto fijo: nada se mueve con los precios.
-    /// </summary>
-    private Control BuildDomButtons()
-    {
-        Button B(string text, string cls, string tip, Action onClick)
-        {
-            var b = new Button
-            {
-                Content = new TextBlock { Text = text, FontSize = 11.5, FontWeight = cls is "buy" or "sell" ? FontWeight.SemiBold : FontWeight.Normal, HorizontalAlignment = HorizontalAlignment.Center },
-                MinHeight = 30,
-                Padding = new Thickness(2, 3),
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Center,
-            };
-            if (cls.Length > 0) b.Classes.Add(cls);
-            ToolTip.SetTip(b, tip);
-            b.Click += (_, _) => onClick();
-            return b;
-        }
-
-        Grid Row(params Control[] cells)
-        {
-            var g = new Grid();
-            for (int i = 0; i < cells.Length; i++)
-            {
-                if (i > 0) g.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(6)));
-                g.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
-                Grid.SetColumn(cells[i], g.ColumnDefinitions.Count - 1);
-                g.Children.Add(cells[i]);
-            }
-
-            return g;
-        }
-
-        void AtBook(OrderDirections dir, bool ask)
-        {
-            if (_active == null || TradeData(_active) is not { } data) return;
-            decimal price = ask ? data.BestAsk : data.BestBid;
-            if (price <= 0) price = data.LastPrice;
-            if (price <= 0)
-            {
-                _status("Todavía no hay precio del libro para esa orden");
-                return;
-            }
-
-            _ = TradeAsync(_active, OrderTypes.Limit, dir, price, QtyOf(_active));
-        }
-
-        // cantidad y sus atajos en una sola fila
-        var qtyRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,8,Auto") };
-        qtyRow.Children.Add(_qty);
-        _qtyPresets.VerticalAlignment = VerticalAlignment.Center;
-        Grid.SetColumn(_qtyPresets, 2);
-        qtyRow.Children.Add(_qtyPresets);
-        ToolTip.SetTip(_qty, "Cantidad de las órdenes del DOM y de estos botones");
-
-        var panel = Ui.V(6,
-            qtyRow,
-            Row(B("Comprar MKT", "buy", "Compra a mercado", () => _ = TradeAsync(_active, OrderTypes.Market, OrderDirections.Buy, 0, QtyOf(_active))),
-                B("Vender MKT", "sell", "Venta a mercado", () => _ = TradeAsync(_active, OrderTypes.Market, OrderDirections.Sell, 0, QtyOf(_active)))),
-            Row(B("C. Bid", "buy-soft", "Compra límite en el bid (espera en la demanda)", () => AtBook(OrderDirections.Buy, ask: false)),
-                B("C. Ask", "buy-soft", "Compra límite en el ask (se llena enseguida, con precio tope)", () => AtBook(OrderDirections.Buy, ask: true)),
-                B("V. Bid", "sell-soft", "Venta límite en el bid (se llena enseguida, con precio tope)", () => AtBook(OrderDirections.Sell, ask: false)),
-                B("V. Ask", "sell-soft", "Venta límite en el ask (espera en la oferta)", () => AtBook(OrderDirections.Sell, ask: true))),
-            Row(B("Cancelar", "", "Cancela todas las órdenes", () => _ = AccountActionAsync(_active, a => a.CancelAll(), "Órdenes canceladas")),
-                B("Revertir", "", "Da vuelta la posición", () => _ = AccountActionAsync(_active, a => a.Reverse(), "Posición revertida")),
-                B("Cerrar", "primary", "Cierra toda la posición a mercado y cancela las órdenes", () => _ = AccountActionAsync(_active, a => a.Flatten(), "Posición cerrada"))));
-        panel.Margin = new Thickness(10, 8, 10, 10);
-        return new Border { Child = panel, BorderBrush = Ui.Line, BorderThickness = new Thickness(0, 1, 0, 0), Background = Ui.Bg1 };
-    }
-
     private Control BuildTapeSection()
     {
-        var header = SectionHeader("Cinta de operaciones", () => SetPanel("tape", false), BuildDetachButton("tape"));
+        // tamaño mínimo en USD, como el filtro de trdr
+        var min = new ChoiceButton<int>(MaterialIconKind.FilterOutline,
+            new[] { (0, "Todas"), (10_000, "≥ $10K"), (50_000, "≥ $50K"), (100_000, "≥ $100K"), (500_000, "≥ $500K"), (1_000_000, "≥ $1M") },
+            "Mostrar solo operaciones de al menos este tamaño (USD)", v => v == 0 ? TradingHub.Rendering.UiText.Tr("Todas") : v >= 1_000_000 ? $"≥{v / 1_000_000}M" : $"≥{v / 1000}K");
+        min.MinHeight = 26;
+        min.Padding = new Thickness(8, 2);
+        min.Select((int)_svc.Settings.TapeMinUsd);
+        min.Changed += v =>
+        {
+            _svc.Settings.TapeMinUsd = v;
+            _svc.Settings.Save();
+            if (_tape.Tape != null) _tape.Tape.MinUsd = v;
+            _tape.InvalidateVisual();
+        };
+        var header = SectionHeader("Cinta de operaciones", () => SetPanel("tape", false), min, BuildDetachButton("tape"));
         _tape.MinHeight = 50;
         var box = new DockPanel();
         DockPanel.SetDock(header, Dock.Top);
@@ -395,7 +327,7 @@ public sealed partial class TradingView
 
             var (key, section) = parts[i];
             double weight = weights.TryGetValue(key, out var w) && w > 0 ? w : DefaultWeight(key);
-            double min = key == "dom" && _svc.Settings.ShowDomButtons ? 290 : 90;
+            double min = 90;
             _side.RowDefinitions.Add(new RowDefinition(new GridLength(weight, GridUnitType.Star)) { MinHeight = min });
             if (section.Parent is Panel old && !ReferenceEquals(old, _side)) old.Children.Remove(section);
             Grid.SetRow(section, _side.RowDefinitions.Count - 1);
@@ -436,7 +368,6 @@ public sealed partial class TradingView
         };
         _qty.ValueChanged += (_, _) =>
         {
-            if (_dom.Dom != null) _dom.Dom.OrderQuantity = Qty();
             if (_syncing || _active == null) return;
             _active.Quantity = Qty();
             _active.Trader?.SyncQuantity();
@@ -621,9 +552,8 @@ public sealed partial class TradingView
         tab.Model.Brackets = _svc.BracketsFor(account);
         if (force || _dom.Dom?.Data != data || _dom.Dom?.Broker != account)
         {
-            _dom.Dom = new DomModel(data, _svc.Settings.Dom) { Broker = account, Brackets = tab.Model.Brackets, OrderQuantity = QtyOf(tab), Step = 1 };
-            _domStep?.Select(1);
-            _tape.Tape = new TapeModel(data) { TimeZone = tab.Model.Settings.TimeZone };
+            _dom.Dom = new DomModel(data, _svc.Settings.Dom) { Broker = account, Step = Math.Max(1, _svc.Settings.Dom.ManualStep) };
+            _tape.Tape = new TapeModel(data) { TimeZone = tab.Model.Settings.TimeZone, MinUsd = _svc.Settings.TapeMinUsd, Unit = _svc.Settings.Dom.Unit };
         }
 
         UpdatePanelTitles();
@@ -659,7 +589,6 @@ public sealed partial class TradingView
         if (tab.Quantity <= 0) tab.Quantity = presets[0];
         _qty.Value = tab.Quantity;
         _syncing = false;
-        if (_dom.Dom != null) _dom.Dom.OrderQuantity = tab.Quantity;
 
         _template = _svc.Settings.BracketTemplateFor(data.Instrument.Key);
         LoadTemplate();
@@ -747,7 +676,6 @@ public sealed partial class TradingView
         _syncing = true;
         _qty.Value = chart.Quantity;
         _syncing = false;
-        if (_dom.Dom != null) _dom.Dom.OrderQuantity = chart.Quantity;
     }
 
     private ITradingAccount? Account => AccountOf(_active);
@@ -849,35 +777,6 @@ public sealed partial class TradingView
         _status(action(_svc.BracketsFor(acc)));
         chart.Model?.Invalidate();
         _dom.InvalidateVisual();
-    }
-
-    private async void OnDomOrder(DomColumn col, decimal price, bool cancel)
-    {
-        var chart = _active;
-        var acc = AccountOf(chart);
-        if (acc == null || chart?.Model == null) return;
-        if (cancel)
-        {
-            acc.CancelAt(price);
-            _status($"Órdenes canceladas en {acc.Instrument.FormatPrice(price)}");
-            return;
-        }
-
-        var book = chart.Model.Data.Depth;
-        decimal last = chart.Model.Data.LastPrice;
-        decimal bestBid = book.HasBid ? acc.Instrument.FromTicks(book.BestBidTicks) : last;
-        decimal bestAsk = book.HasAsk ? acc.Instrument.FromTicks(book.BestAskTicks) : last;
-        switch (col)
-        {
-            case DomColumn.Bid:
-            case DomColumn.BuyOrders:
-                await TradeAsync(chart, price < bestAsk ? OrderTypes.Limit : OrderTypes.Stop, OrderDirections.Buy, price);
-                break;
-            case DomColumn.Ask:
-            case DomColumn.SellOrders:
-                await TradeAsync(chart, price > bestBid ? OrderTypes.Limit : OrderTypes.Stop, OrderDirections.Sell, price);
-                break;
-        }
     }
 
     // ===================================================================== atajos de teclado
@@ -1133,8 +1032,10 @@ public sealed partial class TradingView
         }
 
         var layout = model.LastLayout;
-        // alertas como en TradingView: sobre la línea de un indicador que está bajo el mouse, o la ventana completa
-        if (layout != null && ChartAlertEngine.LineAt(model, x, y) is { } line)
+        // alertas como en TradingView: la línea de un indicador bajo el mouse (un POC virgen, un VWAP…) se captura y la
+        // alerta queda sobre esa línea, no sobre el precio del mouse
+        var snapped = layout != null ? ChartAlertEngine.LineAt(model, x, y, 10) : null;
+        if (layout != null && snapped is { } line)
         {
             bool onPrice = layout.Main.Rect.Contains(x, y);
             var left = onPrice ? AlertOperand.Price("close", "Precio (cierre)") : line;
@@ -1144,13 +1045,16 @@ public sealed partial class TradingView
             lineMenu.Items.Add(Item("Cruza hacia arriba…", null, () => _ = OpenAlertsAsync(tab, left, right, null, AlertCondition.CrossingUp)));
             lineMenu.Items.Add(Item("Cruza hacia abajo…", null, () => _ = OpenAlertsAsync(tab, left, right, null, AlertCondition.CrossingDown)));
             lineMenu.Items.Add(Item("Toca la línea…", null, () => _ = OpenAlertsAsync(tab, left, right, null, AlertCondition.Touching)));
-            items.Add(lineMenu);
+            // arriba de todo: es lo que se buscó al hacer clic derecho sobre la línea
+            items.Insert(0, lineMenu);
+            items.Insert(1, new Separator());
         }
 
         if (layout != null && layout.PanelAt(y) is { } anyPanel)
         {
             items.Add(Item(model.Alerts.Count > 0 ? $"Alertas del gráfico ({model.Alerts.Count(a => a.Active)} activas)…" : "Crear alerta…", MaterialIconKind.BellCogOutline,
-                () => _ = OpenAlertsAsync(tab, null, anyPanel.IsPrice ? AlertOperand.Fixed(model.Instrument.RoundPrice((decimal)anyPanel.ValueAt(y))) : null)));
+                () => _ = OpenAlertsAsync(tab, snapped != null && anyPanel.IsPrice ? AlertOperand.Price("close", "Precio (cierre)") : null,
+                    snapped ?? (anyPanel.IsPrice ? AlertOperand.Fixed(model.Instrument.RoundPrice((decimal)anyPanel.ValueAt(y))) : null))));
         }
 
         if (layout != null && layout.Main.Rect.Contains(x, y))
@@ -1169,11 +1073,24 @@ public sealed partial class TradingView
                 items.Add(Item($"Comprar stop {QtyOf(tab)} @ {ps}", MaterialIconKind.ArrowUpBold, () => _ = TradeAsync(tab, OrderTypes.Stop, OrderDirections.Buy, price)));
             }
 
-            items.Add(Item($"Alerta de precio en {ps}", MaterialIconKind.BellPlusOutline, () =>
+            if (snapped != null && layout.Main.Rect.Contains(x, y))
             {
-                model.Drawings.Add(new ChartDrawing { Kind = DrawingKind.HorizontalLine, Alert = true, ColorArgb = 0xFFF2B53A, LineStyle = LineStyleKind.Dashed, Points = { new ChartPoint(DateTime.UtcNow, (double)price) } });
-                DrawingsTouched(tab);
-            }));
+                // sobre una línea de indicador: la alerta rápida es sobre esa línea (sigue al nivel, no a un precio fijo)
+                var target = snapped;
+                items.Add(Item($"Alerta cuando el precio cruce «{target.Label}»", MaterialIconKind.BellPlusOutline, () =>
+                {
+                    model.Alerts.Add(new ChartAlert { Left = AlertOperand.Price("close", "Precio (cierre)"), Condition = AlertCondition.Crossing, Right = target.Copy(), Frequency = AlertFrequency.OncePerBar });
+                    model.Invalidate();
+                    Workspace.Save(this);
+                    _status($"Alerta creada: el precio cruza «{target.Label}»");
+                }));
+            }
+            else
+                items.Add(Item($"Alerta de precio en {ps}", MaterialIconKind.BellPlusOutline, () =>
+                {
+                    model.Drawings.Add(new ChartDrawing { Kind = DrawingKind.HorizontalLine, Alert = true, ColorArgb = 0xFFF2B53A, LineStyle = LineStyleKind.Dashed, Points = { new ChartPoint(DateTime.UtcNow, (double)price) } });
+                    DrawingsTouched(tab);
+                }));
             if (acc?.ActiveOrders.Any() == true) items.Add(Item("Cancelar todas las órdenes", MaterialIconKind.CloseCircleOutline, () => _ = AccountActionAsync(tab, a => a.CancelAll(), "Órdenes canceladas")));
             items.Add(new Separator());
         }
@@ -1274,7 +1191,7 @@ public sealed partial class TradingView
         replay.Items.Add(Item("A ciegas (sin instrumento ni fecha)", MaterialIconKind.EyeOffOutline, () => _ = OpenRandomReplayAsync(blind: true)));
         if (tab.IsReplay && model.Settings.BlindReplay) replay.Items.Add(Item("Revelar este replay", MaterialIconKind.EyeOutline, () => RevealReplay(tab)));
         items.Add(replay);
-        items.Add(Item("Workbench (热力 / 成交 / 流动 / 衍生 / 期权 / 结构)…", MaterialIconKind.ViewDashboardVariantOutline, () =>
+        items.Add(Item("Workbench (热力 / 成交 / 流动 / 衍生 / 期权)…", MaterialIconKind.ViewDashboardVariantOutline, () =>
         {
             if (TopLevel.GetTopLevel(this) is TradingHub.App.Windows.MainWindow mw) mw.Navigate("workbench");
             else if (App.Services != null) _ = App.Services.Workbench.StartAsync().ContinueWith(_ => Shell.OpenUrl(App.Services.Workbench.BaseUrl + "/wb/"));

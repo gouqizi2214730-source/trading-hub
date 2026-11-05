@@ -21,6 +21,12 @@ public sealed class TapeModel
     /// <summary>Volumen mínimo para mostrar.</summary>
     public decimal MinVolume { get; set; }
 
+    /// <summary>Solo las operaciones de al menos estos dólares (como el «Size ≥ 100K USD» de trdr; 0 = todas).</summary>
+    public decimal MinUsd { get; set; }
+
+    /// <summary>Unidad de la columna de volumen (la misma del DOM).</summary>
+    public DomUnit Unit { get; set; } = DomUnit.Quantity;
+
     /// <summary>A partir de este volumen la fila se resalta.</summary>
     public decimal HighlightVolume { get; set; }
 
@@ -68,7 +74,9 @@ public sealed class TapeRenderer
         _text.Color = t.TextDim;
         canvas.DrawUiText("Hora", c1, 14, head, _text);
         canvas.DrawUiText("Precio", c2, 14, head, _text);
-        canvas.DrawUiText("Volumen", c3 - RenderContext.MeasureWidth(head, "Volumen"), 14, head, _text);
+        string vh = tape.Unit == DomUnit.Usd ? "USD" : UiText.Tr("Volumen");
+        if (tape.MinUsd > 0) vh = "≥ " + DomRenderer.Amount(tape.MinUsd, 1, DomUnit.Usd, 0) + " · " + vh;
+        canvas.DrawUiText(vh, c3 - RenderContext.MeasureWidth(head, vh), 14, head, _text);
 
         int maxRows = (int)((height - HeaderH) / RowH) + 1;
         if (tape.Anchor is { } anchor && anchor >= tape.Data.Trades.Count - 1) tape.Anchor = null;
@@ -91,7 +99,7 @@ public sealed class TapeRenderer
             var local = TimeZoneInfo.ConvertTimeFromUtc(r.Time, tape.TimeZone);
             canvas.DrawUiText(local.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture), c1, y + baseOff, f, _text);
             canvas.DrawUiText(inst.FormatPrice(r.Price), c2, y + baseOff, f, _text);
-            string v = VolumeFormat.Compact(r.Volume, dec);
+            string v = DomRenderer.Amount(r.Volume, r.Price, tape.Unit, dec);
             canvas.DrawUiText(v, c3 - RenderContext.MeasureWidth(f, v), y + baseOff, f, _text);
         }
 
@@ -190,7 +198,7 @@ public sealed class TapeRenderer
             }
 
             scanned += count;
-            if (vol >= tape.MinVolume) res.Add(new Row(new DateTime(t, DateTimeKind.Utc), price, vol, side, count));
+            if (vol >= tape.MinVolume && (tape.MinUsd <= 0 || vol * price >= tape.MinUsd)) res.Add(new Row(new DateTime(t, DateTimeKind.Utc), price, vol, side, count));
             i = j;
         }
 

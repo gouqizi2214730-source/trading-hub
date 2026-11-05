@@ -38,7 +38,7 @@ FLAG_FILE = "vpfm-update.flag"
 # 多窗口：界面在这里写请求文件，VPFM 主程序（vpfm_windows.rs）轮询处理；窗口状态由主程序写在 WIN_STATE_FILE
 WIN_REQ_PREFIX = "vpfm-winreq-"
 WIN_STATE_FILE = "vpfm-windows.json"
-WIN_MODULES = ("flowmap", "aggr", "lmap", "derivs", "options", "structure", "tools")
+WIN_MODULES = ("flowmap", "aggr", "lmap", "derivs", "options", "tools")
 WIN_OPS = ("open", "focus", "close", "main", "sync")
 PROXY_PREFIX = "/api/wb/proxy/"
 FUPANBOOK_RELEASES = "https://github.com/gouqizi2214730-source/trade-journal/releases"

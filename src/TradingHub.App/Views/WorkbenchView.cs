@@ -112,7 +112,7 @@ public sealed class WorkbenchView : UserControl
 /// <summary>Los módulos del Workbench en ventanas aparte (lo que en VPFM era «在新窗口打开»).</summary>
 internal static class WorkbenchWindows
 {
-    private static readonly string[] Modules = { "flowmap", "aggr", "lmap", "derivs", "options", "structure", "tools" };
+    private static readonly string[] Modules = { "flowmap", "aggr", "lmap", "derivs", "options", "tools" };
     private static readonly Dictionary<string, Window> Open = new();
 
     public static string[] OpenModules()

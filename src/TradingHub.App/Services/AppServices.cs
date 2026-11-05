@@ -293,8 +293,8 @@ public sealed class AppSettings
     /// <summary>Botones de ejecución debajo del DOM (mercado, límites, cancelar, cerrar…).</summary>
     public bool ShowDomButtons { get; set; } = true;
 
-    /// <summary>Si se puede operar desde el DOM (clics, arrastre y botones de ejecución del DOM), aparte del gráfico.</summary>
-    public bool DomTrading { get; set; } = true;
+    /// <summary>Cinta: solo operaciones de al menos estos dólares (0 = todas).</summary>
+    public decimal TapeMinUsd { get; set; }
 
     /// <summary>DOM en una ventana aparte (versión anterior: ahora va en <see cref="PanelWindows"/>).</summary>
     public bool DomFloating { get; set; }

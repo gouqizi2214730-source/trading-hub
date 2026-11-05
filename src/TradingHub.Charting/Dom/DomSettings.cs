@@ -8,15 +8,27 @@ namespace TradingHub.Charting.Dom;
 
 public enum DomColumn
 {
-    [Display(Name = "Órdenes de compra")] BuyOrders,
+    // órdenes propias: el DOM ya no opera (se leen de configuraciones viejas y se descartan)
+    [Browsable(false)] BuyOrders,
     [Display(Name = "Bid (libro)")] Bid,
     [Display(Name = "Precio")] Price,
     [Display(Name = "Ask (libro)")] Ask,
-    [Display(Name = "Órdenes de venta")] SellOrders,
+    [Browsable(false)] SellOrders,
     [Display(Name = "Volumen de la sesión")] Volume,
     [Display(Name = "Delta de la sesión")] Delta,
     [Display(Name = "Operado al bid")] TradedBid,
     [Display(Name = "Operado al ask")] TradedAsk,
+    [Display(Name = "Cantidad (bid abajo / ask arriba)")] Size,
+    [Display(Name = "Total acumulado desde el precio")] Total,
+    [Display(Name = "Cambios del libro (+ agregado / − retirado)")] Changes,
+    [Display(Name = "Operado reciente (en la ventana)")] Recent,
+}
+
+/// <summary>En qué se muestran los tamaños del libro y lo operado.</summary>
+public enum DomUnit
+{
+    [Display(Name = "Cantidad (monedas / contratos)")] Quantity,
+    [Display(Name = "USD (cantidad × precio)")] Usd,
 }
 
 /// <summary>Una columna del DOM: si se ve y cuánto ancho relativo ocupa.</summary>
@@ -47,10 +59,34 @@ public sealed class DomSettings
     [Display(Name = "Centrar en el precio automáticamente", GroupName = "Comportamiento", Order = 10)]
     public bool AutoCenter { get; set; } = true;
 
-    [Display(Name = "Doble clic para operar", GroupName = "Comportamiento", Order = 20, Description = "Evita mandar órdenes por un clic accidental.")]
-    public bool DoubleClickToTrade { get; set; }
+    [Display(Name = "Agrupar precios automáticamente (tick automático)", GroupName = "Comportamiento", Order = 12, Description = "Elige el paso de las filas para que el DOM abarque el rango de abajo; apagado, usa el paso elegido a mano.")]
+    public bool AutoStep { get; set; } = true;
 
-    [Display(Name = "Resaltar tamaños desde", GroupName = "Comportamiento", Order = 30, Description = "Tamaños del libro iguales o mayores se resaltan (0 = no).")]
+    [Display(Name = "Tick automático: rango a cada lado del precio (%)", GroupName = "Comportamiento", Order = 13)]
+    [Range(0.02, 20)]
+    public double AutoRangePercent { get; set; } = 0.5;
+
+    [Display(Name = "Paso a mano (ticks por fila)", GroupName = "Comportamiento", Order = 14)]
+    [Range(1, 100000)]
+    public int ManualStep { get; set; } = 1;
+
+    [Display(Name = "Unidad", GroupName = "Comportamiento", Order = 15)]
+    public DomUnit Unit { get; set; } = DomUnit.Quantity;
+
+    [Display(Name = "Ventana de cambios y operado reciente (segundos)", GroupName = "Comportamiento", Order = 16, Description = "Cuánto atrás se compara el libro (+ agregado / − retirado) y se suma lo operado reciente.")]
+    [Range(5, 3600)]
+    public int ChangeWindowSeconds { get; set; } = 60;
+
+    [Display(Name = "Marcas de distancia al precio (%)", GroupName = "Comportamiento", Order = 17, Description = "Separadas por coma: se marcan en el precio, como en trdr (vacío = ninguna).")]
+    public string DistanceMarks { get; set; } = "0.5, 1, 2.5, 5";
+
+    [Display(Name = "Barra de estadísticas arriba (spread, liquidez a 0,5 / 2 / 10 %)", GroupName = "Comportamiento", Order = 18)]
+    public bool ShowStats { get; set; } = true;
+
+    [Display(Name = "Comparar con el otro lado al pasar el mouse (Mirror)", GroupName = "Comportamiento", Order = 19)]
+    public bool HoverMirror { get; set; } = true;
+
+    [Display(Name = "Resaltar tamaños desde (en la unidad elegida)", GroupName = "Comportamiento", Order = 30, Description = "Tamaños del libro iguales o mayores se resaltan (0 = automático: los más grandes de lo visible).")]
     public decimal LargeSize { get; set; }
 
     [Display(Name = "Barras del libro", GroupName = "Comportamiento", Order = 40, Description = "Dibuja barras proporcionales al tamaño de cada nivel.")]
@@ -83,27 +119,49 @@ public sealed class DomSettings
     [Display(Name = "Texto de precios", GroupName = "Colores", Order = 90)]
     public Color PriceText { get; set; } = Color.FromArgb(255, 160, 175, 200);
 
+    /// <summary>Como el Order Book de trdr: cambios, cantidad, total acumulado, precio y lo operado.</summary>
     public static List<DomColumnSetting> DefaultColumns() => new()
     {
-        new() { Column = DomColumn.BuyOrders, Width = 0.55 },
-        new() { Column = DomColumn.Bid, Width = 1 },
+        new() { Column = DomColumn.Changes, Width = 0.8 },
+        new() { Column = DomColumn.Size, Width = 1.1 },
+        new() { Column = DomColumn.Total, Width = 0.9 },
         new() { Column = DomColumn.Price, Width = 1.05 },
-        new() { Column = DomColumn.Ask, Width = 1 },
-        new() { Column = DomColumn.SellOrders, Width = 0.55 },
-        new() { Column = DomColumn.Volume, Width = 1.25 },
+        new() { Column = DomColumn.Recent, Width = 0.9 },
+        new() { Column = DomColumn.Volume, Width = 1.1 },
+        new() { Column = DomColumn.Bid, Width = 1, Visible = false },
+        new() { Column = DomColumn.Ask, Width = 1, Visible = false },
         new() { Column = DomColumn.Delta, Width = 0.9, Visible = false },
         new() { Column = DomColumn.TradedBid, Width = 0.9, Visible = false },
         new() { Column = DomColumn.TradedAsk, Width = 0.9, Visible = false },
     };
 
-    /// <summary>Completa columnas que falten (configuraciones guardadas con versiones anteriores).</summary>
+    /// <summary>Versión de las columnas: una configuración de antes del DOM nuevo pasa a las columnas nuevas.</summary>
+    [Browsable(false)]
+    public int Layout { get; set; }
+
+    private const int CurrentLayout = 2;
+
+    /// <summary>Completa columnas que falten (configuraciones guardadas con versiones anteriores) y saca las de órdenes.</summary>
     public void Normalize()
     {
+        if (Layout < CurrentLayout)
+        {
+            Columns = DefaultColumns();
+            Layout = CurrentLayout;
+        }
+
+        Columns.RemoveAll(c => c.Column is DomColumn.BuyOrders or DomColumn.SellOrders);
         foreach (var d in DefaultColumns())
-            if (Columns.All(c => c.Column != d.Column)) Columns.Add(d);
+            if (Columns.All(c => c.Column != d.Column)) Columns.Add(new DomColumnSetting { Column = d.Column, Width = d.Width, Visible = false });
         Columns = Columns.GroupBy(c => c.Column).Select(g => g.First()).ToList();
         if (!Columns.Any(c => c.Visible)) Columns.First(c => c.Column == DomColumn.Price).Visible = true;
+        if (ManualStep < 1) ManualStep = 1;
     }
+
+    /// <summary>Las marcas de distancia (en %), ordenadas.</summary>
+    public double[] Marks() => (DistanceMarks ?? "").Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries)
+        .Select(x => double.TryParse(x.Replace('%', ' ').Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0)
+        .Where(v => v > 0 && v < 100).Distinct().OrderBy(v => v).ToArray();
 
     public DomSettings Clone()
     {

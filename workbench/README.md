@@ -6,7 +6,7 @@ hace falta instalar VPFM ni tener otro repositorio: todo se arma desde acá.
 
 | Carpeta | Qué es |
 |---|---|
-| `web/` | La barra lateral de VPFM y los módulos propios (衍生 / 期权 / 结构 / 工具) |
+| `web/` | La barra lateral de VPFM y los módulos propios (衍生 / 期权 / 工具) |
 | `aggr/` | Traducción al chino y fuentes locales de aggr, y el retoque de su compilación |
 | `zh-patch/` | Traducción al chino de FlowMap |
 | `server/vpfm_wb.py` | Extensión del servidor de FlowMap (proxy y ajustes) para el motor del mapa de calor |

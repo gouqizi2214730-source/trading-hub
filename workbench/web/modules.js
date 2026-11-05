@@ -6,11 +6,10 @@ window.VPFM_MODULES = [
   { id: 'lmap', name: '流动性地图', short: '流动', src: 'lmap/?lang=zh&source=browser', heavy: true },
   { id: 'derivs', name: '衍生品数据', short: '衍生', src: 'derivs/' },
   { id: 'options', name: '期权 GEX', short: '期权', src: 'options/' },
-  { id: 'structure', name: '结构分析', short: '结构', src: 'structure/' },
   { id: 'tools', name: '工具箱', short: '工具', src: 'tools/' },
 ];
 /* 跟着聚合成交切币的模块 */
-window.VPFM_LINKED = ['derivs', 'structure'];
+window.VPFM_LINKED = ['derivs'];
 
 /* 从聚合成交的交易对（如 BINANCE_FUTURES:btcusdt、OKEX:BTC-USDT-SWAP）里取出币种 */
 window.VPFM_baseFromMarket = function (id) {
