@@ -409,6 +409,7 @@ internal sealed class DrawingToolStrip : UserControl
         [DrawingKind.Ray] = (MaterialIconKind.ArrowTopRightThin, "Rayo"),
         [DrawingKind.ExtendedLine] = (MaterialIconKind.ArrowExpandHorizontal, "Línea extendida"),
         [DrawingKind.Rectangle] = (MaterialIconKind.RectangleOutline, "Rectángulo / zona"),
+        [DrawingKind.ParallelChannel] = (MaterialIconKind.VectorLine, "Canal paralelo (dos clics para la línea base; el tercer manejador, el ancho)"),
         [DrawingKind.FibRetracement] = (MaterialIconKind.FormatLineSpacing, "Retroceso de Fibonacci"),
         [DrawingKind.Ruler] = (MaterialIconKind.RulerSquare, "Regla (medir)"),
         [DrawingKind.LongPosition] = (MaterialIconKind.TrendingUp, "Posición larga (entrada, stop y objetivo)"),
@@ -427,7 +428,7 @@ internal sealed class DrawingToolStrip : UserControl
         {
             new DrawingKind?[] { null },
             new DrawingKind?[] { DrawingKind.HorizontalLine, DrawingKind.HorizontalRay, DrawingKind.VerticalLine, DrawingKind.TrendLine, DrawingKind.Ray, DrawingKind.ExtendedLine },
-            new DrawingKind?[] { DrawingKind.Rectangle },
+            new DrawingKind?[] { DrawingKind.Rectangle, DrawingKind.ParallelChannel },
             new DrawingKind?[] { DrawingKind.FibRetracement },
             new DrawingKind?[] { DrawingKind.AnchoredVwap, DrawingKind.FixedRangeProfile },
             // a la vista, como en TradingView (antes compartían un botón y la corta quedaba escondida en el menú)

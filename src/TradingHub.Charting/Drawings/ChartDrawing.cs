@@ -22,6 +22,7 @@ public enum DrawingKind
     ShortPosition,
     AnchoredVwap,
     FixedRangeProfile,
+    ParallelChannel,
 }
 
 public enum LineStyleKind
@@ -161,6 +162,7 @@ public sealed class ChartDrawing
     {
         DrawingKind.HorizontalLine or DrawingKind.HorizontalRay or DrawingKind.VerticalLine or DrawingKind.Text => 1,
         DrawingKind.LongPosition or DrawingKind.ShortPosition or DrawingKind.AnchoredVwap => 1,
+        DrawingKind.ParallelChannel => 3,
         _ => 2,
     };
 
@@ -185,6 +187,7 @@ public sealed class ChartDrawing
         DrawingKind.ShortPosition => "Posición corta",
         DrawingKind.AnchoredVwap => "VWAP anclado",
         DrawingKind.FixedRangeProfile => "Perfil de rango fijo",
+        DrawingKind.ParallelChannel => "Canal paralelo",
         _ => k.ToString(),
     };
 
@@ -271,7 +274,46 @@ public sealed class ChartDrawing
             return;
         }
 
+        if (Kind == DrawingKind.ParallelChannel && Points.Count >= 3 && handle is >= 0 and <= 2)
+        {
+            // el tercer punto es el ancho del canal (en precio, igual en toda la línea); va pegado al primero
+            double off = ChannelOffset;
+            switch (handle)
+            {
+                case 0:
+                    Points[0] = p;
+                    Points[2] = new ChartPoint(p.Time, p.Price + off);
+                    break;
+                case 1:
+                    Points[1] = p;
+                    break;
+                default:
+                {
+                    var a = Points[0];
+                    var b = Points[1];
+                    double span = (b.Time - a.Time).Ticks;
+                    double basis = Math.Abs(span) < 1 ? a.Price : a.Price + (p.Time - a.Time).Ticks / span * (b.Price - a.Price);
+                    Points[2] = new ChartPoint(a.Time, a.Price + (p.Price - basis));
+                    break;
+                }
+            }
+
+            return;
+        }
+
         if (handle >= 0 && handle < Points.Count) Points[handle] = p;
+    }
+
+    /// <summary>Canal paralelo: distancia en precio del borde paralelo a la línea base (el tercer punto, pegado al primero).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public double ChannelOffset => Points.Count >= 3 ? Points[2].Price - Points[0].Price : 0;
+
+    /// <summary>Canal paralelo recién trazado: el borde paralelo arranca a <paramref name="offset"/> de la línea base.</summary>
+    public void InitChannel(double offset)
+    {
+        if (Points.Count < 2) return;
+        while (Points.Count > 2) Points.RemoveAt(Points.Count - 1);
+        Points.Add(new ChartPoint(Points[0].Time, Points[0].Price + offset));
     }
 
     /// <summary>Resultado de la posición sobre las velas: si tocó el objetivo o el stop primero.</summary>
@@ -313,19 +355,23 @@ public sealed class ChartDrawing
     // ------------------------------------------------------------------ coordenadas
 
     /// <summary>X de un instante (interpola entre velas y extrapola al futuro).</summary>
-    public static float XOf(ChartLayout layout, CandleSeries series, DateTime time)
+    public static float XOf(ChartLayout layout, CandleSeries series, DateTime time) =>
+        series.Count == 0 ? layout.Plot.Right : layout.CenterX(BarPos(series, time));
+
+    /// <summary>Posición (en velas, con fracción) de un instante: más allá de la última vela sigue al ritmo del período.</summary>
+    public static double BarPos(CandleSeries series, DateTime time)
     {
-        if (series.Count == 0) return layout.Plot.Right;
+        if (series.Count == 0) return 0;
         var lastTime = series[^1].Time;
         if (time > lastTime)
         {
             var dur = series.Period.ApproxDuration;
             double bars = dur > TimeSpan.Zero ? (time - lastTime).Ticks / (double)dur.Ticks : 1;
-            return layout.CenterX(series.Count - 1 + bars);
+            return series.Count - 1 + bars;
         }
 
         int bar = series.FindBar(time);
-        if (bar < 0) return layout.CenterX(0);
+        if (bar < 0) return 0;
         double frac = 0;
         if (bar + 1 < series.Count)
         {
@@ -334,7 +380,82 @@ public sealed class ChartDrawing
             if (t1 > t0) frac = Math.Clamp((time - t0).Ticks / (double)(t1 - t0).Ticks, 0, 0.999);
         }
 
-        return layout.CenterX(bar + frac);
+        return bar + frac;
+    }
+
+    // ------------------------------------------------------------------ líneas para las alertas
+
+    /// <summary>Las líneas de este dibujo a las que se les puede poner una alerta: (clave, nombre).</summary>
+    public IReadOnlyList<(string Part, string Name)> AlertParts() => Kind switch
+    {
+        DrawingKind.HorizontalLine or DrawingKind.HorizontalRay or DrawingKind.TrendLine or DrawingKind.Ray or DrawingKind.ExtendedLine => new[] { ("line", "línea") },
+        DrawingKind.Rectangle => new[] { ("top", "borde de arriba"), ("bottom", "borde de abajo") },
+        DrawingKind.ParallelChannel => new[] { ("upper", "borde de arriba"), ("middle", "línea del medio"), ("lower", "borde de abajo") },
+        DrawingKind.FibRetracement => EffectiveLevels.Where(l => l.Visible).Select(l => ("fib:" + l.Value.ToString(CultureInfo.InvariantCulture), "nivel " + l.Value.ToString("0.###", CultureInfo.InvariantCulture))).ToArray(),
+        _ => Array.Empty<(string, string)>(),
+    };
+
+    /// <summary>Si el dibujo forma un canal (dos bordes): rectángulo y canal paralelo.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsChannel => Kind is DrawingKind.Rectangle or DrawingKind.ParallelChannel;
+
+    /// <summary>
+    /// Precio de una línea del dibujo en la vela <paramref name="bar"/> (en velas, con fracción); null si en esa vela la
+    /// línea no existe (antes del comienzo de un rayo, fuera de un segmento sin extender).
+    /// </summary>
+    public double? ValueAt(CandleSeries series, double bar, string part)
+    {
+        if (Points.Count == 0) return null;
+        double b0 = BarPos(series, Points[0].Time), p0 = Points[0].Price;
+        double b1 = Points.Count > 1 ? BarPos(series, Points[1].Time) : b0, p1 = Points.Count > 1 ? Points[1].Price : p0;
+        const double eps = 1e-9;
+        double Line(double ba, double pa, double bb, double pb, double at) => Math.Abs(bb - ba) < eps ? pa : pa + (at - ba) * (pb - pa) / (bb - ba);
+        bool Within(bool left, bool right)
+        {
+            double lo = Math.Min(b0, b1), hi = Math.Max(b0, b1);
+            return (left || bar >= lo - eps) && (right || bar <= hi + eps);
+        }
+
+        switch (Kind)
+        {
+            case DrawingKind.HorizontalLine:
+                return p0;
+            case DrawingKind.HorizontalRay:
+                return ExtendLeft || bar >= b0 - eps ? p0 : null;
+            case DrawingKind.TrendLine:
+                return Within(ExtendLeft, ExtendRight) ? Line(b0, p0, b1, p1, bar) : null;
+            case DrawingKind.Ray:
+            {
+                // desde el primer punto hacia el segundo y más allá
+                bool forward = b1 >= b0;
+                return (forward ? bar >= b0 - eps : bar <= b0 + eps) ? Line(b0, p0, b1, p1, bar) : null;
+            }
+            case DrawingKind.ExtendedLine:
+                return Line(b0, p0, b1, p1, bar);
+            case DrawingKind.Rectangle:
+                if (!Within(ExtendLeft, ExtendRight)) return null;
+                return part == "bottom" ? Math.Min(p0, p1) : Math.Max(p0, p1);
+            case DrawingKind.ParallelChannel:
+            {
+                if (Points.Count < 3 || !Within(ExtendLeft, ExtendRight)) return null;
+                double basis = Line(b0, p0, b1, p1, bar);
+                double a = basis, b = basis + ChannelOffset;
+                return part switch
+                {
+                    "middle" => (a + b) / 2,
+                    "lower" => Math.Min(a, b),
+                    _ => Math.Max(a, b),
+                };
+            }
+            case DrawingKind.FibRetracement:
+            {
+                if (!part.StartsWith("fib:", StringComparison.Ordinal) || !double.TryParse(part[4..], NumberStyles.Float, CultureInfo.InvariantCulture, out var lvl)) return null;
+                if (!ExtendLeft && bar < Math.Min(b0, b1) - eps) return null;
+                return p1 + (p0 - p1) * (1 - lvl);
+            }
+            default:
+                return null;
+        }
     }
 
     /// <summary>Instante en una coordenada X.</summary>
@@ -440,6 +561,30 @@ public sealed class ChartDrawing
                     canvas.DrawUiText(label, (x0 + x1) / 2 - w / 2, (y0 + y1) / 2 - 6, labelFont, text);
                 }
 
+                break;
+            }
+            case DrawingKind.ParallelChannel:
+            {
+                double off = ChannelOffset;
+                float ux0 = x0, uy0 = main.Y(p0.Price + off), ux1 = x1, uy1 = main.Y((Points.Count > 1 ? Points[1].Price : p0.Price) + off);
+                var (ax, ay, bx, by) = Extend(x0, y0, x1, y1, plot, ExtendLeft, ExtendRight);
+                var (cx, cy, dx, dy) = Extend(ux0, uy0, ux1, uy1, plot, ExtendLeft, ExtendRight);
+                using (var path = new SKPath())
+                {
+                    path.MoveTo(ax, ay);
+                    path.LineTo(bx, by);
+                    path.LineTo(dx, dy);
+                    path.LineTo(cx, cy);
+                    path.Close();
+                    canvas.DrawPath(path, fill);
+                }
+
+                canvas.DrawLine(ax, ay, bx, by, stroke);
+                canvas.DrawLine(cx, cy, dx, dy, stroke);
+                using (var mid = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1, Color = Color.WithAlpha(150), PathEffect = SKPathEffect.CreateDash(new[] { 5f, 4f }, 0) })
+                    canvas.DrawLine((ax + cx) / 2, (ay + cy) / 2, (bx + dx) / 2, (by + dy) / 2, mid);
+                if (label.Length > 0) canvas.DrawUiText(label, Math.Min(x0, x1) + 5, Math.Min(Math.Min(y0, y1), Math.Min(uy0, uy1)) - 5, labelFont, text);
+                if (IsAlert) DrawBell(canvas, bx - 14, Math.Min(by, dy) - 10, Color);
                 break;
             }
             case DrawingKind.Rectangle:
@@ -879,6 +1024,19 @@ public sealed class ChartDrawing
                 return Math.Abs(y - y0) <= tol && (ExtendLeft || x >= x0 - tol);
             case DrawingKind.VerticalLine:
                 return Math.Abs(x - x0) <= tol;
+            case DrawingKind.ParallelChannel:
+            {
+                double off = ChannelOffset;
+                float uy0 = main.Y(Points[0].Price + off), uy1 = main.Y((Points.Count > 1 ? Points[1].Price : Points[0].Price) + off);
+                var (ax, ay, bx, by) = Extend(x0, y0, x1, y1, plot, ExtendLeft, ExtendRight);
+                var (cx, cy, dx, dy) = Extend(x0, uy0, x1, uy1, plot, ExtendLeft, ExtendRight);
+                if (DistanceToSegment(x, y, ax, ay, bx, by, false) <= tol || DistanceToSegment(x, y, cx, cy, dx, dy, false) <= tol) return true;
+                // dentro del canal
+                if (x < Math.Min(ax, bx) || x > Math.Max(ax, bx)) return false;
+                float t = Math.Abs(bx - ax) < 0.5f ? 0 : (x - ax) / (bx - ax);
+                float ya = ay + t * (by - ay), yc = cy + t * (dy - cy);
+                return y >= Math.Min(ya, yc) && y <= Math.Max(ya, yc);
+            }
             case DrawingKind.Rectangle:
             case DrawingKind.Ruler:
             case DrawingKind.FibRetracement:

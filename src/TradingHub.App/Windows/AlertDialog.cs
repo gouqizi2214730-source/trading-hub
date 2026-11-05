@@ -27,11 +27,14 @@ internal sealed class AlertDialog : TradingHubDialog<bool>
     private readonly ComboBox _freq = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly ComboBox _expiry = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBox _message = new() { Watermark = "Mensaje (vacío = la condición)" };
+    private readonly NumericUpDown _bars = new() { Minimum = 1, Maximum = 1000, Value = 1, Increment = 1, FormatString = "0", HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly Control _barsRow;
+    private readonly Control _rightRow;
     private readonly StackPanel _list = new() { Spacing = 4 };
     private readonly Control _lowerRow;
     private bool _changed;
 
-    private AlertDialog(ChartModel model, AlertOperand? left, AlertOperand? right) : base("Alertas", 520)
+    private AlertDialog(ChartModel model, AlertOperand? left, AlertOperand? right, AlertOperand? lower, AlertCondition? condition) : base("Alertas", 540)
     {
         _model = model;
         // precio (cierre / máximo / mínimo) y cada línea de los indicadores del gráfico
@@ -42,6 +45,8 @@ internal sealed class AlertDialog : TradingHubDialog<bool>
             AlertOperand.Price("low", "Mínimo de la vela"),
         };
         _sources.AddRange(ChartAlertEngine.Lines(model));
+        // las líneas dibujadas: líneas, rayos, rectángulos, canales y niveles de Fibonacci
+        _sources.AddRange(ChartAlertEngine.DrawingLines(model));
         Fill(_left, false);
         Fill(_right, true);
         Fill(_lower, true);
@@ -49,7 +54,7 @@ internal sealed class AlertDialog : TradingHubDialog<bool>
         foreach (AlertFrequency f in Enum.GetValues<AlertFrequency>()) _freq.Items.Add(new ComboBoxItem { Content = PropertyGrid.EnumDisplay(f), Tag = f });
         foreach (var (text, days) in new[] { ("Nunca vence", 0), ("1 día", 1), ("1 semana", 7), ("1 mes", 30), ("3 meses", 90) })
             _expiry.Items.Add(new ComboBoxItem { Content = text, Tag = days });
-        _cond.SelectedIndex = 0;
+        _cond.SelectedIndex = condition is { } cnd ? Array.IndexOf(Enum.GetValues<AlertCondition>(), cnd) : 0;
         _freq.SelectedIndex = 1;
         _expiry.SelectedIndex = 0;
 
@@ -62,17 +67,28 @@ internal sealed class AlertDialog : TradingHubDialog<bool>
             _rightValue.Value = right?.Value ?? last;
         }
 
-        _lower.SelectedIndex = 0;
+        if (lower != null) Select(_lower, lower);
+        else _lower.SelectedIndex = 0;
         _lowerValue.Value = last;
         decimal step = model.Instrument.TickSize > 0 ? model.Instrument.TickSize : 1;
         _rightValue.Increment = step;
         _lowerValue.Increment = step;
 
-        _right.SelectionChanged += (_, _) => UpdateVisibility();
+        _right.SelectionChanged += (_, _) =>
+        {
+            PairChannel();
+            UpdateVisibility();
+        };
         _lower.SelectionChanged += (_, _) => UpdateVisibility();
-        _cond.SelectionChanged += (_, _) => UpdateVisibility();
+        _cond.SelectionChanged += (_, _) =>
+        {
+            PairChannel();
+            UpdateVisibility();
+        };
 
         _lowerRow = Ui.Field("Borde de abajo del canal", Ui.Row(8, _lower, _lowerValue));
+        _barsRow = Ui.Field("En cuántas velas", _bars, "1 = desde la vela anterior. El valor de «Con» es el porcentaje.");
+        _rightRow = Ui.Field("Con", Ui.Row(8, _right, _rightValue));
         var create = new Button { Content = "Crear alerta", IsDefault = true }.Classes("primary");
         create.Click += (_, _) => Create();
         var close = new Button { Content = "Listo", IsCancel = true };
@@ -86,8 +102,9 @@ internal sealed class AlertDialog : TradingHubDialog<bool>
                 new TextBlock { Text = "Crear alerta", Classes = { "h2" } },
                 Ui.Field("Condición", _left),
                 _cond,
-                Ui.Field("Con", Ui.Row(8, _right, _rightValue)),
+                _rightRow,
                 _lowerRow,
+                _barsRow,
                 Ui.Row(8, Ui.Field("Frecuencia", _freq), Ui.Field("Vence", _expiry)),
                 Ui.Field("Mensaje", _message, "Se muestra en la app y sale por webhook / Telegram si están activados (Ajustes → Alertas)."),
                 new Separator { Margin = new Thickness(0, 6) },
@@ -103,6 +120,14 @@ internal sealed class AlertDialog : TradingHubDialog<bool>
     private void Fill(ComboBox box, bool withValue)
     {
         if (withValue) box.Items.Add(new ComboBoxItem { Content = "Valor fijo", Tag = null });
+        // en «Con» y en el borde de abajo, las líneas dibujadas primero (es lo que más se alerta), después precio e indicadores
+        if (withValue)
+        {
+            foreach (var s in _sources.Where(o => o.Drawing != null)) box.Items.Add(new ComboBoxItem { Content = "✎ " + s.Label, Tag = s });
+            foreach (var s in _sources.Where(o => o.Drawing == null)) box.Items.Add(new ComboBoxItem { Content = s.Label, Tag = s });
+            return;
+        }
+
         foreach (var s in _sources) box.Items.Add(new ComboBoxItem { Content = s.Label, Tag = s });
     }
 
@@ -110,7 +135,7 @@ internal sealed class AlertDialog : TradingHubDialog<bool>
     {
         foreach (var item in box.Items.OfType<ComboBoxItem>())
         {
-            if (item.Tag is AlertOperand o && o.Indicator == op.Indicator && o.Series == op.Series)
+            if (item.Tag is AlertOperand o && o.Indicator == op.Indicator && o.Series == op.Series && o.Drawing == op.Drawing)
             {
                 box.SelectedItem = item;
                 return;
@@ -124,26 +149,48 @@ internal sealed class AlertDialog : TradingHubDialog<bool>
     {
         _rightValue.IsVisible = (_right.SelectedItem as ComboBoxItem)?.Tag == null;
         _lowerValue.IsVisible = (_lower.SelectedItem as ComboBoxItem)?.Tag == null;
-        bool channel = (_cond.SelectedItem as ComboBoxItem)?.Tag is AlertCondition c && ChartAlert.IsChannel(c);
-        _lowerRow.IsVisible = channel;
+        var cond = (_cond.SelectedItem as ComboBoxItem)?.Tag is AlertCondition c ? c : AlertCondition.Crossing;
+        _lowerRow.IsVisible = ChartAlert.IsChannel(cond);
+        _barsRow.IsVisible = ChartAlert.IsPercent(cond);
+        if (ChartAlert.IsPercent(cond))
+        {
+            // el porcentaje es un valor fijo
+            if ((_right.SelectedItem as ComboBoxItem)?.Tag != null) _right.SelectedIndex = 0;
+            _rightValue.IsVisible = true;
+        }
+    }
+
+    /// <summary>
+    /// En una condición de canal con el borde de arriba de un dibujo (canal o rectángulo), el de abajo es el otro borde del
+    /// mismo dibujo: se elige solo.
+    /// </summary>
+    private void PairChannel()
+    {
+        if ((_cond.SelectedItem as ComboBoxItem)?.Tag is not AlertCondition c || !ChartAlert.IsChannel(c)) return;
+        if ((_right.SelectedItem as ComboBoxItem)?.Tag is not AlertOperand { Drawing: { } id } r) return;
+        string other = r.Series switch { "upper" => "lower", "top" => "bottom", "lower" => "upper", "bottom" => "top", _ => "" };
+        if (other.Length == 0) return;
+        var op = _sources.FirstOrDefault(o => o.Drawing == id && o.Series == other);
+        if (op != null) Select(_lower, op);
     }
 
     private static AlertOperand Operand(ComboBox box, NumericUpDown value) =>
         (box.SelectedItem as ComboBoxItem)?.Tag is AlertOperand o
-            ? new AlertOperand { Indicator = o.Indicator, Series = o.Series, Label = o.Label }
+            ? o.Copy()
             : AlertOperand.Fixed(value.Value ?? 0);
 
     private void Create()
     {
         var a = new ChartAlert
         {
-            Left = (_left.SelectedItem as ComboBoxItem)?.Tag is AlertOperand l ? new AlertOperand { Indicator = l.Indicator, Series = l.Series, Label = l.Label } : AlertOperand.Price(),
+            Left = (_left.SelectedItem as ComboBoxItem)?.Tag is AlertOperand l ? l.Copy() : AlertOperand.Price(),
             Condition = (_cond.SelectedItem as ComboBoxItem)?.Tag is AlertCondition c ? c : AlertCondition.Crossing,
             Right = Operand(_right, _rightValue),
             Frequency = (_freq.SelectedItem as ComboBoxItem)?.Tag is AlertFrequency f ? f : AlertFrequency.OncePerBar,
             Message = (_message.Text ?? "").Trim(),
+            Bars = (int)(_bars.Value ?? 1),
         };
-        if (a.Right.IsFixed) a.Right.Label = _model.Instrument.FormatPrice(a.Right.Value ?? 0);
+        if (a.Right.IsFixed) a.Right.Label = ChartAlert.IsPercent(a.Condition) ? (a.Right.Value ?? 0).ToString("0.##", CultureInfo.CurrentCulture) : _model.Instrument.FormatPrice(a.Right.Value ?? 0);
         if (ChartAlert.IsChannel(a.Condition))
         {
             a.Lower = Operand(_lower, _lowerValue);
@@ -200,6 +247,7 @@ internal sealed class AlertDialog : TradingHubDialog<bool>
     }
 
     /// <summary>Abre el diálogo. Devuelve true si cambió alguna alerta (para guardar el espacio de trabajo).</summary>
-    public static Task<bool> ShowAsync(Window owner, ChartModel model, AlertOperand? left = null, AlertOperand? right = null) =>
-        new AlertDialog(model, left, right).ShowDialog<bool>(owner);
+    public static Task<bool> ShowAsync(Window owner, ChartModel model, AlertOperand? left = null, AlertOperand? right = null,
+        AlertOperand? lower = null, AlertCondition? condition = null) =>
+        new AlertDialog(model, left, right, lower, condition).ShowDialog<bool>(owner);
 }

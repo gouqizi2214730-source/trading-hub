@@ -129,8 +129,11 @@ public sealed partial class TradingView
         };
 
         var buttonsToggle = Ui.IconButton(MaterialIconKind.GestureTapButton, "Mostrar u ocultar los botones de ejecución (mercado, límites, cancelar, cerrar)", ToggleDomButtons, 15);
+        _domLock = new Button().Classes("icon");
+        _domLock.Click += (_, _) => ToggleDomTrading();
         var header = SectionHeader("DOM", () => SetPanel("dom", false),
             _domStep,
+            _domLock,
             buttonsToggle,
             Ui.IconButton(MaterialIconKind.ImageFilterCenterFocus, "Centrar en el precio", () => _dom.Recenter(), 15),
             Ui.IconButton(MaterialIconKind.Tune, "Configurar DOM (columnas, tamaños, colores)", () => OpenDomSettings(), 15),
@@ -142,6 +145,7 @@ public sealed partial class TradingView
         _dom.MinHeight = 80;
         _domButtons = BuildDomButtons();
         _domButtons.IsVisible = _svc.Settings.ShowDomButtons;
+        ApplyDomTrading();
         var box = new DockPanel();
         DockPanel.SetDock(header, Dock.Top);
         box.Children.Add(header);
@@ -152,6 +156,28 @@ public sealed partial class TradingView
     }
 
     private Control? _domButtons;
+    private Button _domLock = null!;
+
+    /// <summary>Prende o apaga operar desde el DOM (independiente de operar en el gráfico).</summary>
+    private void ToggleDomTrading()
+    {
+        _svc.Settings.DomTrading = !_svc.Settings.DomTrading;
+        _svc.Settings.Save();
+        ApplyDomTrading();
+        _status(_svc.Settings.DomTrading ? "Operar desde el DOM: prendido" : "Operar desde el DOM: apagado (solo muestra el libro)");
+    }
+
+    private void ApplyDomTrading()
+    {
+        bool on = _svc.Settings.DomTrading;
+        _dom.TradingEnabled = on;
+        _domLock.Content = Ui.Icon(on ? MaterialIconKind.LockOpenVariantOutline : MaterialIconKind.LockOutline, 15, on ? null : Ui.Accent);
+        ToolTip.SetTip(_domLock, on
+            ? "Operar desde el DOM: prendido. Tocá para apagarlo (el DOM solo muestra; el gráfico sigue operando como esté)."
+            : "Operar desde el DOM: apagado. Tocá para prenderlo.");
+        if (_domButtons != null) _domButtons.IsEnabled = on;
+        _dom.InvalidateVisual();
+    }
 
     private void ToggleDomButtons()
     {
@@ -948,12 +974,12 @@ public sealed partial class TradingView
     // ===================================================================== menú contextual
 
     /// <summary>Abre las alertas del gráfico (crear, pausar, borrar) con la condición ya armada si se pasa.</summary>
-    internal async Task OpenAlertsAsync(ChartTab tab, AlertOperand? left, AlertOperand? right)
+    internal async Task OpenAlertsAsync(ChartTab tab, AlertOperand? left, AlertOperand? right, AlertOperand? lower = null, AlertCondition? condition = null)
     {
         if (tab.Model == null) return;
         var owner = tab.Window ?? TopLevel.GetTopLevel(this) as Window;
         if (owner == null) return;
-        if (await AlertDialog.ShowAsync(owner, tab.Model, left, right))
+        if (await AlertDialog.ShowAsync(owner, tab.Model, left, right, lower, condition))
         {
             tab.Model.Invalidate();
             Workspace.Save(this);
@@ -1014,11 +1040,73 @@ public sealed partial class TradingView
             items.Add(new Separator());
         }
 
+        // clic derecho sobre un dibujo: queda elegido (como en TradingView)
+        if (model.LastLayout is { } hitLayout)
+        {
+            for (int i = model.Drawings.Count - 1; i >= 0; i--)
+            {
+                var d = model.Drawings[i];
+                if (!d.HitTest(hitLayout, model.Series, x, y, out _)) continue;
+                foreach (var o in model.Drawings) o.Selected = false;
+                d.Selected = true;
+                model.Invalidate();
+                break;
+            }
+        }
+
         var sel = model.Drawings.FirstOrDefault(d => d.Selected && d.IsVisibleOn(model.Period));
         if (sel != null)
         {
+            // alertas sobre el dibujo: cruza / toca una línea; entra / sale de un canal o un rectángulo
+            var lines = ChartAlertEngine.DrawingLines(model, sel);
+            if (lines.Count > 0)
+            {
+                var price = AlertOperand.Price("close", "Precio (cierre)");
+                if (sel.IsChannel && lines.Count >= 2)
+                {
+                    var upper = lines[0];
+                    var lowerLine = lines[^1];
+                    var alerts = new MenuItem { Header = "Agregar alerta", Icon = Ui.Icon(MaterialIconKind.BellPlusOutline, 16) };
+                    alerts.Items.Add(Item("Entra en el canal…", null, () => _ = OpenAlertsAsync(tab, price, upper, lowerLine, AlertCondition.EnteringChannel)));
+                    alerts.Items.Add(Item("Sale del canal…", null, () => _ = OpenAlertsAsync(tab, price, upper, lowerLine, AlertCondition.ExitingChannel)));
+                    alerts.Items.Add(Item("Dentro del canal…", null, () => _ = OpenAlertsAsync(tab, price, upper, lowerLine, AlertCondition.InsideChannel)));
+                    alerts.Items.Add(Item("Fuera del canal…", null, () => _ = OpenAlertsAsync(tab, price, upper, lowerLine, AlertCondition.OutsideChannel)));
+                    alerts.Items.Add(new Separator());
+                    foreach (var l in lines)
+                    {
+                        alerts.Items.Add(Item($"Cruza «{l.Label}»…", null, () => _ = OpenAlertsAsync(tab, price, l, null, AlertCondition.Crossing)));
+                        alerts.Items.Add(Item($"Toca «{l.Label}»…", null, () => _ = OpenAlertsAsync(tab, price, l, null, AlertCondition.Touching)));
+                    }
+
+                    items.Add(alerts);
+                }
+                else if (lines.Count == 1)
+                {
+                    var l = lines[0];
+                    var alerts = new MenuItem { Header = "Agregar alerta", Icon = Ui.Icon(MaterialIconKind.BellPlusOutline, 16) };
+                    alerts.Items.Add(Item("Cruza la línea…", null, () => _ = OpenAlertsAsync(tab, price, l, null, AlertCondition.Crossing)));
+                    alerts.Items.Add(Item("Cruza hacia arriba…", null, () => _ = OpenAlertsAsync(tab, price, l, null, AlertCondition.CrossingUp)));
+                    alerts.Items.Add(Item("Cruza hacia abajo…", null, () => _ = OpenAlertsAsync(tab, price, l, null, AlertCondition.CrossingDown)));
+                    alerts.Items.Add(Item("Toca la línea…", null, () => _ = OpenAlertsAsync(tab, price, l, null, AlertCondition.Touching)));
+                    items.Add(alerts);
+                }
+                else
+                {
+                    var alerts = new MenuItem { Header = "Agregar alerta", Icon = Ui.Icon(MaterialIconKind.BellPlusOutline, 16) };
+                    foreach (var l in lines)
+                        alerts.Items.Add(Item($"«{l.Label}»…", null, () => _ = OpenAlertsAsync(tab, price, l, null, AlertCondition.Crossing)));
+                    items.Add(alerts);
+                }
+            }
+
             items.Add(Item("Configurar dibujo…", MaterialIconKind.TuneVariant, () => EditDrawing(tab, sel)));
-            items.Add(Item("Borrar dibujo", MaterialIconKind.DeleteOutline, () => { model.Drawings.Remove(sel); DrawingsTouched(tab); }));
+            items.Add(Item("Borrar dibujo", MaterialIconKind.DeleteOutline, () =>
+            {
+                model.Drawings.Remove(sel);
+                // las alertas de ese dibujo se van con él
+                model.Alerts.RemoveAll(a => a.Uses(sel.Id.ToString("N")));
+                DrawingsTouched(tab);
+            }));
             items.Add(Item(sel.Locked ? "Desbloquear" : "Bloquear", MaterialIconKind.LockOutline, () => { sel.Locked = !sel.Locked; DrawingsTouched(tab); }));
             items.Add(Item(sel.EffectiveLineStyle == LineStyleKind.Solid ? "Línea punteada" : "Línea sólida", MaterialIconKind.Minus, () =>
             {

@@ -16,6 +16,12 @@ public sealed class DomView : SkiaView
     public DomModel? Dom { get; set; }
 
     /// <summary>
+    /// Si se puede operar desde el DOM (clic para mandar o cancelar, arrastrar órdenes). Apagado, el DOM solo muestra:
+    /// un interruptor propio, aparte del de operar en el gráfico.
+    /// </summary>
+    public bool TradingEnabled { get; set; } = true;
+
+    /// <summary>
     /// Pedido de orden: columna, precio y si es cancelación (clic derecho / Alt).
     /// Si nadie escucha, el DOM opera directo en la cuenta.
     /// </summary>
@@ -36,12 +42,29 @@ public sealed class DomView : SkiaView
         }
 
         _renderer.Render(canvas, Dom, width, height, _mouseY);
+        if (!TradingEnabled)
+        {
+            // aviso discreto arriba a la derecha: el DOM no manda órdenes
+            string text = TradingHub.Rendering.UiText.Tr("Operar desde el DOM: apagado");
+            using var bg = new SKPaint { Color = new SKColor(40, 40, 46, 220), IsAntialias = true };
+            using var fg = new SKPaint { Color = new SKColor(230, 180, 90), IsAntialias = true, TextSize = 10.5f };
+            float w = fg.MeasureText(text) + 12;
+            var r = new SKRect(width - w - 6, height - 22, width - 6, height - 5);
+            canvas.DrawRoundRect(r, 4, 4, bg);
+            canvas.DrawText(text, r.Left + 6, r.Bottom - 5, fg);
+        }
     }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
         if (Dom == null) return;
+        if (!TradingEnabled)
+        {
+            Message?.Invoke(TradingHub.Rendering.UiText.Tr("Operar desde el DOM está apagado (el candado del encabezado del DOM lo prende)."));
+            return;
+        }
+
         var p = e.GetPosition(this);
         var props = e.GetCurrentPoint(this).Properties;
         bool cancel = props.IsRightButtonPressed || e.KeyModifiers.HasFlag(KeyModifiers.Alt);

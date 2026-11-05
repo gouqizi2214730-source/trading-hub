@@ -566,6 +566,15 @@ public sealed class ChartController
 
     private void FinishDrawing()
     {
+        // canal paralelo: el borde paralelo arranca a un 6 % del alto visible por encima (se ajusta con su manejador)
+        if (_active is { Kind: DrawingKind.ParallelChannel, Points.Count: 2 } ch && L is { } lc)
+        {
+            double off = Math.Abs(lc.Main.Top - lc.Main.Bottom) * 0.06;
+            double tick = (double)_model.Instrument.TickSize;
+            if (tick > 0) off = Math.Max(tick, Math.Round(off / tick) * tick);
+            ch.InitChannel(off);
+        }
+
         _drag = DragMode.None;
         if (!StickyTool) ActiveTool = null;
         ToolFinished?.Invoke();

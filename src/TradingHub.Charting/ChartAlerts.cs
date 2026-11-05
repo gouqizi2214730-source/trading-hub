@@ -9,12 +9,15 @@ public enum AlertCondition
     [Display(Name = "Cruza")] Crossing,
     [Display(Name = "Cruza hacia arriba")] CrossingUp,
     [Display(Name = "Cruza hacia abajo")] CrossingDown,
+    [Display(Name = "Toca")] Touching,
     [Display(Name = "Mayor que")] GreaterThan,
     [Display(Name = "Menor que")] LessThan,
     [Display(Name = "Entra en el canal")] EnteringChannel,
     [Display(Name = "Sale del canal")] ExitingChannel,
     [Display(Name = "Dentro del canal")] InsideChannel,
     [Display(Name = "Fuera del canal")] OutsideChannel,
+    [Display(Name = "Sube más de un % (en N velas)")] MovingUpPercent,
+    [Display(Name = "Baja más de un % (en N velas)")] MovingDownPercent,
 }
 
 /// <summary>Cada cuánto puede dispararse.</summary>
@@ -40,6 +43,9 @@ public sealed class AlertOperand
 
     public decimal? Value { get; set; }
 
+    /// <summary>Dibujo del gráfico (su Id): una línea, un rayo, un rectángulo o un canal; <see cref="Series"/> dice cuál de sus líneas.</summary>
+    public string? Drawing { get; set; }
+
     /// <summary>Cómo se muestra (nombre del indicador y de la línea).</summary>
     public string Label { get; set; } = "";
 
@@ -47,7 +53,12 @@ public sealed class AlertOperand
 
     public static AlertOperand Fixed(decimal value) => new() { Value = value, Label = value.ToString(System.Globalization.CultureInfo.InvariantCulture) };
 
-    public bool IsFixed => Indicator == null && Series == null;
+    public bool IsFixed => Indicator == null && Series == null && Drawing == null;
+
+    /// <summary>El precio de la vela (cierre, máximo…), no una línea ni un valor.</summary>
+    public bool IsPrice => Indicator == null && Drawing == null && Series != null;
+
+    public AlertOperand Copy() => new() { Indicator = Indicator, Series = Series, Value = Value, Drawing = Drawing, Label = Label };
 }
 
 /// <summary>Alerta de un gráfico sobre el precio o las líneas de sus indicadores.</summary>
@@ -62,6 +73,9 @@ public sealed class ChartAlert
     public AlertOperand? Lower { get; set; }
 
     public AlertFrequency Frequency { get; set; } = AlertFrequency.OncePerBar;
+
+    /// <summary>«Sube / baja más de un %»: en cuántas velas (1 = desde la anterior).</summary>
+    public int Bars { get; set; } = 1;
     public string Message { get; set; } = "";
     public bool Active { get; set; } = true;
     public DateTime? ExpiresUtc { get; set; }
@@ -74,6 +88,11 @@ public sealed class ChartAlert
 
     public static bool IsChannel(AlertCondition c) => c is AlertCondition.EnteringChannel or AlertCondition.ExitingChannel or AlertCondition.InsideChannel or AlertCondition.OutsideChannel;
 
+    public static bool IsPercent(AlertCondition c) => c is AlertCondition.MovingUpPercent or AlertCondition.MovingDownPercent;
+
+    /// <summary>Si la alerta usa un dibujo (para borrarla con él).</summary>
+    public bool Uses(string drawingId) => Left.Drawing == drawingId || Right.Drawing == drawingId || Lower?.Drawing == drawingId;
+
     public string Describe()
     {
         string cond = Condition switch
@@ -81,6 +100,9 @@ public sealed class ChartAlert
             AlertCondition.Crossing => "cruza",
             AlertCondition.CrossingUp => "cruza hacia arriba",
             AlertCondition.CrossingDown => "cruza hacia abajo",
+            AlertCondition.Touching => "toca",
+            AlertCondition.MovingUpPercent => "sube más de",
+            AlertCondition.MovingDownPercent => "baja más de",
             AlertCondition.GreaterThan => "mayor que",
             AlertCondition.LessThan => "menor que",
             AlertCondition.EnteringChannel => "entra en el canal",
@@ -88,6 +110,7 @@ public sealed class ChartAlert
             AlertCondition.InsideChannel => "dentro del canal",
             _ => "fuera del canal",
         };
+        if (IsPercent(Condition)) return $"{Left.Label} {cond} {Right.Label} % en {Math.Max(1, Bars)} vela{(Bars > 1 ? "s" : "")}";
         return IsChannel(Condition) ? $"{Left.Label} {cond} {Lower?.Label} – {Right.Label}" : $"{Left.Label} {cond} {Right.Label}";
     }
 }
@@ -143,6 +166,28 @@ public static class ChartAlertEngine
         return res;
     }
 
+    /// <summary>Las líneas de los dibujos del gráfico que se pueden alertar (líneas, rayos, rectángulos, canales, Fibonacci).</summary>
+    public static List<AlertOperand> DrawingLines(ChartModel model)
+    {
+        var res = new List<AlertOperand>();
+        var count = new Dictionary<Drawings.DrawingKind, int>();
+        foreach (var d in model.Drawings)
+        {
+            var parts = d.AlertParts();
+            if (parts.Count == 0) continue;
+            int n = count[d.Kind] = (count.TryGetValue(d.Kind, out var c) ? c : 0) + 1;
+            string name = (d.Text is { Length: > 0 } t && t != "alerta" ? t : Drawings.ChartDrawing.KindName(d.Kind) + (n > 1 ? " " + n : ""));
+            foreach (var (part, partName) in parts)
+                res.Add(new AlertOperand { Drawing = d.Id.ToString("N"), Series = part, Label = parts.Count > 1 ? $"{name} · {partName}" : name });
+        }
+
+        return res;
+    }
+
+    /// <summary>Las líneas de un dibujo como operandos (arriba primero en los canales).</summary>
+    public static List<AlertOperand> DrawingLines(ChartModel model, Drawings.ChartDrawing d) =>
+        DrawingLines(model).Where(o => o.Drawing == d.Id.ToString("N")).ToList();
+
     /// <summary>La línea de indicador más cercana al punto (x, y) del gráfico, a menos de <paramref name="tolerance"/> píxeles.</summary>
     public static AlertOperand? LineAt(ChartModel model, float x, float y, float tolerance = 7)
     {
@@ -183,6 +228,14 @@ public static class ChartAlertEngine
         }
 
         if (bar < 0 || bar >= model.Series.Count) return false;
+        if (op.Drawing != null)
+        {
+            var d = model.Drawings.FirstOrDefault(x => x.Id.ToString("N") == op.Drawing);
+            if (d?.ValueAt(model.Series, bar, op.Series ?? "line") is not { } v || double.IsNaN(v) || double.IsInfinity(v)) return false;
+            value = (decimal)Math.Clamp(v, -7.9e27, 7.9e27);
+            return true;
+        }
+
         if (op.Indicator == null)
         {
             var c = model.Series[bar];
@@ -205,6 +258,15 @@ public static class ChartAlertEngine
     /// <summary>La condición en la vela <paramref name="bar"/> (null = falta algún valor).</summary>
     public static bool? Check(ChartModel model, ChartAlert a, int bar)
     {
+        if (ChartAlert.IsPercent(a.Condition))
+        {
+            int back = Math.Max(1, a.Bars);
+            if (!TryValue(model, a.Left, bar, out var now) || !TryValue(model, a.Left, bar - back, out var then) || then == 0) return null;
+            decimal pct = a.Right.Value ?? 0;
+            decimal change = (now - then) / Math.Abs(then) * 100m;
+            return a.Condition == AlertCondition.MovingUpPercent ? change >= pct : change <= -pct;
+        }
+
         if (!TryValue(model, a.Left, bar, out var x0) || !TryValue(model, a.Right, bar, out var r0)) return null;
         bool has1 = TryValue(model, a.Left, bar - 1, out var x1) & TryValue(model, a.Right, bar - 1, out var r1);
         decimal l0 = 0, l1 = 0;
@@ -222,6 +284,7 @@ public static class ChartAlertEngine
             AlertCondition.Crossing => has1 && ((x1 <= r1 && x0 > r0) || (x1 >= r1 && x0 < r0)),
             AlertCondition.CrossingUp => has1 && x1 <= r1 && x0 > r0,
             AlertCondition.CrossingDown => has1 && x1 >= r1 && x0 < r0,
+            AlertCondition.Touching => Touches(model, a, bar, x0, r0, has1, x1, r1),
             AlertCondition.GreaterThan => x0 > r0,
             AlertCondition.LessThan => x0 < r0,
             AlertCondition.EnteringChannel => has1 && !inside1 && inside0,
@@ -229,6 +292,22 @@ public static class ChartAlertEngine
             AlertCondition.InsideChannel => inside0,
             _ => !inside0,
         };
+    }
+
+    /// <summary>
+    /// «Toca»: con el precio, la vela llega a la línea (el mínimo está debajo y el máximo encima); con una línea de un
+    /// indicador, la alcanza o la cruza.
+    /// </summary>
+    private static bool Touches(ChartModel model, ChartAlert a, int bar, decimal x0, decimal r0, bool has1, decimal x1, decimal r1)
+    {
+        if (a.Left.IsPrice)
+        {
+            var c = model.Series[bar];
+            decimal hi = model.Instrument.FromTicks(c.HighTicks), lo = model.Instrument.FromTicks(c.LowTicks);
+            return lo <= r0 && hi >= r0;
+        }
+
+        return x0 == r0 || (has1 && (x1 - r1) * (x0 - r0) <= 0);
     }
 
     /// <summary>Revisa las alertas activas y devuelve las que se disparan ahora (las «una sola vez» quedan apagadas).</summary>
