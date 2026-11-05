@@ -73,4 +73,31 @@ public class FlowIndicatorTests
 
         Assert.True(amber > 50, $"ámbar: {amber}");
     }
+
+    [Fact]
+    public void Liquidity_tracker_pesa_por_distancia_y_los_niveles_de_liquidacion_se_van_con_el_precio()
+    {
+        // un nivel de $1M en el mejor bid y otro igual 10 bp más abajo: con vida media de 10 bp pesa la mitad
+        long bb = 800000, ba = 800001; // ticks de 0.1 → 80000.0 / 80000.1
+        var s = new DepthSample(DateTime.UtcNow, bb, ba, new[] { 0, 800 }, new[] { 12.5f, 12.5f }, new[] { 0 }, new[] { 12.5f });
+        var (bid, ask) = LiquidityTracker.Measure(s, 0.1m, 10, 0, 0, false);
+        Assert.InRange(bid, 1_000_000 * 1.49, 1_000_000 * 1.51);
+        Assert.InRange(ask, 999_000, 1_001_000);
+        var (onlyBig, _) = LiquidityTracker.Measure(s, 0.1m, 10, 2_000_000, 0, false);
+        Assert.Equal(0, onlyBig);
+
+        var json = """{"v":2,"coin":"BTC","attribution":"Powered by HyperTracker","snapshot":{"asOf":1793840368498},"mark":80500.0,"positions":3,"step":10.0,"bins":[[8000,100,50,0,0,2,0,120,0],[8040,0,0,300,0,0,1,0,300],[8100,0,0,700,100,0,2,0,600]]}""";
+        var snap = LiquidationLevels.Parse(json)!;
+        Assert.Equal(3, snap.Bins.Count);
+        Assert.Equal(80000, snap.Bins[0].Price);
+        Assert.Equal(150, snap.Bins[0].Long);
+        // el precio bajó a 80005 (no llegó a la franja 80000-80010? sí: su techo 80010 está encima) y subió a 80450
+        var left = LiquidationLevels.Remaining(snap, 80005, 80450);
+        Assert.DoesNotContain(left, b => b.Price == 80000);
+        Assert.DoesNotContain(left, b => b.Price == 80400);
+        Assert.Contains(left, b => b.Price == 81000 && b.Short == 800);
+
+        var book = new[] { (80000m, 1m), (79990m, 2m), (80010m, 0.5m) };
+        Assert.Equal(3, BookMirror.Sum(book, 79980, 80000).Coins);
+    }
 }
