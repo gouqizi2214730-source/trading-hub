@@ -80,6 +80,31 @@ public class SmcStructure : StructureIndicator
         _cisds = Smc.Cisds(Bars);
     }
 
+    /// <summary>
+    /// Lo que dibuja, para las alertas: BOS / CHoCH, EQH / EQL, CISD (los 40 más recientes de cada uno) y los bordes de FVG y
+    /// order blocks (los que se ven).
+    /// </summary>
+    public override IEnumerable<IndicatorLevel> GetAlertLevels()
+    {
+        if (Bars.Count == 0) yield break;
+        int last = Bars.Count - 1;
+        if (ShowFvg)
+            foreach (var g in _fvgs.Where(g => g.Filled < 0 || ShowFilledFvg).TakeLast(MaxBoxes))
+                foreach (var l in BoxLevels("fvg" + g.Dir, g.Dir == 1 ? "FVG ▲" : "FVG ▼", g.I + 1, g.Filled >= 0 ? g.Filled : -1, g.Top, g.Bottom)) yield return l;
+        if (ShowOrderBlocks)
+            foreach (var ob in _blocks.TakeLast(MaxBoxes))
+                foreach (var l in BoxLevels("ob" + ob.Dir, (ob.Breaker ? "Breaker " : "OB ") + (ob.Dir == 1 ? "▲" : "▼"), ob.I, -1, ob.Top, ob.Bottom)) yield return l;
+        if (ShowBreaks)
+            foreach (var b in _breaks.TakeLast(40))
+                yield return Level((b.IsChoch ? "choch" : "bos") + b.Dir, (b.IsChoch ? "CHoCH " : "BOS ") + (b.Dir == 1 ? "▲" : "▼"), b.I, b.Broken, b.Level);
+        if (ShowLiquidity)
+            foreach (var p in _pools.TakeLast(40))
+                yield return Level(p.Type == 1 ? "eqh" : "eql", p.Type == 1 ? "EQH" : "EQL", p.I, p.Swept >= 0 ? p.Swept : -1, p.Level);
+        if (ShowCisd)
+            foreach (var c in _cisds.TakeLast(40))
+                yield return Level("cisd" + (c.Bull ? "u" : "d"), "CISD", c.Start, c.Invalid >= 0 ? c.Invalid : Math.Min(last, c.I + 20), c.Level);
+    }
+
     protected override void OnRender(RenderContext ctx, DrawingLayouts layout)
     {
         if (ChartInfo == null || Bars.Count == 0) return;

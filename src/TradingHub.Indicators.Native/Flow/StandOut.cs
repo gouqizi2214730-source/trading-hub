@@ -334,6 +334,35 @@ public class TrappedTraders : Indicator
         }
     }
 
+    /// <summary>Hasta dónde vive el promedio de unos atrapados: hasta que el precio cierra de vuelta más allá, o <see cref="KeepBars"/>.</summary>
+    private int EndOf(Trap t) => Life(t).End;
+
+    private (int End, bool Dead) Life(Trap t)
+    {
+        int end = Math.Min(CurrentBar - 1, t.Bar + KeepBars);
+        for (int b = t.Bar + 1; b <= end; b++)
+        {
+            var c = GetCandle(b);
+            if (t.Buyers ? c.Close > t.AvgPrice : c.Close < t.AvgPrice) return (b, true);
+        }
+
+        return (end, false);
+    }
+
+    /// <summary>La línea punteada del precio promedio de cada grupo de atrapados, para las alertas.</summary>
+    public override IEnumerable<IndicatorLevel> GetAlertLevels()
+    {
+        foreach (var t in _traps.TakeLast(50))
+        {
+            if (t.Bar < 0 || t.Bar >= CurrentBar) continue;
+            var time = GetCandle(t.Bar).Time;
+            var (end, dead) = Life(t);
+            int to = dead ? end : t.Bar + KeepBars; // si sigue vivo, sigue a la derecha hasta KeepBars
+            yield return new IndicatorLevel($"trap{(t.Buyers ? "b" : "s")}@{time.Ticks}",
+                $"{UiText.Tr(t.Buyers ? "Compradores atrapados" : "Vendedores atrapados")} {time:dd/MM HH:mm} · {UiText.Tr("promedio")}", t.AvgPrice, t.Bar, to);
+        }
+    }
+
     protected override void OnRender(RenderContext context, DrawingLayouts layout)
     {
         if (ChartInfo == null || CurrentBar <= 0) return;
@@ -344,16 +373,7 @@ public class TrappedTraders : Indicator
         {
             if (t.Bar > pc.LastVisibleBarNumber || t.Bar + KeepBars < pc.FirstVisibleBarNumber) continue;
             // se apaga si el precio cerró de vuelta más allá del promedio de los atrapados
-            int end = Math.Min(CurrentBar - 1, t.Bar + KeepBars);
-            for (int b = t.Bar + 1; b <= end; b++)
-            {
-                var c = GetCandle(b);
-                if (t.Buyers ? c.Close > t.AvgPrice : c.Close < t.AvgPrice)
-                {
-                    end = b;
-                    break;
-                }
-            }
+            int end = EndOf(t);
 
             int x0 = ChartInfo.GetXByBar(t.Bar), x1 = ChartInfo.GetXByBar(end) + bw;
             int y0 = ChartInfo.GetYByPrice(t.High, false), y1 = ChartInfo.GetYByPrice(t.Low, false);

@@ -128,5 +128,26 @@ public abstract class StructureIndicator : Indicator
         ctx.DrawString(text, font, color, x, y - size.Height / 2);
     }
 
+    /// <summary>
+    /// Un nivel para las alertas (de la vela local <paramref name="fromBar"/> a <paramref name="toBar"/>; −1 = sigue a la
+    /// derecha). El Id lleva la hora de la vela de inicio (no el precio, que puede moverse: un EQH es un promedio), así es el
+    /// mismo al recalcular; <paramref name="kind"/> distingue lo que empieza en la misma vela.
+    /// </summary>
+    protected IndicatorLevel Level(string kind, string name, int fromBar, int toBar, double price, string? part = null)
+    {
+        int from = Math.Clamp(fromBar + Offset, 0, Math.Max(0, CurrentBar - 1));
+        long key = CurrentBar > 0 ? GetCandle(from).Time.Ticks : from;
+        string when = CurrentBar > 0 ? GetCandle(from).Time.ToString("dd/MM HH:mm") : "";
+        return new IndicatorLevel($"{kind}@{key}", ($"{UiText.Tr(name)} {when}".Trim() + (part == null ? "" : " · " + UiText.Tr(part))),
+            (decimal)price, from, toBar < 0 ? int.MaxValue : toBar + Offset);
+    }
+
+    /// <summary>Los dos bordes de una caja como niveles.</summary>
+    protected IEnumerable<IndicatorLevel> BoxLevels(string kind, string name, int fromBar, int toBar, double top, double bottom)
+    {
+        yield return Level(kind + ".top", name, fromBar, toBar, Math.Max(top, bottom), "borde de arriba");
+        yield return Level(kind + ".bottom", name, fromBar, toBar, Math.Min(top, bottom), "borde de abajo");
+    }
+
     protected bool Visible(int localBar) => localBar + Offset >= FirstVisibleBarNumber - 1 && localBar + Offset <= LastVisibleBarNumber + 1;
 }

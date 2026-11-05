@@ -330,6 +330,39 @@ public class VpSessionProfiles : VpSessionBase
         }
     }
 
+    /// <summary>Lo que dibuja, para las alertas: POC, VAH y VAL de los perfiles de cada sesión que se ven.</summary>
+    public override IEnumerable<IndicatorLevel> GetAlertLevels()
+    {
+        if (!Usable) yield break;
+        var on = new[] { ShowAsia, ShowLondon, ShowNewYork };
+        int last = Math.Max(0, CurrentBar - 1);
+        for (int s = 0; s < 3; s++)
+        {
+            if (!on[s]) continue;
+            var list = _done[s];
+            for (int i = Math.Max(0, list.Count - Keep); i < list.Count; i++)
+                foreach (var l in Of(list[i])) yield return l;
+            if (_developing && _dev[s] is { } d)
+                foreach (var l in Of(d)) yield return l;
+        }
+
+        IEnumerable<IndicatorLevel> Of(Result r)
+        {
+            bool known = r.StartBar >= 0 && r.StartBar < CurrentBar;
+            string id = SessionNames[r.Session] + (r.Final ? "" : ".dev") + "@" + (known ? GetCandle(r.StartBar).Time.Ticks : 0);
+            string name = UiText.Tr(SessionNames[r.Session]) + " " + (r.Final && known ? GetCandle(r.StartBar).Time.ToString("dd/MM") : UiText.Tr("en formación"));
+            int end = r.Final ? r.EndBar : last;
+            if (ShowPoc)
+                yield return new IndicatorLevel(id + ".poc", name + " POC", r.Poc, r.StartBar,
+                    ExtendPoc && r.Final ? (r.PocDead ? r.PocEnd : int.MaxValue) : end);
+            if (ShowValueArea)
+            {
+                yield return new IndicatorLevel(id + ".vah", name + " VAH", r.Vah, r.StartBar, end);
+                yield return new IndicatorLevel(id + ".val", name + " VAL", r.Val, r.StartBar, end);
+            }
+        }
+    }
+
     private void Draw(RenderContext ctx, Result r, Color color)
     {
         int first = FirstVisibleBarNumber, last = LastVisibleBarNumber;

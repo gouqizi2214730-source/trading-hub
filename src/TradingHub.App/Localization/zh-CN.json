@@ -4517,5 +4517,8 @@
  "Copias editadas sin cambios actualizadas al original nuevo: {0}": "没改动过的编辑副本已更新为新版原版：{0}",
  "Ejemplo: delta % por vela": "示例：每根 K 线的 delta %",
  "Umbral para resaltar (%)": "高亮阈值（%）",
- "Delta %": "Delta %"
+ "Delta %": "Delta %",
+ "Compradores atrapados": "被套多头",
+ "Vendedores atrapados": "被套空头",
+ "promedio": "均价"
 }

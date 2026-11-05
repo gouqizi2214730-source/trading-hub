@@ -117,6 +117,41 @@ public class HtfStructure : StructureIndicator
         }
     }
 
+    /// <summary>Lo que dibuja, para las alertas: FVG de los períodos mayores, PO3 (C1, barrido, T-Spots), CISD / STDV y breakers.</summary>
+    public override IEnumerable<IndicatorLevel> GetAlertLevels()
+    {
+        if (Bars.Count == 0) yield break;
+        int last = Bars.Count - 1;
+        if (ShowHtfFvg)
+            foreach (var (g, tf, start) in _htfFvg)
+                foreach (var l in BoxLevels("hfvg" + tf + "." + g.Dir, $"FVG {Smc.TfName(tf)}", Math.Min(start, last), -1, g.Top, g.Bottom)) yield return l;
+        var seq = _po3.FirstOrDefault();
+        if (ShowPo3 && seq != null)
+        {
+            yield return Level("c1h", "C1 alto", _c1Idx, -1, seq.C1.H);
+            yield return Level("c1l", "C1 bajo", _c1Idx, -1, seq.C1.L);
+            yield return Level("c2", seq.Side == 1 ? "C2 barrido bajo" : "C2 barrido alto", _c2Idx, -1, seq.Extreme);
+            if (seq.TSpot3 is { } t3)
+                foreach (var l in BoxLevels("ts3", "T-Spot C3", Math.Min(_c3Idx, last), -1, Math.Max(t3.From, t3.To), Math.Min(t3.From, t3.To))) yield return l;
+            if (seq.TSpot4 is { } t4)
+            {
+                int c4 = seq.I2 + 2 < _h1.Count ? IdxAtOrAfter(_h1[seq.I2 + 2].T) : last;
+                foreach (var l in BoxLevels("ts4", "T-Spot C4", Math.Min(c4, last), -1, Math.Max(t4.From, t4.To), Math.Min(t4.From, t4.To))) yield return l;
+            }
+        }
+
+        if (ShowStdv && _cisd != null)
+        {
+            yield return Level("cisd", "CISD", _cisd.Start, -1, _cisd.Level);
+            foreach (var (d, price) in _stdv)
+                yield return Level("stdv" + d.ToString(System.Globalization.CultureInfo.InvariantCulture), $"STDV {d:0.#}", _cisd.I, -1, price);
+        }
+
+        if (ShowBreakers)
+            foreach (var b in _breakers)
+                foreach (var l in BoxLevels("brk" + b.Side, b.Unicorn ? "Unicornio" : "Breaker", b.I0, b.Invalid >= 0 ? b.Invalid : -1, b.Top, b.Bottom)) yield return l;
+    }
+
     protected override void OnRender(RenderContext ctx, DrawingLayouts layout)
     {
         if (ChartInfo == null || Bars.Count == 0) return;

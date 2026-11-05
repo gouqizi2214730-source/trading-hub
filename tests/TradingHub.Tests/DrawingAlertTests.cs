@@ -140,3 +140,78 @@ public class IndicatorLevelAlertTests
         Assert.NotNull(ChartAlertEngine.Check(model, a, Math.Max(bar, 1)));
     }
 }
+
+public class AllIndicatorLevelsTests
+{
+    public static IEnumerable<object[]> Cases() => new[]
+    {
+        new object[] { "smc", true },
+        new object[] { "htf", false },
+        new object[] { "sessions", true },
+        new object[] { "svp", true },
+        new object[] { "dib", false },
+        new object[] { "trap", false },
+    };
+
+    private static TradingHub.Indicators.Indicator Make(string kind) => kind switch
+    {
+        "smc" => new TradingHub.Indicators.Native.Structure.SmcStructure { ShowCisd = true, ShowFilledFvg = true },
+        "htf" => new TradingHub.Indicators.Native.Structure.HtfStructure(),
+        "sessions" => new TradingHub.Indicators.Native.VpUltimate.VpSessionProfiles { ShowAsia = true, ShowDeveloping = true },
+        "svp" => new TradingHub.Indicators.Native.SessionVolumeProfile(),
+        "dib" => new TradingHub.Indicators.Native.VpUltimate.VpDoubleInside(),
+        _ => new TradingHub.Indicators.Native.Flow.TrappedTraders(),
+    };
+
+    [Theory]
+    [MemberData(nameof(Cases))]
+    public void Las_lineas_que_dibuja_cada_indicador_se_pueden_alertar(string kind, bool mustHave)
+    {
+        var data = VpUltimateTests.Market(8);
+        var model = new ChartModel(data, ChartPeriod.Parse("M15"), new ChartSettings { TimeZoneId = "UTC" });
+        var ind = Make(kind);
+        model.AddIndicator(ind);
+        for (int k = 0; k < 2; k++) model.Update();
+        var levels = ind.GetAlertLevels().ToList();
+        if (mustHave) Assert.NotEmpty(levels);
+        Assert.Equal(levels.Count, levels.Select(l => l.Id).Distinct().Count());
+        Assert.All(levels, l =>
+        {
+            Assert.True(l.Price > 0, l.Name);
+            Assert.True(l.FromBar >= 0 && l.FromBar < model.Series.Count, l.Name);
+            Assert.True(l.ToBar >= l.FromBar, l.Name);
+            Assert.False(string.IsNullOrWhiteSpace(l.Name));
+        });
+
+        // las ofrece el diálogo de alertas, dan su precio y siguen ahí (mismo Id) después de recalcular
+        var ops = ChartAlertEngine.Lines(model).Where(o => o.Series!.StartsWith(ChartAlertEngine.LevelPrefix)).ToList();
+        Assert.Equal(levels.Count, ops.Count);
+        foreach (var lv in levels.Take(20))
+        {
+            var op = ops.First(o => o.Series == ChartAlertEngine.LevelPrefix + lv.Id);
+            Assert.True(ChartAlertEngine.TryValue(model, op, lv.FromBar, out var v));
+            Assert.Equal(lv.Price, v);
+        }
+
+        ind.RecalculateValues();
+        model.Update();
+        var again = ind.GetAlertLevels().Select(l => l.Id).ToHashSet();
+        Assert.All(levels.Take(20), l => Assert.Contains(l.Id, again));
+
+        // el clic derecho sobre una de ellas la captura
+        if (levels.Count == 0) return;
+        var pick = levels[^1];
+        using var surface = SkiaSharp.SKSurface.Create(new SkiaSharp.SKImageInfo(1200, 700));
+        model.Viewport.AutoScale = false;
+        model.Viewport.PriceTop = (double)pick.Price + 50;
+        model.Viewport.PriceBottom = (double)pick.Price - 50;
+        new TradingHub.Charting.Rendering.ChartRenderer().Render(surface.Canvas, model, 1200, 700, new TradingHub.Charting.Rendering.ChartRenderState());
+        var layout = model.LastLayout!;
+        int at = Math.Min(pick.ToBar == int.MaxValue ? model.Series.Count - 1 : pick.ToBar, model.Series.Count - 1);
+        float x = layout.CenterX(Math.Max(pick.FromBar, at));
+        float y = ((TradingHub.Indicators.IChartContainer)layout.Main).GetYByPrice(pick.Price, false);
+        var hit = ChartAlertEngine.LineAt(model, x, y, 10);
+        Assert.NotNull(hit);
+        Assert.StartsWith(ChartAlertEngine.LevelPrefix, hit!.Series);
+    }
+}

@@ -250,6 +250,22 @@ public class VpDoubleInside : VpIndicator
             Alert(bar, string.Format(UiText.Tr("Doble vela interior en {0}: rango {1} ~ {2}"), InstrumentInfo?.Instrument, z.Bottom, z.Top));
     }
 
+    /// <summary>Lo que dibuja, para las alertas: el borde de arriba y el de abajo de cada zona que se ve.</summary>
+    public override IEnumerable<IndicatorLevel> GetAlertLevels()
+    {
+        if (!ShowBox) yield break;
+        for (int i = Math.Max(0, _zones.Count - Keep); i < _zones.Count; i++)
+        {
+            var z = _zones[i];
+            if (z.StartBar < 0 || z.StartBar >= CurrentBar) continue;
+            var t = GetCandle(z.StartBar).Time;
+            string id = "dib@" + t.Ticks, name = UiText.Tr("Doble vela interior") + " " + t.ToString("dd/MM");
+            int to = z.State == 0 ? int.MaxValue : z.EndBar;
+            yield return new IndicatorLevel(id + ".top", name + " · " + UiText.Tr("borde de arriba"), z.Top, z.StartBar, to);
+            yield return new IndicatorLevel(id + ".bottom", name + " · " + UiText.Tr("borde de abajo"), z.Bottom, z.StartBar, to);
+        }
+    }
+
     protected override void OnRender(RenderContext context, DrawingLayouts layout)
     {
         if (ChartInfo == null) return;

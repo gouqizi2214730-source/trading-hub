@@ -350,6 +350,38 @@ public class SessionVolumeProfile : Indicator
 
     private static decimal Vol(Profile p, decimal price) => p.Rows.TryGetValue(price, out var v) ? v.Bid + v.Ask : 0;
 
+    /// <summary>Lo que dibuja, para las alertas: el POC (hasta que lo tocan, si se extiende), VAH y VAL de las últimas sesiones.</summary>
+    public override IEnumerable<IndicatorLevel> GetAlertLevels()
+    {
+        for (int i = Math.Max(0, _profiles.Count - 30); i < _profiles.Count; i++)
+        {
+            var p = _profiles[i];
+            if (p.MaxVolume <= 0 || p.StartBar < 0 || p.StartBar >= CurrentBar) continue;
+            decimal top = p.RowSize > 0 && Tick > 0 ? p.RowSize - Tick : 0;
+            var t = GetCandle(p.StartBar).Time;
+            string id = "svp@" + t.Ticks, when = p.Final ? t.ToString("dd/MM") : TradingHub.Rendering.UiText.Tr("en formación");
+            int to = p.EndBar;
+            if (ExtendPoc && p.Final)
+            {
+                to = int.MaxValue;
+                for (int b = p.EndBar + 1; b < CurrentBar; b++)
+                {
+                    var c = GetCandle(b);
+                    if (c.Low <= p.Poc + top && c.High >= p.Poc)
+                    {
+                        to = b;
+                        break;
+                    }
+                }
+            }
+
+            yield return new IndicatorLevel(id + ".poc", "POC " + when, p.Poc + top / 2, p.StartBar, to);
+            if (!ShowValueAreaLines) continue;
+            yield return new IndicatorLevel(id + ".vah", "VAH " + when, p.Vah + top, p.StartBar, p.EndBar);
+            yield return new IndicatorLevel(id + ".val", "VAL " + when, p.Val, p.StartBar, p.EndBar);
+        }
+    }
+
     protected override void OnRender(RenderContext context, DrawingLayouts layout)
     {
         if (ChartInfo == null || _profiles.Count == 0) return;

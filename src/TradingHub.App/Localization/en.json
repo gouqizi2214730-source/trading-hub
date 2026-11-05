@@ -4517,5 +4517,8 @@
  "Copias editadas sin cambios actualizadas al original nuevo: {0}": "Unchanged edited copies updated to the new original: {0}",
  "Ejemplo: delta % por vela": "Example: delta % per candle",
  "Umbral para resaltar (%)": "Highlight threshold (%)",
- "Delta %": "Delta %"
+ "Delta %": "Delta %",
+ "Compradores atrapados": "Trapped buyers",
+ "Vendedores atrapados": "Trapped sellers",
+ "promedio": "average"
 }
