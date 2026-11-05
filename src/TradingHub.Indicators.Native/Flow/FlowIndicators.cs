@@ -568,7 +568,39 @@ public class BarStatsStrip : Indicator
         DataSeries[0] = _anchor;
         EnableCustomDrawing = true;
         SubscribeToDrawingEvents(DrawingLayouts.Final);
+        _deriv = new DerivFeed(a => DoActionInGuiThread(a), RedrawChart, oi: true, funding: true, liquidations: true);
     }
+
+    private readonly DerivFeed _deriv;
+
+    protected override void OnDispose() => _deriv.Dispose();
+
+    public enum StatUnit
+    {
+        [Display(Name = "Monedas")] Coin,
+        [Display(Name = "Dólares")] Usd,
+    }
+
+    public enum CvdAnchor
+    {
+        [Display(Name = "Todo lo que se ve")] Visible,
+        [Display(Name = "Cada día de trading")] Day,
+    }
+
+    // filas de la «Bar Statistics» de openmarket (fusionadas acá)
+    [Display(Name = "Compras %", GroupName = "Filas · volumen", Order = 7)] public bool BuyPct { get; set; }
+    [Display(Name = "Cambio del volumen %", GroupName = "Filas · volumen", Order = 8)] public bool VolChange { get; set; }
+    [Display(Name = "Volumen relativo", GroupName = "Filas · volumen", Order = 9)] public bool Rvol { get; set; }
+    [Display(Name = "Rango %", GroupName = "Filas · mercado", Order = 31)] public bool RangePct { get; set; }
+    [Display(Name = "Distancia al VWAP %", GroupName = "Filas · mercado", Order = 32)] public bool VwapDist { get; set; }
+    [Display(Name = "Liquidaciones", GroupName = "Filas · derivados", Order = 33)] public bool Liq { get; set; }
+    [Display(Name = "Liquidaciones largos / cortos", GroupName = "Filas · derivados", Order = 34)] public bool LiqSplit { get; set; }
+    [Display(Name = "Cambio del interés abierto", GroupName = "Filas · derivados", Order = 35)] public bool OiChange { get; set; }
+    [Display(Name = "Financiación", GroupName = "Filas · derivados", Order = 36)] public bool Funding { get; set; }
+    [Display(Name = "Libro neto (0,1 % – 2,5 %)", GroupName = "Filas · mercado", Order = 37)] public bool BookDepth { get; set; }
+    [Display(Name = "Unidad (volumen, delta, CVD)", GroupName = "Opciones", Order = 39)] public StatUnit Units { get; set; } = StatUnit.Coin;
+    [Display(Name = "CVD desde", GroupName = "Opciones", Order = 39)] public CvdAnchor CvdFrom { get; set; } = CvdAnchor.Visible;
+    [Display(Name = "Volumen relativo: velas", GroupName = "Opciones", Order = 39)] [Range(2, 500)] public int RvolLength { get; set; } = 20;
 
     [Display(Name = "Volumen", GroupName = "Filas · volumen", Order = 1)] public bool Vol { get; set; } = true;
     [Display(Name = "Delta", GroupName = "Filas · volumen", Order = 2)] public bool Delta { get; set; } = true;
@@ -660,18 +692,21 @@ public class BarStatsStrip : Indicator
         var rows = new List<(string Name, Func<int, double?> Value, Func<double, string> Fmt, bool Signed)>();
         var cvd = new Dictionary<int, (double All, double Retail, double Whales)>();
         double a = 0, ar = 0, aw = 0;
+        double U(int b) => Units == StatUnit.Usd ? (double)GetCandle(b).Close : 1;
+        if (Liq || LiqSplit || OiChange || Funding) _deriv.Ensure(InstrumentInfo?.Instrument ?? "", GetCandle(first).Time.AddDays(-1), ChartInfo.GetTimeFrameTypeChartPeriod());
         for (int b = first; b <= last; b++)
         {
             var f = _cache.Get(this, b);
             var (rd, wd) = SizeDelta(f);
-            a += (double)GetCandle(b).Delta;
+            if (CvdFrom == CvdAnchor.Day && b > first && IsNewSession(b)) a = 0;
+            a += (double)GetCandle(b).Delta * U(b);
             ar += rd;
             aw += wd;
             cvd[b] = (a, ar, aw);
         }
 
-        if (Vol) rows.Add(("vol", b => (double)GetCandle(b).Volume, FlowText.Num, false));
-        if (Delta) rows.Add(("delta", b => (double)GetCandle(b).Delta, FlowText.Num, true));
+        if (Vol) rows.Add(("vol", b => (double)GetCandle(b).Volume * U(b), FlowText.Num, false));
+        if (Delta) rows.Add(("delta", b => (double)GetCandle(b).Delta * U(b), FlowText.Num, true));
         if (Cvd) rows.Add(("cvd", b => cvd[b].All, FlowText.Num, true));
         if (DeltaPct) rows.Add(("delta %", b => GetCandle(b).Volume > 0 ? (double)(GetCandle(b).Delta / GetCandle(b).Volume * 100) : null, v => v.ToString("0", CultureInfo.InvariantCulture) + "%", true));
         if (BuyVol) rows.Add(("buy vol", b => (double)(GetCandle(b).Volume + GetCandle(b).Delta) / 2, FlowText.Num, false));
@@ -690,6 +725,58 @@ public class BarStatsStrip : Indicator
         if (CvdRetail) rows.Add(("cvd retail", b => cvd[b].Retail, FlowText.Usd, true));
         if (CvdWhales) rows.Add(("cvd whales", b => cvd[b].Whales, FlowText.Usd, true));
         if (Range) rows.Add(("range", b => (double)(GetCandle(b).High - GetCandle(b).Low), v => v.ToString("0.##", CultureInfo.InvariantCulture), false));
+        static string Pct(double v) => v.ToString("0.#", CultureInfo.InvariantCulture) + "%";
+        if (BuyPct) rows.Add(("buy %", b => GetCandle(b).Volume > 0 ? (double)((GetCandle(b).Volume + GetCandle(b).Delta) / 2 / GetCandle(b).Volume * 100) : null, Pct, false));
+        if (VolChange) rows.Add(("vol chg", b => b > 0 && GetCandle(b - 1).Volume > 0 ? (double)((GetCandle(b).Volume - GetCandle(b - 1).Volume) / GetCandle(b - 1).Volume * 100) : null, Pct, true));
+        if (Rvol)
+            rows.Add(("rvol", b =>
+            {
+                decimal sum = 0;
+                int n = 0;
+                for (int k = Math.Max(0, b - RvolLength); k < b; k++, n++) sum += GetCandle(k).Volume;
+                return n > 0 && sum > 0 ? (double)(GetCandle(b).Volume / (sum / n)) : null;
+            }, v => v.ToString("0.0", CultureInfo.InvariantCulture) + "x", false));
+        if (RangePct) rows.Add(("range %", b => GetCandle(b).Low > 0 ? (double)((GetCandle(b).High - GetCandle(b).Low) / GetCandle(b).Low * 100) : null, v => v.ToString("0.00", CultureInfo.InvariantCulture) + "%", false));
+        if (VwapDist)
+        {
+            // VWAP del día de trading de cada vela
+            var vwap = new Dictionary<int, double>();
+            double pv = 0, vv = 0;
+            int startDay = first;
+            while (startDay > 0 && !IsNewSession(startDay)) startDay--;
+            for (int b = startDay; b <= last; b++)
+            {
+                if (b > startDay && IsNewSession(b)) pv = vv = 0;
+                var c = GetCandle(b);
+                pv += (double)((c.High + c.Low + c.Close) / 3 * c.Volume);
+                vv += (double)c.Volume;
+                vwap[b] = vv > 0 ? pv / vv : (double)c.Close;
+            }
+
+            rows.Add(("vwap dist", b => vwap.TryGetValue(b, out var w) && w > 0 ? ((double)GetCandle(b).Close - w) / w * 100 : null, v => v.ToString("0.00", CultureInfo.InvariantCulture) + "%", true));
+        }
+
+        DateTime T0(int b) => GetCandle(b).Time;
+        DateTime T1(int b) => b + 1 < CurrentBar ? GetCandle(b + 1).Time : DateTime.UtcNow;
+        if (Liq) rows.Add(("liq", b => _deriv.Liquidations(T0(b), T1(b)) is var q && q.Long + q.Short > 0 ? (q.Long + q.Short) * (Units == StatUnit.Usd ? (double)GetCandle(b).Close : 1) : null, FlowText.Num, false));
+        if (LiqSplit) rows.Add(("liq L−S", b => _deriv.Liquidations(T0(b), T1(b)) is var q && q.Long + q.Short > 0 ? (q.Short - q.Long) * (Units == StatUnit.Usd ? (double)GetCandle(b).Close : 1) : null, FlowText.Num, true));
+        if (OiChange) rows.Add(("oi chg", b => _deriv.OiAt(T1(b)) is { } x && _deriv.OiAt(T0(b)) is { } y ? x - y : null, FlowText.Num, true));
+        if (Funding) rows.Add(("funding", b => _deriv.FundingAt(T0(b)), v => v.ToString("0.0000", CultureInfo.InvariantCulture) + "%", true));
+        if (BookDepth)
+        {
+            decimal tick = InstrumentInfo?.TickSize > 0 ? InstrumentInfo.TickSize : 0.01m;
+            rows.Add(("book net", b =>
+            {
+                var samples = GetDepthSamples(b);
+                if (samples.Count == 0) return null;
+                var d = samples[^1];
+                double px = (double)GetCandle(b).Close;
+                int near = Math.Max(1, (int)(px * 0.001 / (double)tick)), far = Math.Max(near + 1, (int)(px * 0.025 / (double)tick));
+                var (nb, na) = d.Within(near);
+                var (fb, fa) = d.Within(far);
+                return (fb - nb) - (fa - na);
+            }, FlowText.Num, true));
+        }
         if (rows.Count == 0) return;
 
         var font = new RenderFont("Arial", 7);

@@ -22,6 +22,18 @@ public class BigTrades : Indicator
         [Display(Name = "Adaptativo (percentil)")] Adaptive,
     }
 
+    public enum SizeUnit
+    {
+        [Display(Name = "Monedas / contratos")] Coins,
+        [Display(Name = "Dólares")] Usd,
+    }
+
+    public enum Placement
+    {
+        [Display(Name = "En el precio de la orden")] AtPrice,
+        [Display(Name = "En el centro de la vela")] CandleCenter,
+    }
+
     public enum PriceAnchor
     {
         [Display(Name = "Precio promedio de la orden")] Average,
@@ -103,6 +115,29 @@ public class BigTrades : Indicator
         set { _anchor = value; RecalculateValues(); }
     }
 
+    private SizeUnit _unit = SizeUnit.Coins;
+
+    [Display(Name = "Unidad del umbral fijo", GroupName = "Filtro", Order = 21)]
+    public SizeUnit Unit
+    {
+        get => _unit;
+        set { _unit = value; RecalculateValues(); }
+    }
+
+    [Display(Name = "Como máximo por vela (0 = todas)", GroupName = "Filtro", Order = 60)]
+    [Range(0, 100)]
+    public int MaxPerBar { get; set; }
+
+    [Display(Name = "Ballena desde (USD; 0 = no)", GroupName = "Filtro", Order = 70, Description = "Las órdenes de este valor o más se resaltan con un anillo y su tamaño siempre a la vista.")]
+    [Range(0, 10000000000)]
+    public decimal WhaleUsd { get; set; } = 5_000_000;
+
+    [Display(Name = "Dónde se dibuja", GroupName = "Visualización", Order = 95)]
+    public Placement Position { get; set; } = Placement.AtPrice;
+
+    [Display(Name = "Tamaño mostrado en", GroupName = "Visualización", Order = 141)]
+    public SizeUnit ShownAs { get; set; } = SizeUnit.Coins;
+
     [Display(Name = "Color compras", GroupName = "Visualización", Order = 100)]
     public Color BuyColor { get; set; } = Color.FromArgb(150, 50, 140, 230);
 
@@ -171,7 +206,7 @@ public class BigTrades : Indicator
         foreach (var t in list)
         {
             bar = FindBar(t.Time, bar);
-            if (t.Volume >= CurrentThreshold && t.Volume > 0) _bubbles.Add(MakeBubble(t, bar));
+            if (Passes(t)) _bubbles.Add(MakeBubble(t, bar));
         }
 
         RedrawChart();
@@ -198,7 +233,7 @@ public class BigTrades : Indicator
 
     private void Consider(CumulativeTrade trade)
     {
-        if (trade.Volume < CurrentThreshold || trade.Volume <= 0) return;
+        if (!Passes(trade)) return;
         int bar = FindBar(trade.Time, Math.Max(0, CurrentBar - 5));
         if (_liveBubble == null)
         {
@@ -214,6 +249,14 @@ public class BigTrades : Indicator
         }
 
         RedrawChart();
+    }
+
+    /// <summary>Si la orden pasa el umbral (el fijo puede estar en dólares).</summary>
+    private bool Passes(CumulativeTrade t)
+    {
+        if (t.Volume <= 0) return false;
+        if (_mode == ThresholdMode.Fixed && _unit == SizeUnit.Usd) return t.Volume * AveragePrice(t) >= _minVolume;
+        return t.Volume >= CurrentThreshold;
     }
 
     private Bubble MakeBubble(CumulativeTrade t, int bar)
@@ -295,20 +338,28 @@ public class BigTrades : Indicator
         decimal thr = Math.Max(CurrentThreshold, 0.0000001m);
         var font = new RenderFont("Arial", 8, FontStyle.Bold);
 
+        var visible = _bubbles.Where(b => b.Bar >= first && b.Bar <= last);
+        // como máximo N por vela: las más grandes
+        if (MaxPerBar > 0) visible = visible.GroupBy(b => b.Bar).SelectMany(g => g.OrderByDescending(b => b.Volume).Take(MaxPerBar));
+        if (_mode == ThresholdMode.Fixed && _unit == SizeUnit.Usd) thr = Math.Max(0.0000001m, _minVolume / Math.Max(0.0000001m, _bubbles.Count > 0 ? _bubbles[^1].Price : 1));
         // las chicas primero para que las grandes queden arriba
-        foreach (var b in _bubbles.Where(b => b.Bar >= first && b.Bar <= last).OrderBy(b => b.Volume))
+        foreach (var b in visible.OrderBy(b => b.Volume))
         {
             int x = ChartInfo.GetXByBar(b.Bar, false);
-            int y = ChartInfo.GetYByPrice(b.Price, false);
+            int y = Position == Placement.CandleCenter && b.Bar < CurrentBar
+                ? ChartInfo.GetYByPrice((GetCandle(b.Bar).High + GetCandle(b.Bar).Low) / 2, false)
+                : ChartInfo.GetYByPrice(b.Price, false);
+            bool whale = WhaleUsd > 0 && b.Volume * b.Price >= WhaleUsd;
             double ratio = Math.Sqrt((double)(b.Volume / thr));
             int size = (int)Math.Clamp(MinSize * ratio, MinSize, Math.Max(MinSize, MaxSize));
             var rect = new Rectangle(x - size / 2, y - size / 2, size, size);
             var col = b.Buy ? BuyColor : SellColor;
             context.FillEllipse(col, rect);
             if (ShowBorder) context.DrawEllipse(new RenderPen(Color.FromArgb(220, col.R, col.G, col.B), Math.Clamp(BorderWidth, 1, 10)), rect);
-            if (ShowVolume && size >= 22)
+            if (whale) context.DrawEllipse(new RenderPen(Color.FromArgb(235, 255, 255, 255), 2), new Rectangle(rect.X - 3, rect.Y - 3, rect.Width + 6, rect.Height + 6));
+            if (ShowVolume && (size >= 22 || whale))
             {
-                string txt = VolumeFormat.Compact(b.Volume, ChartInfo.VolumeDecimals > 0 && b.Volume < 100 ? 1 : 0);
+                string txt = ShownAs == SizeUnit.Usd ? "$" + VolumeFormat.Compact(b.Volume * b.Price, 1) : VolumeFormat.Compact(b.Volume, ChartInfo.VolumeDecimals > 0 && b.Volume < 100 ? 1 : 0);
                 context.DrawString(txt, font, Color.White, rect, new RenderStringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoClip });
             }
         }
