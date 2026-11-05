@@ -7,6 +7,7 @@ using TradingHub.Indicators;
 using TradingHub.Rendering.Context;
 using TradingHub.Trading;
 using Rectangle = System.Drawing.Rectangle;
+using PointF = System.Drawing.PointF;
 using TradingHub.Rendering;
 
 namespace TradingHub.Charting.Rendering;
@@ -355,7 +356,17 @@ public sealed class ChartRenderer
         foreach (var slot in slots)
         {
             var ind = slot.Indicator;
-            if (!slot.Visible || !ind.EnableCustomDrawing || ind.SubscribedLayouts == DrawingLayouts.None) continue;
+            if (!slot.Visible || !ind.EnableCustomDrawing || ind.SubscribedLayouts == DrawingLayouts.None)
+            {
+                if (panel.IsPrice && !above && slot.DrawnLines.Count > 0)
+                {
+                    slot.DrawnLines = Array.Empty<DrawnLine>();
+                    slot.DrawnGeneration++;
+                }
+
+                continue;
+            }
+
             // en el panel de precio, los que no piden "encima del precio" van antes de las velas
             bool wantAbove = !panel.IsPrice || ind.DrawAbovePrice;
             if (wantAbove != above) continue;
@@ -363,6 +374,15 @@ public sealed class ChartRenderer
             canvas.Save();
             canvas.ClipRect(new SKRect(panel.Rect.Left, panel.Rect.Top, layout.PriceAxis.Right, panel.Rect.Bottom));
             var ctx = new RenderContext(canvas, new Rectangle(0, 0, (int)layout.Bounds.Width, (int)layout.Bounds.Height));
+            // en el gráfico de precio se anota cada línea que dibuja: así cualquier línea de cualquier indicador se alerta
+            var capture = panel.IsPrice ? new DrawnLineCapture(model, layout, panel) : null;
+            if (capture != null)
+            {
+                ctx.LineRecorder = capture.Line;
+                ctx.TextRecorder = capture.Text;
+                panel.YPrices = capture.YPrices;
+            }
+
             try
             {
                 foreach (var l in new[] { DrawingLayouts.Historical, DrawingLayouts.LatestBar, DrawingLayouts.Final })
@@ -376,6 +396,25 @@ public sealed class ChartRenderer
             {
                 if (slot.Error == null) this.LogError($"Error dibujando {ind.Name}: {ex.Message}", ex);
                 slot.Error = ex.Message;
+            }
+            finally
+            {
+                panel.YPrices = null;
+            }
+
+            if (capture != null)
+            {
+                try
+                {
+                    slot.DrawnLines = capture.Finish();
+                }
+                catch (Exception ex)
+                {
+                    this.LogError($"Líneas de {ind.Name}: {ex.Message}", ex);
+                    slot.DrawnLines = Array.Empty<DrawnLine>();
+                }
+
+                slot.DrawnGeneration++;
             }
 
             canvas.Restore();
@@ -1547,6 +1586,12 @@ public sealed class ChartRenderer
     /// <summary>La línea de indicador elegida con el clic derecho (para una alerta): resaltada como un dibujo elegido.</summary>
     private void DrawHighlightedLine(SKCanvas canvas, ChartModel model, ChartLayout layout)
     {
+        if (model.HighlightedLine is { Line: not null })
+        {
+            DrawHighlightedPath(canvas, ChartAlertEngine.PixelsOf(model, layout, model.HighlightedLine), layout.Main);
+            return;
+        }
+
         if (ChartAlertEngine.LevelOf(model, model.HighlightedLine!) is not { } lv) return;
         var main = layout.Main;
         float y = ((TradingHub.Indicators.IChartContainer)main).GetYByPrice(lv.Price, false);
@@ -1561,6 +1606,25 @@ public sealed class ChartRenderer
         using var dot = new SKPaint { IsAntialias = true, Color = new SKColor(242, 181, 58) };
         canvas.DrawCircle(x0, y, 3.5f, dot);
         canvas.DrawCircle(x1 - 1, y, 3.5f, dot);
+    }
+
+    /// <summary>Resalta una línea capturada de un indicador (cualquier forma: horizontal, inclinada o curva).</summary>
+    private static void DrawHighlightedPath(SKCanvas canvas, PointF[] pts, PanelLayout main)
+    {
+        if (pts.Length < 2) return;
+        canvas.Save();
+        canvas.ClipRect(main.Rect);
+        using var path = new SKPath();
+        path.MoveTo(pts[0].X, pts[0].Y);
+        for (int i = 1; i < pts.Length; i++) path.LineTo(pts[i].X, pts[i].Y);
+        using var glow = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 6, Color = new SKColor(242, 181, 58, 90) };
+        using var line = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f, Color = new SKColor(242, 181, 58, 255) };
+        canvas.DrawPath(path, glow);
+        canvas.DrawPath(path, line);
+        using var dot = new SKPaint { IsAntialias = true, Color = new SKColor(242, 181, 58) };
+        canvas.DrawCircle(pts[0].X, pts[0].Y, 3.5f, dot);
+        canvas.DrawCircle(pts[^1].X, pts[^1].Y, 3.5f, dot);
+        canvas.Restore();
     }
 
     private void DrawCrosshair(SKCanvas canvas, ChartModel model, ChartLayout layout, ChartRenderState state)

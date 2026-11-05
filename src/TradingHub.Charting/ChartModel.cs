@@ -28,6 +28,13 @@ public sealed class IndicatorSlot
     public SubPanel? Panel { get; internal set; }
     public bool Visible { get; set; } = true;
     public string? Error { get; internal set; }
+
+    /// <summary>Las líneas que el indicador dibujó en el gráfico de precio la última vez que se dibujó (para las alertas).</summary>
+    public IReadOnlyList<DrawnLine> DrawnLines { get; internal set; } = Array.Empty<DrawnLine>();
+
+    /// <summary>Cambia con cada captura de <see cref="DrawnLines"/>.</summary>
+    internal int DrawnGeneration;
+
     internal bool NeedsRecalc = true;
     internal bool Initialized;
     internal bool WantsTrades, WantsDepth, WantsBestBidAsk, WantsMyTrades;

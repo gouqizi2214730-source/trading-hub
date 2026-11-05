@@ -142,6 +142,16 @@ internal sealed class AlertDialog : TradingHubDialog<bool>
             }
         }
 
+        // una línea capturada con el clic derecho que no está en la lista (ya terminó a la izquierda, o se repite con un
+        // nivel): se agrega para poder elegirla igual
+        if (op.Line != null)
+        {
+            var extra = new ComboBoxItem { Content = op.Label, Tag = op.Copy() };
+            box.Items.Add(extra);
+            box.SelectedItem = extra;
+            return;
+        }
+
         box.SelectedIndex = 0;
     }
 

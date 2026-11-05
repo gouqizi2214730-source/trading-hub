@@ -49,6 +49,14 @@ public sealed class AlertOperand
     /// <summary>Cómo se muestra (nombre del indicador y de la línea).</summary>
     public string Label { get; set; } = "";
 
+    /// <summary>
+    /// Una línea que dibujó el indicador (capturada del gráfico, sin que el indicador la declare): su forma, que se va
+    /// poniendo al día cada vez que el indicador la vuelve a dibujar.
+    /// </summary>
+    public DrawnLine? Line { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore] internal int LineGeneration = -1;
+
     public static AlertOperand Price(string series = "close", string label = "Precio") => new() { Series = series, Label = label };
 
     public static AlertOperand Fixed(decimal value) => new() { Value = value, Label = value.ToString(System.Globalization.CultureInfo.InvariantCulture) };
@@ -58,7 +66,7 @@ public sealed class AlertOperand
     /// <summary>El precio de la vela (cierre, máximo…), no una línea ni un valor.</summary>
     public bool IsPrice => Indicator == null && Drawing == null && Series != null;
 
-    public AlertOperand Copy() => new() { Indicator = Indicator, Series = Series, Value = Value, Drawing = Drawing, Label = Label };
+    public AlertOperand Copy() => new() { Indicator = Indicator, Series = Series, Value = Value, Drawing = Drawing, Label = Label, Line = Line?.Clone() };
 }
 
 /// <summary>Alerta de un gráfico sobre el precio o las líneas de sus indicadores.</summary>
@@ -163,11 +171,52 @@ public static class ChartAlertEngine
             }
 
             // las líneas horizontales que el indicador dibuja a mano (POC vírgenes, niveles clave, cierres de VWAP…)
-            foreach (var l in Levels(slot))
+            var levels = Levels(slot);
+            foreach (var l in levels)
                 res.Add(new AlertOperand { Indicator = key, Series = LevelPrefix + l.Id, Label = $"{slot.Indicator.Name} · {l.Name}" });
+
+            // y todas las demás líneas que dibujó (capturadas del gráfico): las que siguen vivas a la derecha, sin repetir
+            // las que ya declaró como nivel
+            int last = model.Series.Count - 1;
+            // lo mismo a la vista: un par de píxeles (una línea a la altura del borde de su fila y no del precio)
+            double perPx = model.LastLayout is { } ll ? ll.Main.Range / Math.Max(1, ll.Main.Rect.Height) : 0;
+            decimal near = Math.Max(Math.Max(model.Series.RowSize, model.Instrument.TickSize), (decimal)Math.Min(perPx * 2.5, 1e12));
+            var alive = levels.Where(l => l.ToBar >= last).Select(l => l.Price).ToList();
+            int n = 0;
+            foreach (var d in slot.DrawnLines)
+            {
+                if (!d.Right || alive.Any(p => Math.Abs(p - d.LastPrice) <= near)) continue;
+                if (res.Any(o => o.Indicator == key && o.Line != null && o.Series == d.Key(model.Series))) continue;
+                res.Add(OperandOf(model, slot, key, d));
+                if (++n >= 80) break;
+            }
         }
 
         return res;
+    }
+
+    /// <summary>Las líneas capturadas se identifican con este prefijo en <see cref="AlertOperand.Series"/>.</summary>
+    public const string DrawnPrefix = "drawn:";
+
+    private static AlertOperand OperandOf(ChartModel model, IndicatorSlot slot, string key, DrawnLine d)
+    {
+        string name = d.Text.Length > 0 ? d.Text : TradingHub.Rendering.UiText.Tr("línea");
+        string price = model.Instrument.FormatPrice(d.LastPrice);
+        string label = name.Contains(price, StringComparison.Ordinal) ? $"{slot.Indicator.Name} · {name}" : $"{slot.Indicator.Name} · {name} {price}";
+        return new AlertOperand { Indicator = key, Series = d.Key(model.Series), Label = label, Line = d.Snapshot(model.Series) };
+    }
+
+    /// <summary>Dónde está ahora en pantalla una línea capturada (la de la última captura si sigue, si no, su copia).</summary>
+    public static System.Drawing.PointF[] PixelsOf(ChartModel model, ChartLayout layout, AlertOperand op)
+    {
+        if (op.Line is not { } line) return Array.Empty<System.Drawing.PointF>();
+        if (op.Indicator != null && SlotOf(model, op.Indicator) is { } slot && DrawnLine.Match(model.Series, line, slot.DrawnLines) is { Pixels: { } px }) return px;
+        var main = layout.Main;
+        var bars = line.BarsIn(model.Series);
+        var pts = new System.Drawing.PointF[bars.Length];
+        for (int i = 0; i < bars.Length; i++)
+            pts[i] = new System.Drawing.PointF(layout.CenterX(bars[i]), ((IChartContainer)main).GetYByPrice(line.Prices[i], false));
+        return pts;
     }
 
     /// <summary>Las series que son niveles dibujados a mano por el indicador (no una serie de datos).</summary>
@@ -234,6 +283,16 @@ public static class ChartAlertEngine
             }
 
             if (!panel.IsPrice) continue;
+            // cualquier otra línea que dibujó (capturada del gráfico); a igual distancia ganan las series y los niveles
+            foreach (var d in slot.DrawnLines)
+            {
+                if (d.Pixels is not { } px) continue;
+                float dd = DrawnLineCapture.Distance(px, x, y) + 1.5f;
+                if (dd > bestD) continue;
+                bestD = dd;
+                best = OperandOf(model, slot, key, d);
+            }
+
             // a la derecha de la última vela también: los niveles siguen hacia la derecha
             double exact = layout.BarAtExact(x);
             foreach (var l in Levels(slot))
@@ -307,6 +366,23 @@ public static class ChartAlertEngine
         }
 
         var slot = SlotOf(model, op.Indicator);
+        if (op.Line is { } drawn)
+        {
+            if (slot == null) return false; // se quitó el indicador
+            if (slot.DrawnGeneration != op.LineGeneration)
+            {
+                // el indicador la volvió a dibujar: se sigue (un nivel en formación se mueve, una línea viva se alarga). Una
+                // captura que empieza fuera de la vista no reemplaza a una completa
+                op.LineGeneration = slot.DrawnGeneration;
+                if (slot.DrawnLines.Count > 0 && DrawnLine.Match(model.Series, drawn, slot.DrawnLines) is { } now && (!now.CutLeft || drawn.CutLeft))
+                    op.Line = drawn = now.Snapshot(model.Series);
+            }
+
+            if (drawn.ValueAt(model.Series, bar) is not { } dv) return false;
+            value = dv;
+            return true;
+        }
+
         if (slot != null && op.Series is { } ser && ser.StartsWith(LevelPrefix, StringComparison.Ordinal))
         {
             string id = ser[LevelPrefix.Length..];

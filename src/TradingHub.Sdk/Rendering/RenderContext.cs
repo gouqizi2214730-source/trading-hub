@@ -33,6 +33,15 @@ namespace TradingHub.Rendering.Context
         /// <summary>Canvas de Skia subyacente (para dibujo avanzado).</summary>
         public SKCanvas Canvas => _canvas;
 
+        /// <summary>
+        /// El gráfico anota acá cada línea que dibuja el indicador (puntos en píxeles, color), para poder alertar sobre
+        /// cualquier línea de cualquier indicador sin que el indicador tenga que declararla. Null = no se anota.
+        /// </summary>
+        internal Action<PointF[], Color>? LineRecorder;
+
+        /// <summary>Lo mismo con los textos (texto y su caja en píxeles): dan nombre a las líneas de al lado.</summary>
+        internal Action<string, RectangleF>? TextRecorder;
+
         public Rectangle ClipBounds => _clip;
 
         public RenderTextRenderingHint TextRenderingHint { get; private set; } = RenderTextRenderingHint.AntiAlias;
@@ -160,6 +169,7 @@ namespace TradingHub.Rendering.Context
                     _ => rect.Left,
                 };
                 float baseline = y0 + i * lineH - f.Metrics.Ascent;
+                TextRecorder?.Invoke(line, new RectangleF(x, y0 + i * lineH, w, lineH));
                 _canvas.DrawUiText(line, x, baseline, f, _text);
             }
 
@@ -182,6 +192,8 @@ namespace TradingHub.Rendering.Context
         {
             if (string.IsNullOrEmpty(text) || font == null || color.A == 0) return;
             var f = GetFont(font);
+            // el ancho aproximado alcanza para saber qué línea nombra (medirlo cada vez cuesta)
+            if (TextRecorder != null && text.IndexOf('\n') < 0) TextRecorder(text, new RectangleF(x, y, text.Length * f.Size * 0.58f, f.Spacing));
             _text.Color = color.ToSkColor();
             if (text.IndexOf('\n') < 0)
             {
@@ -227,6 +239,7 @@ namespace TradingHub.Rendering.Context
         public void DrawLine(RenderPen pen, float x1, float y1, float x2, float y2)
         {
             if (pen == null || pen.Color.A == 0) return;
+            LineRecorder?.Invoke(new[] { new PointF(x1, y1), new PointF(x2, y2) }, pen.Color);
             var p = Stroke(pen);
             if (x1 == x2)
             {
@@ -248,6 +261,7 @@ namespace TradingHub.Rendering.Context
         public void DrawLines(RenderPen pen, Point[] points)
         {
             if (pen == null || points == null || points.Length < 2) return;
+            LineRecorder?.Invoke(Array.ConvertAll(points, p => (PointF)p), pen.Color);
             using var path = new SKPath();
             path.MoveTo(points[0].X, points[0].Y);
             for (int i = 1; i < points.Length; i++) path.LineTo(points[i].X, points[i].Y);
@@ -257,6 +271,7 @@ namespace TradingHub.Rendering.Context
         public void DrawLines(RenderPen pen, PointF[] points)
         {
             if (pen == null || points == null || points.Length < 2) return;
+            LineRecorder?.Invoke((PointF[])points.Clone(), pen.Color);
             using var path = new SKPath();
             path.MoveTo(points[0].X, points[0].Y);
             for (int i = 1; i < points.Length; i++) path.LineTo(points[i].X, points[i].Y);
@@ -303,6 +318,13 @@ namespace TradingHub.Rendering.Context
         public void DrawRectangle(RenderPen pen, Rectangle rect)
         {
             if (pen == null || pen.Color.A == 0) return;
+            if (LineRecorder != null)
+            {
+                // los bordes de arriba y de abajo de una caja (zonas, FVG, order blocks…) son líneas de precio
+                LineRecorder(new[] { new PointF(rect.Left, rect.Top), new PointF(rect.Right, rect.Top) }, pen.Color);
+                LineRecorder(new[] { new PointF(rect.Left, rect.Bottom), new PointF(rect.Right, rect.Bottom) }, pen.Color);
+            }
+
             var p = Stroke(pen);
             float l = Crisp(rect.Left, p.StrokeWidth), t = Crisp(rect.Top, p.StrokeWidth);
             float r = Crisp(rect.Right, p.StrokeWidth), b = Crisp(rect.Bottom, p.StrokeWidth);
