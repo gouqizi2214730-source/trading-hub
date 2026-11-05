@@ -15,6 +15,7 @@ public class LibraryIndicatorsTests
     {
         typeof(SupplyDemandZones), typeof(CalendarKeyLevels), typeof(FloorPivots), typeof(StandardPivots), typeof(LineBreak),
         typeof(LiquiditySweeps), typeof(SessionSweepInverseFvg), typeof(PriorDayFvg), typeof(EqualHighsLowsFvg), typeof(GapFillBreakouts), typeof(BreakoutTestsRetests),
+        typeof(MarketSessions), typeof(SessionMap), typeof(AsianSessionSweeps), typeof(SessionSweeps), typeof(SessionGapFill),
         typeof(StructureShiftSweeps), typeof(AnchoredMarketStructure), typeof(StructureRegimeOscillator), typeof(StructureScatterPanel), typeof(StructureTrendPanel), typeof(WaveExtensions),
     }.Select(t => new object[] { t });
 
@@ -67,10 +68,12 @@ public class LibraryIndicatorsTests
 
         var shortRun = Run(7, out int cut);
         var full = Run(10, out _);
-        foreach (var m in shortRun.Marks.Where(m => m.Bar < cut))
+        // las de los últimos días de la corrida corta (lo más viejo puede salir de la vista por los límites de dibujo)
+        int from = cut - 150;
+        foreach (var m in shortRun.Marks.Where(m => m.Bar < cut && m.Bar >= from))
             Assert.True(full.Marks.Any(f => f.Bar == m.Bar && f.Kind == m.Kind && Math.Abs(f.Price - m.Price) < 1e-6 && f.Text == m.Text),
                 $"{type.Name}: la marca {m.Kind} «{m.Text}» de la vela {m.Bar} desapareció o se movió");
-        foreach (var t in shortRun.Tags.Where(t => t.Bar < cut))
+        foreach (var t in shortRun.Tags.Where(t => t.Bar < cut && t.Bar >= from))
             Assert.True(full.Tags.Any(f => f.Bar == t.Bar && Math.Abs(f.Price - t.Price) < 1e-6 && f.Text == t.Text),
                 $"{type.Name}: la etiqueta «{t.Text}» de la vela {t.Bar} desapareció o se movió");
     }

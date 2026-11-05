@@ -202,6 +202,8 @@ public sealed class PropertyGrid : UserControl
         try
         {
             p.SetValue(owner, value);
+            // un ajuste de un indicador lo vuelve a calcular (los que dibujan una escena la arman de nuevo enseguida)
+            if (owner is TradingHub.Indicators.Indicator ind && p.DeclaringType != typeof(TradingHub.Indicators.Indicator)) ind.RecalculateValues();
             Changed?.Invoke();
             UpdateVisibility();
         }
