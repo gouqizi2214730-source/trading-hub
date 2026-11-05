@@ -13,8 +13,10 @@ namespace TradingHub.Feeds.Binance;
 /// históricas por REST y, en vivo por WebSocket, el tape (aggTrade) y el libro (depth @100ms)
 /// sincronizado con su foto inicial según el procedimiento oficial.
 /// </summary>
-public sealed class BinanceFeed : IMarketDataFeed, ITickerStatsProvider, IKlineHistory
+public sealed class BinanceFeed : IMarketDataFeed, ITickerStatsProvider, IKlineHistory, TradingHub.Feeds.Venues.ICryptoVenue
 {
+    public string Venue => "Binance";
+    public bool IsSpot => !_futures;
     public const string FuturesId = "binance-futures";
     public const string SpotId = "binance-spot";
 

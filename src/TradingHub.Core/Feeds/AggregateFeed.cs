@@ -19,7 +19,7 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, ITickerStats
     private long _liveSlot;
 
     /// <summary>
-    /// Ids de las operaciones agregadas: el instante en microsegundos × 8 más el número del mercado de origen (0 a 7), así
+    /// Ids de las operaciones agregadas: el instante en microsegundos × 16 más el número del mercado de origen (0 a 15), así
     /// cada operación sabe de qué mercado vino (para el CVD por mercado) y los ids siguen creciendo con el tiempo.
     /// </summary>
     public static long TaggedId(DateTime utc, int source, ref long lastSlot)
@@ -27,11 +27,41 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, ITickerStats
         long slot = (utc.Ticks - DateTime.UnixEpoch.Ticks) / 10;
         if (slot <= lastSlot) slot = lastSlot + 1;
         lastSlot = slot;
-        return slot * 8 + (source & 7);
+        return slot * SourceSlots + (source & (SourceSlots - 1));
     }
 
     /// <summary>Mercado de origen de una operación agregada (índice en <see cref="Sources"/>; -1 si no se sabe).</summary>
-    public static int SourceOf(long id) => id > 0 ? (int)(id & 7) : -1;
+    public static int SourceOf(long id) => id > 0 ? (int)(id & (SourceSlots - 1)) : -1;
+
+    /// <summary>Cuántos mercados distintos pueden sumarse (los ids guardan el número de cada uno).</summary>
+    public const int SourceSlots = 16;
+
+    /// <summary>
+    /// Nombre común de un instrumento en todos los mercados: la moneda más «USDT» (BTC-USDT-SWAP de OKX, BTC-USD de
+    /// Coinbase, BTC de Hyperliquid y BTCUSDT de Binance son el mismo «BTCUSDT»). Null si no cotiza en dólares.
+    /// </summary>
+    public static string? CanonicalSymbol(Instrument i)
+    {
+        string b = i.BaseAsset.Trim().ToUpperInvariant(), q = i.QuoteAsset.Trim().ToUpperInvariant();
+        if (b.Length == 0) return i.Symbol.ToUpperInvariant();
+        if (q is not ("USDT" or "USD" or "USDC")) return null;
+        return b + "USDT";
+    }
+
+    private static int QuoteRank(IMarketDataFeed feed, Instrument i)
+    {
+        string q = i.QuoteAsset.ToUpperInvariant();
+        if (feed is Venues.ICryptoVenue v && q == v.PreferredQuote) return 0;
+        return q switch { "USDT" => 1, "USD" => 2, _ => 3 };
+    }
+
+    /// <summary>Si el mercado de origen es spot (el resto, perpetuos).</summary>
+    public bool IsSpot(int source) => source >= 0 && source < _sources.Count && _sources[source] is Venues.ICryptoVenue { IsSpot: true };
+
+    /// <summary>El exchange de un mercado de origen (Binance Futures y Binance Spot son «Binance»).</summary>
+    public string VenueOf(int source) => source >= 0 && source < _sources.Count
+        ? _sources[source] is Venues.ICryptoVenue v ? v.Venue : _sources[source].DisplayName
+        : "?";
 
     private long NextLiveId(DateTime utc, int source)
     {
@@ -42,7 +72,7 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, ITickerStats
     {
         for (int i = 0; i < _sources.Count; i++)
             if (ReferenceEquals(_sources[i], feed)) return i;
-        return 7;
+        return SourceSlots - 1;
     }
 
     public AggregateFeed(IReadOnlyList<IMarketDataFeed> sources)
@@ -103,8 +133,12 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, ITickerStats
         for (int i = 0; i < lists.Count; i++)
             foreach (var inst in lists[i])
             {
-                if (!bySymbol.TryGetValue(inst.Symbol, out var l)) bySymbol[inst.Symbol] = l = new List<(IMarketDataFeed, Instrument)>();
-                l.Add((_sources[i], inst));
+                if (CanonicalSymbol(inst) is not { } key) continue;
+                if (!bySymbol.TryGetValue(key, out var l)) bySymbol[key] = l = new List<(IMarketDataFeed, Instrument)>();
+                // un mercado entra una sola vez por moneda (BTCUSDT antes que BTCUSDC)
+                int same = l.FindIndex(x => ReferenceEquals(x.Item1, _sources[i]));
+                if (same < 0) l.Add((_sources[i], inst));
+                else if (QuoteRank(_sources[i], inst) < QuoteRank(_sources[i], l[same].Item2)) l[same] = (_sources[i], inst);
             }
 
         var result = new List<Instrument>();
@@ -391,6 +425,9 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, ITickerStats
     {
         public readonly List<IDisposable> Inner = new();
         public long LastTicks;
+
+        /// <summary>Último precio del primer mercado (para dejar afuera un mercado cuyo precio no coincide: otra moneda con el mismo nombre).</summary>
+        public double RefPrice;
         public bool Disposed;
         public DepthSnapshot?[] Books = Array.Empty<DepthSnapshot?>();
         public long LastBookEmit;
@@ -447,6 +484,13 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, ITickerStats
         public void OnTrades(Instrument instrument, IReadOnlyList<Trade> trades)
         {
             var list = new List<Trade>(trades.Count);
+            if (trades.Count > 0)
+            {
+                double px = (double)trades[^1].Price;
+                if (_index == 0) Volatile.Write(ref _live.RefPrice, px);
+                else if (Mismatch(px)) return;
+            }
+
             foreach (var t in trades)
             {
                 // tiempo que nunca retrocede (los relojes de los mercados difieren unos milisegundos)
@@ -469,6 +513,7 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, ITickerStats
 
             // libro sumado: el de este mercado (pasado a los ticks del agregado) se guarda y cada ~200 ms sale la suma
             var snap = update.Snapshot;
+            if (_index > 0 && snap.Bids.Length > 0 && Mismatch((double)_source.FromTicks(snap.Bids[0].PriceTicks))) return;
             var conv = new DepthSnapshot(Convert(snap.Bids), Convert(snap.Asks), snap.Time);
             DepthSnapshot? merged = null;
             lock (_live)
@@ -483,6 +528,13 @@ public sealed class AggregateFeed : IMarketDataFeed, IKlineHistory, ITickerStats
             }
 
             if (merged != null) _sink.OnDepth(_instrument, new DepthUpdate { Snapshot = merged, IsFullRefresh = true });
+        }
+
+        /// <summary>El precio de este mercado se aleja más de 3 % del primero (no es la misma moneda).</summary>
+        private bool Mismatch(double px)
+        {
+            double r = Volatile.Read(ref _live.RefPrice);
+            return r > 0 && px > 0 && Math.Abs(px / r - 1) > 0.03;
         }
 
         private BookLevel[] Convert(BookLevel[] levels)

@@ -120,6 +120,12 @@ namespace TradingHub.Indicators
         /// <summary>Mercados que forman el instrumento (agregado: Binance, Bybit…; uno solo en los demás).</summary>
         public string[] Sources { get; set; } = Array.Empty<string>();
 
+        /// <summary>Si cada mercado de <see cref="Sources"/> es spot (el resto, perpetuos).</summary>
+        public bool[] SourceIsSpot { get; set; } = Array.Empty<bool>();
+
+        /// <summary>El exchange de cada mercado de <see cref="Sources"/> (Binance Futures y Binance Spot son «Binance»).</summary>
+        public string[] SourceVenues { get; set; } = Array.Empty<string>();
+
         public decimal TickCost { get; set; } = 1m;
         public TimeSpan TimeZoneOffset { get; set; } = TimeSpan.Zero;
         public Valuation Valuation { get; set; } = new();

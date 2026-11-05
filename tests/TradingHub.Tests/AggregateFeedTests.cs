@@ -19,7 +19,7 @@ public class AggregateFeedTests
             Id = id;
             _trades = trades;
             _klines = klines;
-            Instruments = symbols.Select(s => new Instrument { Symbol = s, FeedId = id, TickSize = tick, BaseAsset = s[..3], QuoteAsset = "USDT" }).ToList();
+            Instruments = symbols.Select(s => new Instrument { Symbol = s, FeedId = id, TickSize = tick, BaseAsset = s.EndsWith("USDT") ? s[..^4] : s, QuoteAsset = "USDT" }).ToList();
         }
 
         public string Id { get; }

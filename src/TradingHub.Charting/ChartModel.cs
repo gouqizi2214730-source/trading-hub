@@ -327,6 +327,9 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
         _instrumentInfo.TickSize = Series.RowSize;
         _instrumentInfo.InstrumentTickSize = Instrument.TickSize > 0 ? Instrument.TickSize : Series.RowSize;
         _instrumentInfo.Sources = Data.Feed is TradingHub.Feeds.AggregateFeed agg ? agg.Sources.Select(f => f.DisplayName).ToArray() : new[] { Data.Feed.DisplayName };
+        var feeds = Data.Feed is TradingHub.Feeds.AggregateFeed agg2 ? agg2.Sources : new[] { Data.Feed };
+        _instrumentInfo.SourceIsSpot = feeds.Select(f => f is TradingHub.Feeds.Venues.ICryptoVenue { IsSpot: true }).ToArray();
+        _instrumentInfo.SourceVenues = feeds.Select(f => f is TradingHub.Feeds.Venues.ICryptoVenue v ? v.Venue : f.DisplayName).ToArray();
         _instrumentInfo.TickCost = Instrument.PointValue * Series.RowSize;
         _instrumentInfo.LotSize = Instrument.VolumeStep;
         _instrumentInfo.Description = Instrument.Description;

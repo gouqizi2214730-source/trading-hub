@@ -94,6 +94,14 @@ internal sealed class FileSecretStore(string path) : ISecretStore
     public string Get(string account) => Load().GetValueOrDefault(account, "");
 }
 
+/// <summary>Qué mercados entran en el cripto agregado.</summary>
+public enum AggregateMarkets
+{
+    [Display(Name = "Spot y perpetuos")] Both,
+    [Display(Name = "Solo spot")] Spot,
+    [Display(Name = "Solo perpetuos")] Perpetual,
+}
+
 public enum ConnectionKind
 {
     [Display(Name = "Simulador")] Simulator,
@@ -175,6 +183,9 @@ public sealed class ConnectionProfile
 
     /// <summary>Conexión agregada: el libro de órdenes suma los de todos los mercados.</summary>
     public bool AggregateBook { get; set; } = true;
+
+    /// <summary>Cripto agregado: sumar solo los spot, solo los perpetuos o ambos.</summary>
+    public AggregateMarkets AggregateMarkets { get; set; } = AggregateMarkets.Both;
 
     // Interactive Brokers
     public string IbHost { get; set; } = "127.0.0.1";
@@ -462,6 +473,18 @@ public sealed class ConnectionManager
         return new TradingHub.Feeds.Longbridge.LongbridgeFeed(settings);
     }
 
+    private readonly Dictionary<string, IMarketDataFeed> _publicVenues = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Un mercado público para el agregado (uno por exchange, compartido por todas las conexiones agregadas).</summary>
+    private IMarketDataFeed PublicVenue(TradingHub.Feeds.Venues.CryptoVenues.Entry v)
+    {
+        lock (_publicVenues)
+        {
+            if (!_publicVenues.TryGetValue(v.Id, out var f)) _publicVenues[v.Id] = f = v.Create();
+            return f;
+        }
+    }
+
     /// <summary>Cripto agregado: suma las operaciones y velas de los mercados elegidos (Binance Futures + Bybit por defecto).</summary>
     private AggregateFeed AggregateFeedOf(ConnectionProfile p)
     {
@@ -476,9 +499,18 @@ public sealed class ConnectionManager
             }
 
             // sin perfil: los mercados públicos se crean igual (no necesitan cuenta)
-            IMarketDataFeed? f = id == BinanceFeed.FuturesId ? new BinanceFeed(futures: true) : id == BinanceFeed.SpotId ? new BinanceFeed(futures: false) : id == BybitFeed.LinearId ? new BybitFeed() : null;
-            if (f != null) sources.Add(f);
+            if (TradingHub.Feeds.Venues.CryptoVenues.Find(id) is { } v) sources.Add(PublicVenue(v));
         }
+
+        // spot / perpetuos / ambos (como el filtro de LiquidityMapperFast); si el filtro deja todo afuera, se usan todos
+        var filtered = p.AggregateMarkets switch
+        {
+            AggregateMarkets.Spot => sources.Where(f => f is TradingHub.Feeds.Venues.ICryptoVenue { IsSpot: true }).ToList(),
+            AggregateMarkets.Perpetual => sources.Where(f => f is not TradingHub.Feeds.Venues.ICryptoVenue { IsSpot: true }).ToList(),
+            _ => sources,
+        };
+        if (filtered.Count > 0) sources = filtered;
+        if (sources.Count > TradingHub.Feeds.AggregateFeed.SourceSlots) sources = sources.Take(TradingHub.Feeds.AggregateFeed.SourceSlots).ToList();
 
         if (sources.Count == 0) sources.Add(new BinanceFeed(futures: true));
         return new AggregateFeed(sources) { AggregateBook = p.AggregateBook };
@@ -587,5 +619,15 @@ public sealed class ConnectionManager
         }
 
         _feeds.Clear();
+        lock (_publicVenues)
+        {
+            foreach (var f in _publicVenues.Values)
+            {
+                try { f.Dispose(); }
+                catch { /* ignorar */ }
+            }
+
+            _publicVenues.Clear();
+        }
     }
 }

@@ -864,33 +864,52 @@ internal sealed class ConnectionsView : UserControl, IPage
     }
 
 
-    private static string AggregateSourceName(string id) => id switch
-    {
-        BinanceFeed.FuturesId => "Binance Futures",
-        BinanceFeed.SpotId => "Binance Spot",
-        BybitFeed.LinearId => "Bybit",
-        _ => id,
-    };
+    private static string AggregateSourceName(string id) => TradingHub.Feeds.Venues.CryptoVenues.Find(id)?.Name ?? id;
 
     /// <summary>Cripto agregado: qué mercados se suman.</summary>
     private Control AggregateSection(ConnectionProfile p, List<Action> apply)
     {
-        var options = new[] { BinanceFeed.FuturesId, BybitFeed.LinearId, BinanceFeed.SpotId };
-        var checks = options.Select(id => new CheckBox { Content = AggregateSourceName(id), IsChecked = p.AggregateSources.Contains(id), Tag = id }).ToList();
+        var all = TradingHub.Feeds.Venues.CryptoVenues.All;
+        var checks = all.Select(v => new CheckBox { Content = v.Name, IsChecked = p.AggregateSources.Contains(v.Id), Tag = v.Id }).ToList();
         apply.Add(() =>
         {
             var chosen = checks.Where(c => c.IsChecked == true).Select(c => (string)c.Tag!).ToList();
             if (chosen.Count == 0) chosen.Add(BinanceFeed.FuturesId);
             p.AggregateSources = chosen;
         });
-        var list = new StackPanel { Spacing = 6 };
-        foreach (var c in checks) list.Children.Add(c);
+        var markets = new ComboBox { MinWidth = 220 };
+        foreach (var m in Enum.GetValues<AggregateMarkets>()) markets.Items.Add(new ComboBoxItem { Content = Ui.EnumName(m), Tag = m });
+        markets.SelectedItem = markets.Items.OfType<ComboBoxItem>().First(i => (AggregateMarkets)i.Tag! == p.AggregateMarkets);
+        apply.Add(() => p.AggregateMarkets = (markets.SelectedItem as ComboBoxItem)?.Tag is AggregateMarkets am ? am : AggregateMarkets.Both);
+        var recommended = Ui.Button("Los recomendados", MaterialIconKind.StarOutline, () =>
+        {
+            foreach (var c in checks) c.IsChecked = TradingHub.Feeds.Venues.CryptoVenues.Recommended.Contains((string)c.Tag!);
+        }, "ghost");
+        var everything = Ui.Button("Todos", MaterialIconKind.CheckAll, () =>
+        {
+            foreach (var c in checks) c.IsChecked = true;
+        }, "ghost");
+        var perps = new WrapPanel();
+        var spots = new WrapPanel();
+        for (int i = 0; i < all.Count; i++)
+        {
+            checks[i].Margin = new Thickness(0, 0, 18, 6);
+            (all[i].Spot ? spots : perps).Children.Add(checks[i]);
+        }
+
+        var list = new StackPanel { Spacing = 6, Children =
+        {
+            new TextBlock { Text = "Perpetuos", Classes = { "faint", "small" } }, perps,
+            new TextBlock { Text = "Spot", Classes = { "faint", "small" } }, spots,
+            Ui.H(6, recommended, everything),
+        } };
         var book = new CheckBox { Content = "Sumar también los libros de órdenes (DOM y mapa de calor agregados)", IsChecked = p.AggregateBook };
         apply.Add(() => p.AggregateBook = book.IsChecked == true);
         return Ui.V(14,
             Ui.H2("Mercados que se suman"),
-            Note(MaterialIconKind.InformationOutline, "Las operaciones y las velas de todos los mercados elegidos se suman en un solo instrumento (BTCUSDT = Binance + Bybit), como en aggr.trade: volumen, delta y footprint agregados. El precio es el del primero; el libro de órdenes, la suma de todos (o el del primero, si se apaga abajo). Solo entran los símbolos que existen en al menos dos mercados."),
+            Note(MaterialIconKind.InformationOutline, "Las operaciones y las velas de todos los mercados elegidos se suman en un solo instrumento (BTCUSDT = Binance + Bybit), como en aggr.trade: volumen, delta y footprint agregados. El precio es el del primero; el libro de órdenes, la suma de todos (o el del primero, si se apaga abajo). Solo entran los símbolos que existen en al menos dos mercados; los nombres se emparejan por moneda (BTC-USDT-SWAP de OKX, BTC-USD de Coinbase y BTC de Hyperliquid son BTCUSDT), y un mercado cuyo precio se aleja más de 3 % del primero queda afuera."),
             list,
+            Ui.Field("Spot / perpetuos", markets, "Deja afuera los spot o los perpetuos sin destildarlos (el filtro de LiquidityMapperFast)."),
             book,
             Note(MaterialIconKind.ShieldCheckOutline, "Datos públicos: no hace falta cuenta ni claves. Para operar, usá la conexión de cada mercado."));
     }
