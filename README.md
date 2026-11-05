@@ -15,8 +15,11 @@
 > - **TradingView 式警报**：右键图表或指标线 → 价格 / 指标线 穿越、上穿、下穿、大于、小于、进出通道，可选频率和到期。
 > - **指标库直接编辑 / 删除**内置指标（不用先复制改名）；**KVS 脚本语言**（类似 openmarket 的 wrun：param / input / output / onBar）。
 > - **滚轮整体缩放**（价格和时间一起）；已算好的分布和裸 POC 跨周期复用，相邻周期后台预先生成，切换 1h / 4h 更快。
+> - **LiquidityMapperFast 的功能都进了 KVP 图表**：聚合连接可加 OKX、Bitget、Hyperliquid、Deribit、MEXC、Coinbase 及 Binance / Bybit / OKX / Bitget 现货（共 12 个市场，可筛选只现货 / 只永续）；新指标「分交易所资金流（排名）」「每根 K 线统计（散户 / 巨鲸）」「NL/NS 新开多空」「Liquidity Tracker」「Mirror」「爆仓价位（Hyperliquid）」「吸收」「被套交易者」「异常高亮与提醒（挂单墙、资金流爆发、多空反转）」。
+> - **画线警报像 TV**：右键自己画的线 / 通道 / 矩形 / 斐波那契 → 穿过、触碰、进入通道、离开通道、在通道内 / 外；新增「平行通道」画图工具和「涨跌超过 N%」条件。
+> - **DOM 下单单独开关**：DOM 标题栏的锁，关掉后 DOM 只显示不下单，图表下单不受影响。
 >
-> **下载 Windows 安装程序：[TradingHub-Setup-x64.exe](https://github.com/gouqizi2214730-source/trading-hub/releases/latest/download/TradingHub-Setup-x64.exe)**（ARM 电脑用 [arm64 版](https://github.com/gouqizi2214730-source/trading-hub/releases/latest/download/TradingHub-Setup-arm64.exe)）· [全部版本](https://github.com/gouqizi2214730-source/trading-hub/releases)
+> **下载 Windows 安装程序：[KVP-Setup-x64.exe](https://github.com/gouqizi2214730-source/trading-hub/releases/latest/download/KVP-Setup-x64.exe)**（只发布 x64 版；Windows ARM 电脑也能运行）· [全部版本](https://github.com/gouqizi2214730-source/trading-hub/releases)
 >
 > 许可证与原项目相同：MIT + Commons Clause（可免费使用、修改、分享，但不能出售）。
 

@@ -86,10 +86,8 @@ public static class UpdateChecker
     /// <summary>Si <paramref name="candidate"/> es más nueva que <paramref name="current"/>.</summary>
     public static bool IsNewer(Version candidate, Version current) => candidate.CompareTo(current) > 0;
 
-    /// <summary>El nombre del instalador para esta computadora.</summary>
-    public static string InstallerAssetName => System.Runtime.InteropServices.RuntimeInformation.OSArchitecture == System.Runtime.InteropServices.Architecture.Arm64
-        ? "KVP-Setup-arm64.exe"
-        : "KVP-Setup-x64.exe";
+    /// <summary>El nombre del instalador: solo se publica el x64 (Windows en ARM lo corre también).</summary>
+    public static string InstallerAssetName => "KVP-Setup-x64.exe";
 
     /// <summary>Busca en las dos fuentes. No tira excepciones: los problemas de red quedan en <see cref="Result.Error"/>.</summary>
     public static async Task<Result> CheckAsync(CancellationToken ct = default)

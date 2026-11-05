@@ -100,4 +100,46 @@ public class FlowIndicatorTests
         var book = new[] { (80000m, 1m), (79990m, 2m), (80010m, 0.5m) };
         Assert.Equal(3, BookMirror.Sum(book, 79980, 80000).Coins);
     }
+
+    [Fact]
+    public void Absorcion_atrapados_y_destacados()
+    {
+        var t0 = new DateTime(2026, 11, 5, 0, 0, 0, DateTimeKind.Utc);
+        var trades = new List<TradingHub.Indicators.BarTrade>();
+        // 30 ventas de 0,2 BTC en 80000 dentro de 6 ms: $480k absorbidos por el bid; y compras sueltas
+        for (int i = 0; i < 30; i++) trades.Add(new(i, t0.AddTicks(i * 2000), 80000m, 0.2m, false, 0));
+        for (int i = 0; i < 10; i++) trades.Add(new(100 + i, t0.AddSeconds(1 + i), 80001m, 0.1m, true, 0));
+        var marks = AbsorptionMarks.Find(trades.OrderBy(t => t.Time).ToList(), 10, 250_000);
+        Assert.Single(marks);
+        Assert.False(marks[0].AggressorBuy);
+        Assert.InRange(marks[0].Usd, 470_000, 490_000);
+
+        // mecha de arriba con compras netas, cuerpo con ventas
+        var levels = new List<TradingHub.Indicators.PriceVolumeInfo>
+        {
+            new(100) { Bid = 5, Ask = 1 }, new(101) { Bid = 5, Ask = 1 }, new(102) { Bid = 4, Ask = 2 },
+            new(103) { Bid = 1, Ask = 9 }, new(104) { Bid = 1, Ask = 8 },
+        };
+        var (net, avg, other) = TrappedTraders.Wick(levels, 103, 104, true);
+        Assert.Equal(15, net);
+        Assert.True(net > other);
+        Assert.InRange(avg, 103m, 104m);
+
+        // regla k·σ: un valor 10 veces lo normal se destaca
+        var vals = Enumerable.Range(0, 80).Select(i => i == 79 ? 100.0 : 10 + i % 3).ToArray();
+        Assert.True(vals[79] > StandOutRule.Threshold(i => vals[i], 79, 72, 2));
+        Assert.Null(StandOutRule.Threshold(i => vals[i], 5, 72, 2));
+
+        // se dibujan sin fallar
+        var (model, _) = Market();
+        model.AddIndicator(new AbsorptionMarks { ThresholdUsd = 50_000 });
+        model.AddIndicator(new TrappedTraders());
+        model.AddIndicator(new HighlightsAndSounds());
+        model.AddIndicator(new LiquidityTracker());
+        model.AddIndicator(new BookMirror());
+        model.Update();
+        model.Viewport.BarWidth = 20;
+        using var surface = SKSurface.Create(new SKImageInfo(1200, 800));
+        new ChartRenderer().Render(surface.Canvas, model, 1200, 800, new ChartRenderState());
+    }
 }

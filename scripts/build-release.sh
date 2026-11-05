@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Builds the Windows installers of KVP (x64 and ARM64) from Linux, macOS or Git Bash on Windows.
+# Builds the Windows installer of KVP (x64; Windows on ARM runs it too) from Linux, macOS or Git Bash on Windows.
 #
 #   scripts/build-release.sh [VERSION] [ARCHES]
 #
 #   VERSION  e.g. 1.2.0.1 (upstream version + fork build number). Default: the <Version> in Directory.Build.props.
-#   ARCHES   default "x64 arm64".
+#   ARCHES   default "x64" (pass "x64 arm64" to also build the ARM64 one).
 #
 # Optimizations over the upstream build-windows.sh:
 #   - ReadyToRun: the app's code is precompiled, so it opens noticeably faster (no JIT on first use of each screen).
@@ -20,7 +20,7 @@ export LC_ALL=C.UTF-8 LANG=C.UTF-8
 
 BASE=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Directory.Build.props | head -1)
 VERSION="${1:-$BASE}"
-ARCHES="${2:-x64 arm64}"
+ARCHES="${2:-x64}"
 R2R="${R2R:-true}"
 
 # NSIS VIProductVersion needs exactly 4 numbers
