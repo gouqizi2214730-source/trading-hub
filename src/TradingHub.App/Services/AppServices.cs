@@ -479,6 +479,10 @@ public sealed class AppServices
         TradingHub.Data.LiquidityHistory.Root = DataLocation.Root;
         // financiación, interés abierto y liquidaciones ya traídos (junto a los datos de mercado)
         TradingHub.Feeds.Derivatives.Root = DataLocation.Root;
+        // datos de opciones y de ETF para los indicadores: los da la conexión que se agregue en Conexiones
+        TradingHub.Feeds.External.OptionsData.Root = Path.Combine(DataLocation.Root, "Options");
+        Connections.ApplyExternalData();
+        Connections.Changed += Connections.ApplyExternalData;
         TradingHub.Data.LiquidityHistory.Enabled = Settings.RecordLiquidity;
         TradingHub.Data.LiquidityHistory.KeepHours = Math.Clamp(Settings.LiquidityHours, 1, 72);
         TradingHub.Compute.GpuCompute.Mode = Settings.GpuMode == "off" ? "off" : "auto";

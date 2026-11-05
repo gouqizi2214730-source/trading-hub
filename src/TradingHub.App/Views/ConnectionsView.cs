@@ -59,6 +59,8 @@ internal sealed class ConnectionsView : UserControl, IPage
         ConnectionKind.Databento => MaterialIconKind.DatabaseArrowDownOutline,
         ConnectionKind.Longbridge => MaterialIconKind.Bridge,
         ConnectionKind.Aggregate => MaterialIconKind.Layers,
+        ConnectionKind.OptionsData => MaterialIconKind.ChartBellCurve,
+        ConnectionKind.EtfFlows => MaterialIconKind.SwapVerticalBold,
         _ => MaterialIconKind.Bank,
     };
 
@@ -81,6 +83,8 @@ internal sealed class ConnectionsView : UserControl, IPage
                 ConnectionKind.Databento => "historia de futuros de CME desde 2010",
                 ConnectionKind.Longbridge => "acciones de Hong Kong, EE.UU. y China (entrás con tu cuenta)",
                 ConnectionKind.Aggregate => "Binance + Bybit sumados (volumen y delta agregados)",
+                ConnectionKind.OptionsData => "cadena, operaciones e historia de opciones para sus indicadores",
+                ConnectionKind.EtfFlows => "flujo diario de los ETF al contado (BTC, ETH…)",
                 _ => null,
             };
             object itemHeader = hint == null ? Ui.EnumName(kind) : Ui.V(1, new TextBlock { Text = Ui.EnumName(kind) }, new TextBlock { Text = hint, Classes = { "faint", "small" } });
@@ -164,10 +168,14 @@ internal sealed class ConnectionsView : UserControl, IPage
             ConnectionKind.Databento => "historia de futuros de CME (pago por uso)",
             ConnectionKind.Longbridge => string.IsNullOrWhiteSpace(_svc.Connections.GetSecret(p, "token")) ? "sin autorizar (entrá con tu cuenta)" : $"{(p.LongbridgeRegion == "cn" ? "China continental" : "global")} · {p.LongbridgeSymbols.Count} símbolos",
             ConnectionKind.Aggregate => string.Join(" + ", p.AggregateSources.Select(AggregateSourceName)),
+            ConnectionKind.OptionsData => p.OptionsSource == OptionsSource.Deribit ? "Deribit · BTC y ETH" : string.IsNullOrWhiteSpace(p.ExternalUrl) ? "sin dirección configurada" : "API propia · " + HostOf(p.ExternalUrl),
+            ConnectionKind.EtfFlows => string.IsNullOrWhiteSpace(p.ExternalUrl) ? "sin dirección configurada" : "API · " + HostOf(p.ExternalUrl),
             _ => $"{p.IbHost}:{p.IbPort}",
         };
         return prefix + detail;
     }
+
+    private static string HostOf(string url) => Uri.TryCreate(url.Trim(), UriKind.Absolute, out var u) ? u.Host : url.Trim();
 
     private void AddProfile(ConnectionKind kind)
     {
@@ -181,6 +189,7 @@ internal sealed class ConnectionsView : UserControl, IPage
         // el primero de cada tipo usa el id de sus datos (así los archivos de ticks quedan con un nombre claro)
         string defaultId = ConnectionProfile.DefaultId(kind);
         if (kind is ConnectionKind.Tradovate or ConnectionKind.CTrader or ConnectionKind.Oanda or ConnectionKind.Alpaca or ConnectionKind.Databento or ConnectionKind.Longbridge or ConnectionKind.Aggregate
+                or ConnectionKind.OptionsData or ConnectionKind.EtfFlows
             && _svc.Connections.Profiles.All(x => x.Id != defaultId))
             p.Id = defaultId;
         if (kind == ConnectionKind.Simulator) p.HistoryHours = 6;
@@ -281,6 +290,14 @@ internal sealed class ConnectionsView : UserControl, IPage
             case ConnectionKind.Aggregate:
                 sections.Children.Add(Ui.Card(AggregateSection(p, apply)));
                 break;
+            case ConnectionKind.OptionsData:
+                dataSection.IsVisible = false;
+                sections.Children.Add(Ui.Card(OptionsDataSection(p, apply)));
+                break;
+            case ConnectionKind.EtfFlows:
+                dataSection.IsVisible = false;
+                sections.Children.Add(Ui.Card(EtfFlowsSection(p, apply)));
+                break;
         }
 
         // ---- encabezado y acciones
@@ -288,7 +305,8 @@ internal sealed class ConnectionsView : UserControl, IPage
         var save = Ui.Button("Guardar", MaterialIconKind.ContentSaveOutline, () => { }, "primary");
         var delete = Ui.Button("Eliminar", MaterialIconKind.DeleteOutline, () => { }, "ghost");
         delete.IsVisible = _svc.Connections.Profiles.Count(x => x.Kind == p.Kind) > 1 || p.Kind is ConnectionKind.InteractiveBrokers or ConnectionKind.AmpFutures
-            or ConnectionKind.Tradovate or ConnectionKind.CTrader or ConnectionKind.Oanda or ConnectionKind.Alpaca or ConnectionKind.Databento or ConnectionKind.Longbridge or ConnectionKind.Aggregate;
+            or ConnectionKind.Tradovate or ConnectionKind.CTrader or ConnectionKind.Oanda or ConnectionKind.Alpaca or ConnectionKind.Databento or ConnectionKind.Longbridge or ConnectionKind.Aggregate
+            or ConnectionKind.OptionsData or ConnectionKind.EtfFlows;
 
         void Save()
         {
@@ -1055,6 +1073,63 @@ internal sealed class ConnectionsView : UserControl, IPage
             Ui.Field("API key", key),
             Ui.H(16, Link("Crear cuenta (con créditos de regalo)", "https://databento.com/signup"), Link("Precios", "https://databento.com/pricing")),
             Note(MaterialIconKind.ShieldCheckOutline, "Se usa desde Datos → «Futuros de CME con Databento»: Trading Hub calcula el costo antes y solo baja si confirmás. Se guarda aparte («Databento» en Datos) y en los backtests elegís solo Databento, solo Rithmic o las dos combinadas (Rithmic primero y Databento completa lo que falta)."));
+    }
+
+    /// <summary>Datos de opciones para los indicadores de opciones: Deribit (público) o una API propia con el JSON documentado.</summary>
+    private Control OptionsDataSection(ConnectionProfile p, List<Action> apply)
+    {
+        var source = new ComboBox { MinWidth = 260 };
+        foreach (var v in Enum.GetValues<OptionsSource>()) source.Items.Add(new ComboBoxItem { Content = Ui.EnumName(v), Tag = v });
+        source.SelectedItem = source.Items.OfType<ComboBoxItem>().First(i => (OptionsSource)i.Tag! == p.OptionsSource);
+        var url = new TextBox { Text = p.ExternalUrl, Watermark = "https://mi-proveedor.com/api/options" };
+        var header = new TextBox { Text = p.ExternalHeader, Watermark = "Authorization" };
+        var key = SecretBox(p, null, "API key (opcional)");
+        var unders = new TextBox { Text = p.ExternalUnderlyings, Watermark = "BTC, ETH, SPY (vacío = todos)" };
+        var custom = Ui.V(14,
+            Ui.Field("Dirección base de la API", url, "Se piden /chain, /trades y /daily debajo de esta dirección."),
+            TwoColumns(Ui.Field("Encabezado de la clave", header, "«Authorization» la manda como Bearer."), Ui.Field("API key", key)),
+            Ui.Field("Subyacentes", unders),
+            Note(MaterialIconKind.CodeJson, "Formato: GET /chain?underlying=BTC → {\"time\",\"spot\",\"contracts\":[{\"symbol\",\"expiry\",\"strike\",\"right\":\"C|P\",\"bid\",\"ask\",\"mark\",\"iv\",\"delta\",\"gamma\",\"oi\",\"volume\",\"contractSize\"}]}; GET /trades?underlying=BTC&from=…&to=… → [{\"time\",\"symbol\",\"expiry\",\"strike\",\"right\",\"price\",\"size\",\"side\":\"buy|sell\",\"iv\",\"spot\",\"venue\"}]; GET /daily → [{\"date\",\"atmIv\",\"rr25\",\"pcVolume\",\"pcOi\",\"gex\",\"callWall\",\"putWall\",\"gammaFlip\",\"expectedMove\"}]. IV en fracción (0,55 = 55 %), precios en dólares por contrato; lo que falte se calcula."));
+        void Sync() => custom.IsVisible = (OptionsSource)((ComboBoxItem)source.SelectedItem!).Tag! == OptionsSource.CustomJson;
+        source.SelectionChanged += (_, _) => Sync();
+        Sync();
+        apply.Add(() =>
+        {
+            p.OptionsSource = (OptionsSource)((ComboBoxItem)source.SelectedItem!).Tag!;
+            p.ExternalUrl = url.Text?.Trim() ?? "";
+            p.ExternalHeader = string.IsNullOrWhiteSpace(header.Text) ? "Authorization" : header.Text.Trim();
+            p.ExternalUnderlyings = unders.Text?.Trim() ?? "";
+            if (!string.IsNullOrWhiteSpace(key.Text)) _svc.Connections.SetSecret(p, key.Text.Trim());
+            key.Text = "";
+        });
+        return Ui.V(14,
+            Ui.H2("Datos de opciones"),
+            Note(MaterialIconKind.InformationOutline, "Los indicadores de opciones (gamma de los creadores de mercado, muros, IV Rank, sesgo, flujo de primas, tablero de opciones…) toman los datos de acá. Sin esta conexión dicen «sin datos de opciones»; cuando la agregás, empiezan a andar solos en los gráficos abiertos. El símbolo del gráfico elige el subyacente (BTCUSDT → BTC)."),
+            Ui.Field("Fuente", source),
+            custom,
+            Note(MaterialIconKind.ShieldCheckOutline, "Deribit es público: no necesita cuenta. La API key de una API propia se guarda " + (Os.IsWindows ? "en el Administrador de credenciales" : "en el Llavero") + ", nunca en los archivos. La historia diaria se completa con una foto por día que Trading Hub guarda mientras el indicador está abierto."));
+    }
+
+    /// <summary>Flujos diarios de los ETF al contado por una API (el formato está documentado).</summary>
+    private Control EtfFlowsSection(ConnectionProfile p, List<Action> apply)
+    {
+        var url = new TextBox { Text = p.ExternalUrl, Watermark = "https://mi-proveedor.com/api/etf" };
+        var header = new TextBox { Text = p.ExternalHeader, Watermark = "Authorization" };
+        var key = SecretBox(p, null, "API key (opcional)");
+        apply.Add(() =>
+        {
+            p.ExternalUrl = url.Text?.Trim() ?? "";
+            p.ExternalHeader = string.IsNullOrWhiteSpace(header.Text) ? "Authorization" : header.Text.Trim();
+            if (!string.IsNullOrWhiteSpace(key.Text)) _svc.Connections.SetSecret(p, key.Text.Trim());
+            key.Text = "";
+        });
+        return Ui.V(14,
+            Ui.H2("Flujos de ETF"),
+            Note(MaterialIconKind.InformationOutline, "El indicador «Flujo de los ETF al contado» toma de acá el flujo neto diario de los ETF de la moneda del gráfico. Sin esta conexión dice que no hay datos; cuando la agregás, anda solo."),
+            Ui.Field("Dirección base de la API", url, "Se pide /flows?asset=BTC&from=AAAA-MM-DD&to=AAAA-MM-DD debajo de esta dirección."),
+            TwoColumns(Ui.Field("Encabezado de la clave", header, "«Authorization» la manda como Bearer."), Ui.Field("API key", key)),
+            Note(MaterialIconKind.CodeJson, "Formato: [{\"date\":\"2026-11-03\",\"net\":-123400000,\"funds\":{\"IBIT\":-80000000}}] en dólares (o \"netMillions\" en millones). También vale {\"data\":[…]}."),
+            Note(MaterialIconKind.ShieldCheckOutline, "La API key se guarda " + (Os.IsWindows ? "en el Administrador de credenciales" : "en el Llavero") + ", nunca en los archivos."));
     }
 
     private Control IbSection(ConnectionProfile p, List<Action> apply)

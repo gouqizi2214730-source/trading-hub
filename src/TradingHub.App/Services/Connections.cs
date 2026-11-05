@@ -118,6 +118,15 @@ public enum ConnectionKind
     [Display(Name = "Databento")] Databento,
     [Display(Name = "长桥 Longbridge")] Longbridge,
     [Display(Name = "Cripto agregado")] Aggregate,
+    [Display(Name = "Datos de opciones (API)")] OptionsData,
+    [Display(Name = "Flujos de ETF (API)")] EtfFlows,
+}
+
+/// <summary>De dónde vienen los datos de opciones.</summary>
+public enum OptionsSource
+{
+    [Display(Name = "Deribit (BTC y ETH, público)")] Deribit,
+    [Display(Name = "API propia (JSON)")] CustomJson,
 }
 
 /// <summary>Una conexión configurada (los secretos van al llavero, no a este archivo).</summary>
@@ -187,6 +196,15 @@ public sealed class ConnectionProfile
     /// <summary>Cripto agregado: sumar solo los spot, solo los perpetuos o ambos.</summary>
     public AggregateMarkets AggregateMarkets { get; set; } = AggregateMarkets.Both;
 
+    // Datos de afuera (opciones, ETF): de dónde, la dirección de la API propia, el encabezado de la clave y los subyacentes
+    public OptionsSource OptionsSource { get; set; } = OptionsSource.Deribit;
+    public string ExternalUrl { get; set; } = "";
+    public string ExternalHeader { get; set; } = "Authorization";
+    public string ExternalUnderlyings { get; set; } = "";
+
+    /// <summary>Solo datos para los indicadores (opciones, ETF): no son un mercado para gráficos.</summary>
+    [JsonIgnore] public bool IsExternalData => Kind is ConnectionKind.OptionsData or ConnectionKind.EtfFlows;
+
     // Interactive Brokers
     public string IbHost { get; set; } = "127.0.0.1";
     public int IbPort { get; set; } = 7497;
@@ -214,11 +232,13 @@ public sealed class ConnectionProfile
         ConnectionKind.Databento => "databento",
         ConnectionKind.Longbridge => TradingHub.Feeds.Longbridge.LongbridgeFeed.FeedId,
         ConnectionKind.Aggregate => AggregateFeed.FeedId,
+        ConnectionKind.OptionsData => "options-data",
+        ConnectionKind.EtfFlows => "etf-flows",
         _ => "ib",
     };
 
     /// <summary>Da datos de mercado para gráficos (Databento e IB, no).</summary>
-    [JsonIgnore] public bool HasMarketData => Kind is not (ConnectionKind.InteractiveBrokers or ConnectionKind.Databento);
+    [JsonIgnore] public bool HasMarketData => Kind is not (ConnectionKind.InteractiveBrokers or ConnectionKind.Databento or ConnectionKind.OptionsData or ConnectionKind.EtfFlows);
 
     /// <summary>Id por defecto del primer perfil de cada tipo (el mismo de sus datos).</summary>
     public static string DefaultId(ConnectionKind kind) => kind switch
@@ -230,6 +250,8 @@ public sealed class ConnectionProfile
         ConnectionKind.Databento => "databento",
         ConnectionKind.Longbridge => TradingHub.Feeds.Longbridge.LongbridgeFeed.FeedId,
         ConnectionKind.Aggregate => AggregateFeed.FeedId,
+        ConnectionKind.OptionsData => "options-data",
+        ConnectionKind.EtfFlows => "etf-flows",
         _ => Guid.NewGuid().ToString("N")[..8],
     };
 
@@ -359,6 +381,7 @@ public sealed class ConnectionManager
             ConnectionKind.Oanda => new TradingHub.Feeds.Oanda.OandaFeed(OandaSettingsOf(p)),
             ConnectionKind.Alpaca => new TradingHub.Feeds.Alpaca.AlpacaFeed(AlpacaSettingsOf(p)),
             ConnectionKind.Databento => throw new NotSupportedException("Databento no da datos en vivo: se usa desde Datos para bajar historia de futuros."),
+            ConnectionKind.OptionsData or ConnectionKind.EtfFlows => throw new NotSupportedException("Esta conexión da datos a los indicadores (opciones o ETF), no un mercado para gráficos."),
             ConnectionKind.Longbridge => LongbridgeFeedOf(p),
             ConnectionKind.Aggregate => AggregateFeedOf(p),
             _ => throw new NotSupportedException("Interactive Brokers todavía no da datos en Trading Hub (solo prueba de conexión)."),
@@ -516,6 +539,39 @@ public sealed class ConnectionManager
         return new AggregateFeed(sources) { AggregateBook = p.AggregateBook };
     }
 
+    /// <summary>Los subyacentes que escribió el usuario (BTC, ETH, SPY…), en mayúsculas.</summary>
+    public static IReadOnlyList<string> UnderlyingsOf(ConnectionProfile p) =>
+        p.ExternalUnderlyings.Split(new[] { ',', ' ', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(u => u.Trim().ToUpperInvariant()).ToList();
+
+    /// <summary>El proveedor de opciones de una conexión (null si falta la dirección de la API propia).</summary>
+    public TradingHub.Feeds.External.IOptionsProvider? OptionsProviderOf(ConnectionProfile p) => p.OptionsSource switch
+    {
+        OptionsSource.Deribit => new TradingHub.Feeds.External.DeribitOptions(),
+        _ => string.IsNullOrWhiteSpace(p.ExternalUrl) ? null : new TradingHub.Feeds.External.JsonOptionsApi(p.ExternalUrl.Trim(), p.ExternalHeader, GetSecret(p), UnderlyingsOf(p)),
+    };
+
+    /// <summary>El proveedor de flujos de ETF de una conexión (null si falta la dirección).</summary>
+    public TradingHub.Feeds.External.IEtfFlowsProvider? EtfProviderOf(ConnectionProfile p) =>
+        string.IsNullOrWhiteSpace(p.ExternalUrl) ? null : new TradingHub.Feeds.External.JsonEtfFlowsApi(p.ExternalUrl.Trim(), p.ExternalHeader, GetSecret(p));
+
+    private string _externalKey = "";
+
+    /// <summary>
+    /// Conecta los datos de afuera de los indicadores (la primera conexión activa de opciones y de ETF). Sin conexión, los
+    /// indicadores dicen que no hay datos; cuando se agrega una, empiezan a andar solos.
+    /// </summary>
+    public void ApplyExternalData()
+    {
+        var opt = Enabled.FirstOrDefault(p => p.Kind == ConnectionKind.OptionsData);
+        var etf = Enabled.FirstOrDefault(p => p.Kind == ConnectionKind.EtfFlows);
+        string Sig(ConnectionProfile? p) => p == null ? "-" : string.Join("|", p.Id, p.OptionsSource, p.ExternalUrl, p.ExternalHeader, p.ExternalUnderlyings, GetSecret(p).GetHashCode());
+        string key = Sig(opt) + "#" + Sig(etf);
+        if (key == _externalKey) return;
+        _externalKey = key;
+        TradingHub.Feeds.External.OptionsData.Provider = opt == null ? null : OptionsProviderOf(opt);
+        TradingHub.Feeds.External.EtfFlows.Provider = etf == null ? null : EtfProviderOf(etf);
+    }
+
     /// <summary>Cliente de Databento con la API key de la conexión (TRADINGHUB_DATABENTO_URL lo apunta a otro servidor).</summary>
     public TradingHub.Feeds.Databento.DatabentoClient DatabentoOf(ConnectionProfile p) =>
         new(GetSecret(p), Environment.GetEnvironmentVariable("TRADINGHUB_DATABENTO_URL") is { Length: > 0 } u ? u : null);
@@ -588,6 +644,26 @@ public sealed class ConnectionManager
                 {
                     var inst = await GetFeed(p.Id).GetInstrumentsAsync(ct);
                     return (true, $"{inst.Count} instrumentos en común entre los mercados elegidos (datos públicos, sin cuenta).");
+                }
+                case ConnectionKind.OptionsData:
+                {
+                    var provider = OptionsProviderOf(p);
+                    if (provider == null) return (false, "Falta la dirección de la API.");
+                    string under = UnderlyingsOf(p).FirstOrDefault() ?? "BTC";
+                    var chain = await provider.ChainAsync(under, ct);
+                    if (chain == null || chain.Contracts.Count == 0) return (false, $"{provider.Name} no devolvió opciones de {under}.");
+                    int expiries = chain.Contracts.Select(c => c.Expiry).Distinct().Count();
+                    return (true, $"{provider.Name}: {chain.Contracts.Count} contratos de {under} en {expiries} vencimientos (subyacente {chain.Spot:0.##}). Los indicadores de opciones ya los usan.");
+                }
+                case ConnectionKind.EtfFlows:
+                {
+                    var provider = EtfProviderOf(p);
+                    if (provider == null) return (false, "Falta la dirección de la API.");
+                    string asset = UnderlyingsOf(p).FirstOrDefault() ?? "BTC";
+                    var days = await provider.DailyAsync(asset, DateTime.UtcNow.AddDays(-14), DateTime.UtcNow, ct);
+                    if (days.Count == 0) return (false, $"La API no devolvió días de {asset} en las últimas dos semanas.");
+                    var lastDay = days.OrderBy(d => d.Date).Last();
+                    return (true, $"{days.Count} días de {asset}; el último ({lastDay.Date:dd/MM}) {lastDay.NetUsd / 1e6:+0.0;-0.0} M USD.");
                 }
                 case ConnectionKind.Databento:
                 {
