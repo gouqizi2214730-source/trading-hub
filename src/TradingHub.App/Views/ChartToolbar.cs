@@ -23,13 +23,13 @@ internal sealed class ChartToolbar : UserControl
     private readonly Border _periodsHost = new() { VerticalAlignment = VerticalAlignment.Center };
     private Ui.Segmented<string>? _periods;
     private string _favSig = "";
-    private readonly Button _periodMenu = new() { MinWidth = 72, Padding = new Thickness(9, 4) };
+    private readonly Button _periodMenu = new() { Padding = new Thickness(7, 4) };
     private readonly TextBlock _periodMenuText = new() { VerticalAlignment = VerticalAlignment.Center };
     private readonly Flyout _periodFlyout = new() { Placement = PlacementMode.BottomEdgeAlignedLeft };
 
     // tipo de gráfico: un selector al lado de Indicadores
     private readonly ChoiceButton<ChartStyle> _styleBox;
-    private readonly ComboBox _layoutBox = new() { MinWidth = 190, MaxWidth = 240 };
+    private readonly ComboBox _layoutBox = new() { MinWidth = 150, MaxWidth = 170 };
     private readonly ChoiceButton<int> _stepBox;
     private readonly ChoiceButton<double> _historyBox;
     private ChartTab? _chart;
@@ -111,36 +111,91 @@ internal sealed class ChartToolbar : UserControl
         }
     }
 
+    // indicadores: el botón con cuántos hay en el gráfico (como OpenMarket) y la estrella de favoritos (como TradingView)
+    private readonly TextBlock _indicatorCount = new() { FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
+    private readonly Border _indicatorBadge = new() { Padding = new Thickness(6, 0), CornerRadius = new CornerRadius(8), MinWidth = 18, VerticalAlignment = VerticalAlignment.Center };
+
+    /// <summary>La rayita entre grupos (visible, como en TradingView; la de Ui ocupa demasiado en la fila).</summary>
+    private static Control Sep() => new Border { Width = 1, Height = 22, Margin = new Thickness(2, 0), Background = Ui.Line, VerticalAlignment = VerticalAlignment.Center };
+
+    private static Control Group(params Control[] items)
+    {
+        var g = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
+        foreach (var c in items)
+        {
+            c.VerticalAlignment = VerticalAlignment.Center;
+            g.Children.Add(c);
+        }
+
+        return g;
+    }
+
     private Control Build(Control[] rightControls)
     {
         ToolTip.SetTip(_layoutBox, "Cómo se arma cada vela del footprint");
 
+        // indicadores · favoritos · alerta · replay (lo de análisis, al lado del tipo de gráfico, como en TradingView)
+        _indicatorBadge.Child = _indicatorCount;
+        _indicatorBadge.Background = Ui.Bg3;
+        var indicatorsText = new TextBlock { Text = "Indicadores", VerticalAlignment = VerticalAlignment.Center };
+        var indicators = new Button { Content = Ui.H(6, Ui.Icon(MaterialIconKind.FunctionVariant, 17), indicatorsText, _indicatorBadge) };
+        // en ventanas angostas el botón queda con el ícono y el número (la barra sigue en una fila)
+        SizeChanged += (_, e) =>
+        {
+            bool wide = e.NewSize.Width >= 1700;
+            indicatorsText.IsVisible = wide;
+            _layoutBox.MinWidth = wide ? 150 : 120;
+            _layoutBox.MaxWidth = wide ? 170 : 130;
+        };
+        ToolTip.SetTip(indicators, "Indicadores del gráfico y la biblioteca (el número: cuántos hay en este gráfico)");
+        indicators.Click += (_, _) => _host.OpenIndicators(_chart);
+        Button? favorites = null;
+        favorites = Ui.IconButton(MaterialIconKind.StarOutline, "Indicadores favoritos y plantillas de gráfico (en Indicadores, clic derecho → «Agregar a favoritos»)", () => _host.ShowFavoritesMenu(_chart, favorites!));
+        var alert = Ui.IconButton(MaterialIconKind.BellPlusOutline, "Crear una alerta (arranca con el último precio)", () => _host.CreatePriceAlert(_chart));
+        Button? replay = null;
+        replay = Ui.IconButton(MaterialIconKind.Rewind, "Replay: practicar con un día al azar o a ciegas", () => _host.ShowReplayMenu(_chart, replay!));
+
+        // botones más justos que los de siempre: la barra entra en una fila (como TradingView y OpenMarket)
+        foreach (var b in new Button[] { _styleBox, _stepBox, _historyBox, indicators }) b.Padding = new Thickness(8, 4);
+        _layoutBox.Padding = new Thickness(8, 4, 4, 4);
+
         // se acomoda en dos líneas si la ventana es angosta (nunca corta botones)
-        var left = new WrapPanel { ItemSpacing = 8, LineSpacing = 6, VerticalAlignment = VerticalAlignment.Center };
-        foreach (var c in new Control[] { _link, Picker, _historyBox, Ui.Divider(true), Ui.H(4, _periodsHost, _periodMenu), _layoutBox, _stepBox })
+        var left = new WrapPanel { ItemSpacing = 6, LineSpacing = 6, VerticalAlignment = VerticalAlignment.Center };
+        foreach (var c in new Control[]
+                 {
+                     Group(_link, Picker), Sep(),
+                     Group(_periodsHost, _periodMenu, _historyBox), Sep(),
+                     Group(_styleBox, _layoutBox, _stepBox), Sep(),
+                     Group(indicators, favorites, alert, replay),
+                 })
         {
             c.VerticalAlignment = VerticalAlignment.Center;
             left.Children.Add(c);
         }
 
-        var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Top };
-        right.Children.Add(_styleBox);
-        right.Children.Add(Ui.Button("Indicadores", MaterialIconKind.FunctionVariant, () => _host.OpenIndicators(_chart)));
-        right.Children.Add(Ui.IconButton(MaterialIconKind.ViewColumnOutline, "Editar footprint (columnas)", () => _host.OpenFootprintEditor(_chart)));
-        right.Children.Add(Ui.IconButton(MaterialIconKind.PaletteOutline, "Configuración del gráfico: colores del fondo, las velas, los ejes…", () => _host.OpenChartSettings(_chart)));
+        // a la derecha: lo del gráfico (estrategias, columnas, ajustes, captura, pantalla completa) y después las ventanas
+        var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Top };
         Button? strategies = null;
         strategies = Ui.IconButton(MaterialIconKind.RobotOutline, "Estrategias en el gráfico: marcan dónde entran y salen (historia y en vivo), solo visuales o ejecutando en una cuenta", () => _host.ShowStrategyMenu(_chart, strategies!));
         right.Children.Add(strategies);
-        Button? templates = null;
-        templates = Ui.IconButton(MaterialIconKind.BookmarkMultipleOutline, "Plantillas de gráfico: guardar cómo se ve este gráfico (estilo, colores, indicadores) y aplicarlo a otros", () => _host.ShowChartTemplates(_chart, templates!));
-        right.Children.Add(templates);
+        right.Children.Add(Ui.IconButton(MaterialIconKind.CogOutline, "Configuración del gráfico: colores del fondo, las velas, los ejes…", () => _host.OpenChartSettings(_chart)));
+        right.Children.Add(Ui.IconButton(MaterialIconKind.CameraOutline, "Captura del gráfico (PNG en Imágenes)", () => _host.SaveChartImage(_chart)));
+        right.Children.Add(Ui.IconButton(MaterialIconKind.Fullscreen, "Pantalla completa", () => _host.ToggleFullScreen(_chart)));
         foreach (var c in rightControls) right.Children.Add(c);
 
-        var bar = new DockPanel { Margin = new Thickness(12, 8), LastChildFill = true };
+        var bar = new DockPanel { Margin = new Thickness(10, 6), LastChildFill = true };
         DockPanel.SetDock(right, Dock.Right);
         bar.Children.Add(right);
         bar.Children.Add(left);
         return new Border { Child = bar }.Classes("toolbar");
+    }
+
+    /// <summary>Cuántos indicadores hay en el gráfico (en el botón).</summary>
+    private void UpdateIndicatorCount()
+    {
+        int n = _chart?.Model?.Indicators.Count ?? 0;
+        _indicatorCount.Text = n.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        _indicatorCount.Foreground = n > 0 ? Ui.Accent : Ui.Text2;
     }
 
     private void Hook()
@@ -347,8 +402,10 @@ internal sealed class ChartToolbar : UserControl
         var favorites = _host.Services.Settings.FavoritePeriods;
         string? favCode = favorites.FirstOrDefault(code => ChartPeriod.TryParse(code, out var fp) && fp == m.Period);
         _periods?.Select(favCode);
+        // como en TradingView: el selector es solo la flechita, salvo que el período no esté en la barra (entonces lo muestra marcado)
         _periodMenuText.Text = m.Period.DisplayName;
-        _periodMenuText.Foreground = favCode == null ? Ui.Accent : Ui.Text1; // si no está en la barra, el selector lo muestra marcado
+        _periodMenuText.Foreground = Ui.Accent;
+        _periodMenuText.IsVisible = favCode == null;
         _styleBox.Select(m.Settings.Style);
         _layoutBox.IsVisible = m.Settings.Style == ChartStyle.Footprint;
         _stepBox.IsVisible = m.Settings.Style == ChartStyle.Footprint;
@@ -365,6 +422,7 @@ internal sealed class ChartToolbar : UserControl
         }
         _syncing = false;
         _link.Refresh();
+        UpdateIndicatorCount();
         _host.UpdateTitles(c);
     }
 
@@ -384,147 +442,6 @@ internal sealed class ChartToolbar : UserControl
         }
 
         Picker.SetQuote(data.LastPrice, change, data.Instrument);
-    }
-}
-
-/// <summary>
-/// Barra de dibujos de cada gráfico (a la izquierda, como en ATAS): herramientas agrupadas; la flechita de
-/// abajo de un grupo abre sus variantes (líneas, posiciones…) y el botón queda con la última usada.
-/// </summary>
-internal sealed class DrawingToolStrip : UserControl
-{
-    private sealed class Group
-    {
-        public required ToggleButton Button;
-        public required DrawingKind?[] Kinds;
-        public DrawingKind? Current;
-    }
-
-    private static readonly Dictionary<DrawingKind, (MaterialIconKind Icon, string Name)> Info = new()
-    {
-        [DrawingKind.HorizontalLine] = (MaterialIconKind.Minus, "Línea horizontal"),
-        [DrawingKind.HorizontalRay] = (MaterialIconKind.ArrowRightThin, "Rayo horizontal"),
-        [DrawingKind.VerticalLine] = (MaterialIconKind.DragVertical, "Línea vertical"),
-        [DrawingKind.TrendLine] = (MaterialIconKind.ChartLineVariant, "Línea de tendencia"),
-        [DrawingKind.Ray] = (MaterialIconKind.ArrowTopRightThin, "Rayo"),
-        [DrawingKind.ExtendedLine] = (MaterialIconKind.ArrowExpandHorizontal, "Línea extendida"),
-        [DrawingKind.Rectangle] = (MaterialIconKind.RectangleOutline, "Rectángulo / zona"),
-        [DrawingKind.ParallelChannel] = (MaterialIconKind.VectorLine, "Canal paralelo (dos clics para la línea base; el tercer manejador, el ancho)"),
-        [DrawingKind.FibRetracement] = (MaterialIconKind.FormatLineSpacing, "Retroceso de Fibonacci"),
-        [DrawingKind.Ruler] = (MaterialIconKind.RulerSquare, "Regla (medir)"),
-        [DrawingKind.LongPosition] = (MaterialIconKind.TrendingUp, "Posición larga (entrada, stop y objetivo)"),
-        [DrawingKind.ShortPosition] = (MaterialIconKind.TrendingDown, "Posición corta (entrada, stop y objetivo)"),
-        [DrawingKind.Text] = (MaterialIconKind.FormatText, "Texto"),
-        [DrawingKind.AnchoredVwap] = (MaterialIconKind.Anchor, "VWAP anclado (desde el punto que elijas, calculado con cada operación)"),
-        [DrawingKind.FixedRangeProfile] = (MaterialIconKind.ChartBar, "Perfil de rango fijo (volumen entre dos puntos; puede abarcar varias sesiones)"),
-    };
-
-    private readonly List<Group> _groups = new();
-
-    public DrawingToolStrip()
-    {
-        var panel = new StackPanel { Orientation = Orientation.Vertical, Spacing = 1, Margin = new Thickness(3, 6) };
-        DrawingKind?[][] groups =
-        {
-            new DrawingKind?[] { null },
-            new DrawingKind?[] { DrawingKind.HorizontalLine, DrawingKind.HorizontalRay, DrawingKind.VerticalLine, DrawingKind.TrendLine, DrawingKind.Ray, DrawingKind.ExtendedLine },
-            new DrawingKind?[] { DrawingKind.Rectangle, DrawingKind.ParallelChannel },
-            new DrawingKind?[] { DrawingKind.FibRetracement },
-            new DrawingKind?[] { DrawingKind.AnchoredVwap, DrawingKind.FixedRangeProfile },
-            // a la vista, como en TradingView (antes compartían un botón y la corta quedaba escondida en el menú)
-            new DrawingKind?[] { DrawingKind.LongPosition },
-            new DrawingKind?[] { DrawingKind.ShortPosition },
-            new DrawingKind?[] { DrawingKind.Ruler },
-            new DrawingKind?[] { DrawingKind.Text },
-        };
-        foreach (var kinds in groups)
-        {
-            var g = new Group { Button = new ToggleButton().Classes("tool"), Kinds = kinds, Current = kinds[0] };
-            UpdateButton(g);
-            g.Button.Click += (_, _) =>
-            {
-                Check(g.Current);
-                ToolSelected?.Invoke(g.Current);
-            };
-            _groups.Add(g);
-            panel.Children.Add(g.Button);
-            if (kinds.Length > 1)
-            {
-                var more = new Button { Content = Ui.Icon(MaterialIconKind.ChevronDown, 11, Ui.Text2) }.Classes("toolmore");
-                ToolTip.SetTip(more, "Más herramientas de este grupo");
-                more.Click += (_, _) => ShowGroup(g, more);
-                panel.Children.Add(more);
-            }
-        }
-
-        panel.Children.Add(new Border { Height = 1, Margin = new Thickness(4, 6) }.Classes("divider"));
-        var clear = new Button { Content = Ui.Icon(MaterialIconKind.DeleteSweepOutline, 17) }.Classes("icon");
-        clear.Width = 30;
-        clear.Height = 28;
-        clear.MinHeight = 0;
-        ToolTip.SetTip(clear, "Borrar todos los dibujos de este instrumento");
-        clear.Click += (_, _) => ClearRequested?.Invoke();
-        panel.Children.Add(clear);
-        _groups[0].Button.IsChecked = true;
-        Content = new Border
-        {
-            Child = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Hidden },
-            Background = Ui.Bg1,
-            BorderBrush = Ui.Line,
-            BorderThickness = new Thickness(0, 0, 1, 0),
-        };
-    }
-
-    public event Action<DrawingKind?>? ToolSelected;
-    public event Action? ClearRequested;
-
-    private static void UpdateButton(Group g)
-    {
-        if (g.Current is { } k)
-        {
-            g.Button.Content = Ui.Icon(Info[k].Icon, 17);
-            ToolTip.SetTip(g.Button, Info[k].Name);
-        }
-        else
-        {
-            g.Button.Content = Ui.Icon(MaterialIconKind.CursorDefaultOutline, 17);
-            ToolTip.SetTip(g.Button, "Cursor (Esc)");
-        }
-    }
-
-    private void ShowGroup(Group g, Control anchor)
-    {
-        var menu = new MenuFlyout { Placement = PlacementMode.RightEdgeAlignedTop };
-        foreach (var k in g.Kinds.OfType<DrawingKind>())
-        {
-            var kind = k;
-            var item = new MenuItem { Header = Info[kind].Name, Icon = Ui.Icon(Info[kind].Icon, 16) };
-            item.Click += (_, _) =>
-            {
-                g.Current = kind;
-                UpdateButton(g);
-                Check(kind);
-                ToolSelected?.Invoke(kind);
-            };
-            menu.Items.Add(item);
-        }
-
-        menu.ShowAt(anchor);
-    }
-
-    /// <summary>Marca la herramienta activa (null = cursor); el grupo pasa a mostrarla.</summary>
-    public void Check(DrawingKind? kind)
-    {
-        foreach (var g in _groups)
-        {
-            bool has = g.Kinds.Contains(kind);
-            if (has && kind != null && !Equals(g.Current, kind))
-            {
-                g.Current = kind;
-                UpdateButton(g);
-            }
-
-            g.Button.IsChecked = has;
-        }
+        UpdateIndicatorCount();
     }
 }

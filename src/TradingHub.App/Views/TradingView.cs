@@ -63,6 +63,9 @@ public sealed class ChartTab
     internal ChartPage? Page { get; set; }
     internal ChartWindow? Window { get; set; }
 
+    /// <summary>La barrita flotante del dibujo elegido.</summary>
+    internal DrawingBar? DrawingBar { get; set; }
+
     /// <summary>Botón de agrandar / achicar de la barra del marco.</summary>
     internal Avalonia.Controls.Button? MaximizeButton { get; set; }
 
@@ -143,7 +146,7 @@ public sealed partial class TradingView : UserControl
         _layoutChoice.Changed += l => _ = SetLayoutAsync(l);
         var popOut = Ui.IconButton(MaterialIconKind.OpenInNew, $"Sacar el gráfico a una ventana aparte ({Keys.Label("D", shift: true)})", () => DetachActive());
         var newTab = Ui.IconButton(MaterialIconKind.Plus, $"Nueva pestaña ({Keys.Label("T")})", () => _ = NewChartAsync());
-        _toolbar = new ChartToolbar(this, false, Ui.Divider(true), _layoutChoice, BuildPanelsButton(), popOut, newTab);
+        _toolbar = new ChartToolbar(this, false, new Border { Width = 1, Height = 22, Margin = new Thickness(4, 5), Background = Ui.Line }, _layoutChoice, BuildPanelsButton(), popOut, newTab);
         _svc.BracketsCreated += HookBrackets;
         Content = BuildLayout();
     }
@@ -162,6 +165,10 @@ public sealed partial class TradingView : UserControl
     internal ChartToolbar Toolbar => _toolbar;
 
     internal void SetStatus(string text) => _status(text);
+
+    /// <summary>La barra de dibujos de un gráfico con su estado (imán y seguir dibujando son de todos; bloquear y ocultar, del gráfico).</summary>
+    internal void SyncDrawingTools(ChartTab chart) =>
+        chart.Tools?.SetStates(_svc.Settings.DrawingMagnet, _svc.Settings.DrawingSticky, chart.Model?.Settings.LockDrawings ?? false, chart.Model?.Settings.HideDrawings ?? false);
 
     // ===================================================================== layout
 
@@ -472,7 +479,10 @@ public sealed partial class TradingView : UserControl
         var body = new DockPanel();
         DockPanel.SetDock(headerBorder, Dock.Top);
         body.Children.Add(headerBorder);
-        body.Children.Add(view);
+        // el gráfico con la barrita flotante del dibujo elegido encima (como en TradingView)
+        var viewHost = new Panel();
+        viewHost.Children.Add(view);
+        body.Children.Add(viewHost);
         // el contenido se recorta con el radio de adentro del borde: el gráfico acompaña la curva de la esquina (sin puntas)
         var inner = new Border { Child = body, CornerRadius = new CornerRadius(7), ClipToBounds = true };
         var frame = new Border { Child = inner, ClipToBounds = true, CornerRadius = new CornerRadius(8), Background = Ui.Bg0, BorderBrush = Ui.Line, BorderThickness = new Thickness(1) };
@@ -482,7 +492,7 @@ public sealed partial class TradingView : UserControl
         var tools = new DrawingToolStrip();
         chart.Tools = tools;
         DockPanel.SetDock(tools, Dock.Left);
-        body.Children.Insert(body.Children.IndexOf(view), tools);
+        body.Children.Insert(body.Children.IndexOf(viewHost), tools);
         tools.ToolSelected += kind =>
         {
             Activate(chart);
@@ -499,10 +509,69 @@ public sealed partial class TradingView : UserControl
             chart.Model.Invalidate();
             DrawingsTouched(chart);
         };
+        tools.DeleteSelectedRequested += () =>
+        {
+            if (chart.Model == null) return;
+            var selected = chart.Model.Drawings.Where(d => d.Selected).ToList();
+            if (selected.Count == 0)
+            {
+                _status("Elegí un dibujo para borrarlo (o usá la flechita para borrar todos)");
+                return;
+            }
+
+            foreach (var d in selected) chart.Model.Drawings.Remove(d);
+            chart.Model.Invalidate();
+            DrawingsTouched(chart);
+        };
+        view.Magnet = _svc.Settings.DrawingMagnet;
+        view.StickyTool = _svc.Settings.DrawingSticky;
+        tools.MagnetChanged += m =>
+        {
+            _svc.Settings.DrawingMagnet = m;
+            _svc.Settings.Save();
+            foreach (var c in AllCharts)
+            {
+                c.View.Magnet = m;
+                SyncDrawingTools(c);
+            }
+
+            _status(m switch { MagnetMode.Weak => "Imán débil prendido", MagnetMode.Strong => "Imán fuerte prendido", _ => "Imán apagado" });
+        };
+        tools.StickyChanged += on =>
+        {
+            _svc.Settings.DrawingSticky = on;
+            _svc.Settings.Save();
+            foreach (var c in AllCharts)
+            {
+                c.View.StickyTool = on;
+                SyncDrawingTools(c);
+            }
+        };
+        tools.LockChanged += on =>
+        {
+            if (chart.Model == null) return;
+            chart.Model.Settings.LockDrawings = on;
+            chart.Model.Invalidate();
+            Workspace.Save(this);
+            _status(on ? "Dibujos bloqueados: se pueden elegir, pero no mover" : "Dibujos desbloqueados");
+        };
+        tools.HideChanged += on =>
+        {
+            if (chart.Model == null) return;
+            chart.Model.Settings.HideDrawings = on;
+            if (on)
+                foreach (var d in chart.Model.Drawings) d.Selected = false;
+            chart.Model.Invalidate();
+            Workspace.Save(this);
+            _status(on ? "Dibujos ocultos (siguen guardados)" : "Dibujos a la vista");
+        };
         var trader = new ChartTraderPanel(this, chart);
         chart.Trader = trader;
         DockPanel.SetDock(trader, Dock.Right);
-        body.Children.Insert(body.Children.IndexOf(view), trader);
+        body.Children.Insert(body.Children.IndexOf(viewHost), trader);
+        var drawingBar = new DrawingBar(this, chart);
+        chart.DrawingBar = drawingBar;
+        viewHost.Children.Add(drawingBar);
 
         // color de vinculación en la esquina de la barrita del gráfico
         var link = new LinkButton(this, () => chart) { Margin = new Thickness(0, 0, 6, 0) };
@@ -530,7 +599,8 @@ public sealed partial class TradingView : UserControl
 
         // clic en cualquier parte del gráfico: pasa a ser el activo
         frame.AddHandler(PointerPressedEvent, (_, _) => Activate(chart), RoutingStrategies.Tunnel, handledEventsToo: true);
-        view.ToolFinished += () => chart.Tools?.Check(null);
+        // con «seguir dibujando» la herramienta sigue marcada
+        view.ToolFinished += () => chart.Tools?.Check(chart.View.Controller?.ActiveTool);
         view.DrawingsChanged += () => DrawingsTouched(chart);
         view.DrawingDefaults = k => _svc.Settings.DrawingDefaults.TryGetValue(k.ToString(), out var d) ? d : null;
         view.MenuRequested += (_, p) => ShowChartMenu(chart, p);
@@ -639,6 +709,7 @@ public sealed partial class TradingView : UserControl
             tab.FeedId = profile.Id;
             tab.Symbol = inst.Symbol;
             tab.View.Model = model;
+            SyncDrawingTools(tab);
             // una cuenta de Rithmic se mantiene aunque su sesión todavía se esté conectando
             if (!tab.AccountId.StartsWith("rithmic|", StringComparison.Ordinal) && !_svc.AccountsFor(data).Any(a => a.Id == tab.AccountId)) tab.AccountId = "sim";
             if (instrumentChanged && tab.CrossSymbol != null)
@@ -1004,6 +1075,7 @@ public sealed partial class TradingView : UserControl
 
         chart.Model = model;
         chart.View.Model = model;
+        SyncDrawingTools(chart);
         _pages.Add(page);
         Arrange(page);
         _tabControl.Items.Add(page.Item);
@@ -1381,6 +1453,7 @@ public sealed partial class TradingView : UserControl
                 t.Model.Update();
                 CheckAlerts(t);
                 if (t.Model.IsDirty && visible.Contains(t)) t.View.InvalidateVisual();
+                if (visible.Contains(t)) t.DrawingBar?.Refresh();
             }
         }
 
@@ -1391,6 +1464,7 @@ public sealed partial class TradingView : UserControl
             t.Model.Update();
             CheckAlerts(t);
             if (t.Model.IsDirty) t.View.InvalidateVisual();
+            t.DrawingBar?.Refresh();
             if (slowFrame) w.Toolbar.UpdateQuote();
         }
 

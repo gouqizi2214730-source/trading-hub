@@ -199,6 +199,16 @@ public sealed class IndicatorsWindow : Window
                     row.Children.Add(badge);
                 }
 
+                // los favoritos llevan la estrella (la de la barra del gráfico los agrega de un clic)
+                if (_svc.Settings.FavoriteIndicators.Contains(i.Type.FullName!))
+                {
+                    var star = Ui.Icon(MaterialIconKind.Star, 13, Ui.Accent);
+                    star.Margin = new Thickness(0, 0, 6, 0);
+                    star.VerticalAlignment = VerticalAlignment.Center;
+                    DockPanel.SetDock(star, Dock.Left);
+                    row.Children.Add(star);
+                }
+
                 row.Children.Add(new TextBlock { Text = Indicator.DefaultName(i.Type), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
                 var item = new ListBoxItem { Content = row, Tag = i, Padding = new Thickness(18, 4, 8, 4) };
                 string? tip = Layout.Names.ContainsKey(i.Type.FullName!) ? $"{TradingHub.Rendering.UiText.Tr(i.Name)}\n{i.Description}".Trim() : i.Description;
@@ -464,6 +474,16 @@ public sealed class IndicatorsWindow : Window
         var add = new MenuItem { Header = "Agregar al gráfico", Icon = Ui.Icon(MaterialIconKind.Plus, 16) };
         add.Click += (_, _) => AddIndicator(i);
         items.Add(add);
+        bool fav = _svc.Settings.FavoriteIndicators.Contains(i.Type.FullName!);
+        var favorite = new MenuItem { Header = fav ? "Quitar de favoritos" : "Agregar a favoritos (la ★ de la barra del gráfico)", Icon = Ui.Icon(fav ? MaterialIconKind.StarOffOutline : MaterialIconKind.StarOutline, 16) };
+        favorite.Click += (_, _) =>
+        {
+            var list = _svc.Settings.FavoriteIndicators;
+            if (!list.Remove(i.Type.FullName!)) list.Add(i.Type.FullName!);
+            _svc.Settings.Save();
+            LibraryChanged();
+        };
+        items.Add(favorite);
         items.Add(new Separator());
         items.AddRange(OrganizeItems(i, group));
         items.Add(new Separator());

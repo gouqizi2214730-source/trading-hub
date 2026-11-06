@@ -940,7 +940,7 @@ public sealed partial class TradingView
         }
 
         // clic derecho sobre un dibujo: queda elegido (como en TradingView)
-        if (model.LastLayout is { } hitLayout)
+        if (model.LastLayout is { } hitLayout && !model.Settings.HideDrawings)
         {
             for (int i = model.Drawings.Count - 1; i >= 0; i--)
             {

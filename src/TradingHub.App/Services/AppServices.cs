@@ -262,6 +262,15 @@ public sealed class AppSettings
     /// <summary>Períodos favoritos: los que se ven en la barra del gráfico (el resto, en su selector).</summary>
     public List<string> FavoritePeriods { get; set; } = new() { "M1", "M5", "M15", "H1", "H4", "Daily" };
 
+    /// <summary>Indicadores favoritos (tipo completo): la estrella de la barra del gráfico los agrega de un clic.</summary>
+    public List<string> FavoriteIndicators { get; set; } = new();
+
+    /// <summary>Imán de los dibujos (el de la barra de dibujos, para todos los gráficos).</summary>
+    public TradingHub.Charting.MagnetMode DrawingMagnet { get; set; }
+
+    /// <summary>Seguir dibujando: la herramienta queda activa después de cada dibujo.</summary>
+    public bool DrawingSticky { get; set; }
+
     // panel derecho de Trading
     public bool ShowSidePanel { get; set; } = true;
     public bool ShowTicket { get; set; } = true;

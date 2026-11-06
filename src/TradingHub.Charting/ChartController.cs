@@ -68,6 +68,9 @@ public sealed class ChartController
     /// <summary>Si la herramienta queda activa después de dibujar (si no, vuelve al cursor).</summary>
     public bool StickyTool { get; set; }
 
+    /// <summary>Imán de los dibujos: pega los puntos al máximo, mínimo, apertura o cierre de la vela (Shift lo fuerza siempre).</summary>
+    public MagnetMode Magnet { get; set; }
+
     public ChartDrawing? Selected => _model.Drawings.FirstOrDefault(d => d.Selected);
 
     /// <summary>Cursor sugerido para la posición actual.</summary>
@@ -304,8 +307,8 @@ public sealed class ChartController
 
         if (button == PointerButton.Left)
         {
-            // ¿tocó un objeto dibujado?
-            for (int i = _model.Drawings.Count - 1; i >= 0; i--)
+            // ¿tocó un objeto dibujado? (ocultos no se tocan)
+            for (int i = _model.Settings.HideDrawings ? -1 : _model.Drawings.Count - 1; i >= 0; i--)
             {
                 var d = _model.Drawings[i];
                 if (!d.HitTest(l, _model.Series, x, y, out int handle)) continue;
@@ -318,7 +321,7 @@ public sealed class ChartController
                     return;
                 }
 
-                if (!d.Locked)
+                if (!d.Locked && !_model.Settings.LockDrawings)
                 {
                     _active = d;
                     _activeHandle = handle;
@@ -717,25 +720,33 @@ public sealed class ChartController
 
     // ======================================================================= ayudas
 
+    /// <summary>Distancia (en píxeles) a la que el imán débil se pega a la vela.</summary>
+    public const float WeakMagnetPixels = 14;
+
     private ChartPoint PointAt(float x, float y, InputModifiers mods)
     {
         var l = L!;
         var series = _model.Series;
         var time = ChartDrawing.TimeAt(l, series, x);
         double price = l.Main.ValueAt(y);
-        // imán: con Shift se pega al máximo/mínimo/cierre más cercano de la vela
-        if ((mods & InputModifiers.Shift) != 0)
+        // imán: se pega al máximo/mínimo/apertura/cierre más cercano de la vela; con Shift o el imán fuerte siempre, con el
+        // débil solo si el puntero está cerca (como en TradingView)
+        bool snapped = false;
+        if (series.Count > 0 && ((mods & InputModifiers.Shift) != 0 || Magnet != MagnetMode.Off))
         {
             int bar = Math.Clamp(l.BarAt(x), 0, Math.Max(0, series.Count - 1));
-            if (series.Count > 0)
+            var c = series[bar];
+            var candidates = new[] { c.HighTicks, c.LowTicks, c.OpenTicks, c.CloseTicks }.Select(t => (double)series.TicksToPrice(t));
+            double best = candidates.OrderBy(p => Math.Abs(l.Main.Y(p) - y)).First();
+            if ((mods & InputModifiers.Shift) != 0 || Magnet == MagnetMode.Strong || Math.Abs(l.Main.Y(best) - y) <= WeakMagnetPixels)
             {
-                var c = series[bar];
-                var candidates = new[] { c.HighTicks, c.LowTicks, c.OpenTicks, c.CloseTicks }.Select(t => (double)series.TicksToPrice(t));
-                price = candidates.OrderBy(p => Math.Abs(l.Main.Y(p) - y)).First();
+                price = best;
                 time = series[bar].Time;
+                snapped = true;
             }
         }
-        else
+
+        if (!snapped)
         {
             double tick = (double)_model.Instrument.TickSize;
             price = Math.Round(price / tick) * tick;
@@ -810,7 +821,7 @@ public sealed class ChartController
         else if (l.Panels.Skip(1).Any(p => Math.Abs(y - p.Rect.Top) <= 3)) Cursor = StdCursor.SizeNS;
         else if (_drag == DragMode.Pan) Cursor = StdCursor.SizeAll;
         else if (_drag is DragMode.MoveOrder or DragMode.Bracket || (ActiveTool == null && (OrderAt(x, y) != null || HandleAt(x, y, false) != null))) Cursor = StdCursor.SizeNS;
-        else if (_model.Drawings.Any(d => d.HitTest(l, _model.Series, x, y, out _))) Cursor = StdCursor.Hand;
+        else if (!_model.Settings.HideDrawings && _model.Drawings.Any(d => d.HitTest(l, _model.Series, x, y, out _))) Cursor = StdCursor.Hand;
         else
         {
             var c = IndicatorCursor(x, y);
@@ -899,4 +910,12 @@ public sealed class ChartController
 
         return false;
     }
+}
+
+/// <summary>Imán de los dibujos.</summary>
+public enum MagnetMode
+{
+    Off,
+    Weak,
+    Strong,
 }

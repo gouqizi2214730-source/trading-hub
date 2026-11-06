@@ -80,6 +80,12 @@ public sealed class ChartSettings
     /// <summary>Marcar las operaciones propias (ejecuciones y operaciones cerradas).</summary>
     public bool ShowTradeMarks { get; set; } = true;
 
+    /// <summary>Ocultar todos los dibujos del gráfico (siguen guardados y sus alertas siguen andando).</summary>
+    public bool HideDrawings { get; set; }
+
+    /// <summary>Bloquear todos los dibujos: se pueden elegir, pero no mover ni estirar.</summary>
+    public bool LockDrawings { get; set; }
+
     /// <summary>Grosor de la línea de la entrada a la salida de cada operación (las propias y las de las estrategias).</summary>
     public double TradeLineWidth { get; set; } = 1.5;
 

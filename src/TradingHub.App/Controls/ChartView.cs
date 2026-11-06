@@ -29,6 +29,12 @@ public sealed class ChartView : SkiaView
             if (_controller != null) _controller.BracketDropped += (d, p) => BracketDropped?.Invoke(d, p);
             if (_controller != null) _controller.DrawingDoubleClicked += d => DrawingDoubleClicked?.Invoke(d);
             if (_controller != null) _controller.DrawingDefaults = k => DrawingDefaults?.Invoke(k);
+            if (_controller != null)
+            {
+                _controller.Magnet = _magnet;
+                _controller.StickyTool = _sticky;
+            }
+
             if (_controller != null) _controller.IndicatorsChanged += () => IndicatorsChanged?.Invoke();
             if (_controller != null) _controller.IndicatorSettingsRequested += slot => IndicatorSettingsRequested?.Invoke(slot);
             if (_controller != null) _controller.StrategySettingsRequested += st => StrategySettingsRequested?.Invoke(st);
@@ -39,6 +45,31 @@ public sealed class ChartView : SkiaView
     }
 
     public ChartController? Controller => _controller;
+
+    private TradingHub.Charting.MagnetMode _magnet;
+    private bool _sticky;
+
+    /// <summary>Imán de los dibujos (también para los gráficos que se arman después).</summary>
+    public TradingHub.Charting.MagnetMode Magnet
+    {
+        get => _magnet;
+        set
+        {
+            _magnet = value;
+            if (_controller != null) _controller.Magnet = value;
+        }
+    }
+
+    /// <summary>Seguir dibujando: la herramienta queda activa después de cada dibujo.</summary>
+    public bool StickyTool
+    {
+        get => _sticky;
+        set
+        {
+            _sticky = value;
+            if (_controller != null) _controller.StickyTool = value;
+        }
+    }
 
     public event Action? ToolFinished;
     public event Action? DrawingsChanged;
