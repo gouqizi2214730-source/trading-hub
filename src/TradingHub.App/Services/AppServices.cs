@@ -271,6 +271,15 @@ public sealed class AppSettings
     /// <summary>Seguir dibujando: la herramienta queda activa después de cada dibujo.</summary>
     public bool DrawingSticky { get; set; }
 
+    /// <summary>Dibujar con un gesto: mantener apretado sobre el gráfico y trazar la forma (como en OpenMarket).</summary>
+    public bool InkGestures { get; set; } = true;
+
+    /// <summary>Mostrar la barrita del dibujo (color, grosor…) apenas se termina de dibujar.</summary>
+    public bool DrawingBarAfterDrawing { get; set; } = true;
+
+    /// <summary>Herramientas de dibujo favoritas (se ven juntas en la barra de dibujos).</summary>
+    public List<string> FavoriteDrawingTools { get; set; } = new();
+
     // panel derecho de Trading
     public bool ShowSidePanel { get; set; } = true;
     public bool ShowTicket { get; set; } = true;

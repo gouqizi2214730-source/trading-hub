@@ -53,8 +53,8 @@ campo de texto solo responden los que usan ⌃, ⌥ o ⌘, o una tecla de funci�
 | Grupo | Acciones (con su atajo de fábrica) |
 |---|---|
 | Operar | Comprar a mercado, Vender a mercado, Comprar límite en el bid, Vender límite en el ask, Cerrar la posición, Dar vuelta la posición, Cancelar todas las órdenes, Cerrar el 25 %, Cerrar el 50 %, Stop a breakeven, Poner stop y objetivos de la plantilla, Cantidad: siguiente preset y Cantidad: preset anterior. **Vienen sin asignar** a propósito. |
-| Gráfico | Período 1 minuto (⌥1), 5 minutos (⌥2), 15 minutos (⌥3), 1 hora (⌥4), 4 horas (⌥5) y diario (⌥6); estilo velas, footprint y Heikin Ashi; escala automática; ir al último precio; dibujar línea horizontal (⌥H); cursor (soltar herramienta). |
-| Ventanas | Diseño de un gráfico, diseño de cuatro gráficos, pestaña siguiente (⌃Tab) y anterior (⌃⇧Tab), sacar el gráfico a una ventana, mostrar u ocultar el DOM, el Chart Trader del gráfico (⌥T) y el panel derecho. |
+| Gráfico | Período 1 minuto (⌥1), 5 minutos (⌥2), 15 minutos (⌥3), 1 hora (⌥4), 4 horas (⌥5) y diario (⌥6); estilo velas, footprint y Heikin Ashi; escala automática; ir al último precio; dibujar línea de tendencia (⌥T), horizontal (⌥H), rayo horizontal (⌥J), vertical (⌥V), cruzada (⌥C), Fibonacci (⌥F), rectángulo (⌥⇧R), pincel (⌥B) y texto (⌥N); cursor (soltar herramienta). |
+| Ventanas | Diseño de un gráfico, diseño de cuatro gráficos, pestaña siguiente (⌃Tab) y anterior (⌃⇧Tab), sacar el gráfico a una ventana, mostrar u ocultar el DOM, el Chart Trader del gráfico (⌥⇧T) y el panel derecho. |
 
 Para cambiar uno, hacé clic en su botón y presioná la combinación: Esc cancela y ⌫ lo deja sin asignar. Si otra acción
 ya usaba esa combinación, se la saca y te avisa. **Restablecer los de fábrica** vuelve todo al principio. En cuentas

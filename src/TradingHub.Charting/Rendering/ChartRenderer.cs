@@ -52,6 +52,20 @@ public sealed class ChartRenderState
 
     /// <summary>Hora y zona horaria en la esquina del eje de tiempo (clic: elegir la zona horaria, como en TradingView).</summary>
     public SKRect? TimeZoneButton { get; set; }
+
+    /// <summary>Dibujar con un gesto: cuánto se llenó el anillo de mantener apretado (0 a 1) y dónde.</summary>
+    public float? InkHold { get; set; }
+
+    public SKPoint InkHoldAt { get; set; }
+
+    /// <summary>El trazo que se está haciendo con el gesto (en píxeles).</summary>
+    public IReadOnlyList<SKPoint>? InkStroke { get; set; }
+
+    /// <summary>Los dibujos que el garabato que se está haciendo va a borrar (se ven apagados).</summary>
+    public HashSet<ChartDrawing>? InkVictims { get; set; }
+
+    /// <summary>Medición con Shift + arrastre (queda hasta el próximo clic; no se guarda).</summary>
+    public ChartDrawing? Measure { get; set; }
 }
 
 public enum LegendAction
@@ -89,6 +103,8 @@ public sealed class ChartRenderer
     public ChartLayout Render(SKCanvas canvas, ChartModel model, float width, float height, ChartRenderState? state = null)
     {
         state ??= new ChartRenderState();
+        _inkVictims = state.InkVictims;
+        _measure = state.Measure;
         state.Legend.Clear();
         state.GoLatestButton = null;
         state.FocusTradeClose = null;
@@ -146,6 +162,8 @@ public sealed class ChartRenderer
             canvas.DrawRect(zb, zf);
             canvas.DrawRect(zb, zs);
         }
+
+        DrawInk(canvas, model, layout, state);
         model.ClearDirty();
         return layout;
     }
@@ -322,7 +340,19 @@ public sealed class ChartRenderer
 
         int decimals = Instrument_Decimals(model);
         if (!model.Settings.HideDrawings)
-            foreach (var d in model.Drawings) d.Render(canvas, layout, model.Series, model.Theme, decimals, model.Data.Trades);
+        {
+            using var faded = _inkVictims is { Count: > 0 } ? new SKPaint { Color = SKColors.White.WithAlpha(60) } : null;
+            foreach (var d in model.Drawings)
+            {
+                // lo que el garabato va a borrar se ve apagado mientras se dibuja
+                bool victim = faded != null && _inkVictims!.Contains(d);
+                if (victim) canvas.SaveLayer(faded);
+                d.Render(canvas, layout, model.Series, model.Theme, decimals, model.Data.Trades);
+                if (victim) canvas.Restore();
+            }
+        }
+
+        _measure?.Render(canvas, layout, model.Series, model.Theme, decimals);
 
         if (model.Settings.ShowLastPriceLine && model.Series.Count > 0)
         {
@@ -333,6 +363,57 @@ public sealed class ChartRenderer
             canvas.DrawLine(main.Rect.Left, y, main.Rect.Right, y, _stroke);
             _stroke.PathEffect = null;
         }
+    }
+
+    private HashSet<ChartDrawing>? _inkVictims;
+    private ChartDrawing? _measure;
+
+    /// <summary>Dibujar con un gesto: el anillo que se llena mientras se mantiene apretado y el trazo de tinta.</summary>
+    private static void DrawInk(SKCanvas canvas, ChartModel model, ChartLayout layout, ChartRenderState state)
+    {
+        if (state.InkHold == null && state.InkStroke == null) return;
+        var t = model.Theme;
+        // tinta clara en el tema oscuro y oscura en el claro (como un lápiz sobre el gráfico)
+        var bgMid = t.BackgroundTop;
+        bool dark = (bgMid.Red + bgMid.Green + bgMid.Blue) / 3 < 128;
+        var ink = dark ? new SKColor(255, 255, 255) : new SKColor(27, 28, 40);
+        canvas.Save();
+        canvas.ClipRect(layout.Main.Rect);
+        if (state.InkHold is { } h)
+        {
+            var c = state.InkHoldAt;
+            using var ring = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f, Color = ink.WithAlpha(30) };
+            canvas.DrawCircle(c, 20, ring);
+            ring.Color = ink.WithAlpha(200);
+            using var arc = new SKPath();
+            arc.AddArc(new SKRect(c.X - 20, c.Y - 20, c.X + 20, c.Y + 20), -90, 360 * Math.Clamp(h, 0, 1));
+            canvas.DrawPath(arc, ring);
+        }
+
+        if (state.InkStroke is { Count: > 0 } pts)
+        {
+            using var pen = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.6f, Color = ink.WithAlpha(230), StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round };
+            if (pts.Count == 1)
+            {
+                pen.Style = SKPaintStyle.Fill;
+                canvas.DrawCircle(pts[0], 2.2f, pen);
+            }
+            else
+            {
+                using var path = new SKPath();
+                path.MoveTo(pts[0]);
+                for (int i = 1; i < pts.Count; i++) path.LineTo(pts[i]);
+                canvas.DrawPath(path, pen);
+            }
+
+            // la punta del lápiz
+            using var tip = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill, Color = ink };
+            canvas.DrawCircle(pts[^1], 3, tip);
+            tip.Color = ink.WithAlpha(40);
+            canvas.DrawCircle(pts[^1], 5, tip);
+        }
+
+        canvas.Restore();
     }
 
     private static int Instrument_Decimals(ChartModel model) => Market.Instrument.DecimalPlaces(model.Series.RowSize);

@@ -135,12 +135,45 @@ la salida de cada operación, también de días anteriores.
 
 ## Dibujos
 
-La barra de la izquierda tiene: cursor (Esc), líneas (horizontal, rayo horizontal, vertical, de tendencia, rayo y
-extendida), rectángulo o zona, retroceso de Fibonacci, posición larga o corta, regla y texto. La flechita debajo de un
-grupo muestra sus variantes. El último botón borra todos los dibujos del instrumento, sin preguntar.
+La barra de la izquierda tiene, como en TradingView y OpenMarket: cursor (Esc); líneas (de tendencia, rayo, extendida,
+horizontal, rayo horizontal, vertical y cruzada); rectángulo o zona, elipse y canal paralelo; retroceso de Fibonacci;
+pincel, resaltador y trayectoria; flecha; VWAP anclado y perfil de rango fijo; posición larga o corta; regla y texto.
+La flechita a la derecha de un botón (o el clic derecho) muestra las variantes del grupo; el botón queda con la última
+usada. **Doble clic** en una herramienta la deja fija (lleva un puntito): sigue activa después de cada dibujo hasta Esc.
+La **estrella** elige las herramientas favoritas, que se ven juntas en la barra.
 
-- Con ⇧ apretado, el punto se pega al máximo, mínimo, apertura o cierre de la vela.
-- Los dibujos se ven en todos los gráficos del mismo instrumento y se guardan solos.
+Abajo están: imán (débil o fuerte), seguir dibujando, dibujar con un gesto, la barrita del dibujo después de dibujar,
+bloquear, ocultar (la flechita también oculta los indicadores) y borrar (el elegido; la flechita, todos).
+
+- Con ⇧ apretado, el punto se pega al máximo, mínimo, apertura o cierre de la vela. **⇧ + arrastre** sin herramienta
+  mide (como la regla, sin guardar nada; se va con el próximo clic).
+- La **trayectoria** va con un clic por punto; doble clic o Enter termina. El pincel y el resaltador dibujan mientras
+  arrastrás.
+- Atajos (se cambian en Ajustes → Atajos de teclado): ⌥T tendencia, ⌥H horizontal, ⌥J rayo horizontal, ⌥V vertical,
+  ⌥C cruzada, ⌥F Fibonacci, ⌥⇧R rectángulo, ⌥B pincel y ⌥N texto.
+- Los dibujos se ven en todos los gráficos del mismo instrumento (cualquier período, pestaña o ventana) y se guardan
+  solos.
+- Al elegir un dibujo aparece arriba una barrita con color, grosor, estilo, bloquear, alerta, configuración y borrar.
+
+### Dibujar con un gesto
+
+Como en OpenMarket: mantené apretado el botón del mouse sobre el gráfico, sin moverlo, hasta que se llene el anillo
+(un tercio de segundo) y, sin soltar, trazá la forma. Al soltar se reconoce:
+
+| Trazo | Dibujo |
+|---|---|
+| Raya horizontal | Línea horizontal (con imán, se pega a la vela más cercana) |
+| Raya vertical | Línea vertical |
+| En diagonal | Línea de tendencia (si llega al borde derecho, rayo) |
+| Un círculo / una caja | Elipse / rectángulo |
+| Una raya con un ganchito al final | Flecha |
+| Una Z | Retroceso de Fibonacci entre la primera y la última raya |
+| Un garabato encima de dibujos | Los borra (se puede deshacer) |
+| Cualquier otra forma | Trayectoria |
+
+Al lado aparece una barrita para cambiarlo por otro tipo con el mismo trazo (de línea a rayo, de rectángulo a elipse…)
+o borrarlo. Esc cancela el trazo. Si movés el mouse antes de que se llene el anillo, el gráfico se arrastra como
+siempre. Se apaga con el botón de la mano en la barra de dibujos; manteniéndolo apretado se ven los gestos.
 - **Doble clic** sobre un dibujo abre su panel: línea (color, grosor, estilo), relleno, texto, extender, niveles de
   Fibonacci, precios exactos y visibilidad (ocultar, mostrar solo en un período, bloquear). «Usar como
   predeterminado» guarda el estilo para los próximos de ese tipo; también hay «Duplicar» y «Eliminar».

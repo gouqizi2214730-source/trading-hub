@@ -43,6 +43,9 @@ public sealed class ChartController
         MoveOrder,
         Bracket,
         ZoomBox,
+        Freehand,
+        Ink,
+        Measure,
     }
 
     private readonly ChartModel _model;
@@ -70,6 +73,21 @@ public sealed class ChartController
 
     /// <summary>Imán de los dibujos: pega los puntos al máximo, mínimo, apertura o cierre de la vela (Shift lo fuerza siempre).</summary>
     public MagnetMode Magnet { get; set; }
+
+    /// <summary>
+    /// Dibujar con un gesto (como en OpenMarket): mantener apretado el botón sobre el gráfico sin moverse y, cuando se
+    /// llena el anillo, trazar la forma sin soltar; al soltar se reconoce y queda el dibujo.
+    /// </summary>
+    public bool InkGestures { get; set; }
+
+    /// <summary>Herramienta que quedó fija con doble clic en su botón (no vuelve al cursor después de cada dibujo).</summary>
+    public DrawingKind? KeepTool { get; set; }
+
+    /// <summary>Terminó un gesto: el dibujo que dejó o lo que borró el garabato.</summary>
+    public event Action<InkResult>? InkFinished;
+
+    /// <summary>Se eligió un dibujo con un clic.</summary>
+    public event Action<ChartDrawing>? DrawingSelected;
 
     public ChartDrawing? Selected => _model.Drawings.FirstOrDefault(d => d.Selected);
 
@@ -148,6 +166,14 @@ public sealed class ChartController
         _downY = _lastY = y;
         _state.MouseX = x;
         _state.MouseY = y;
+        _inkCandidate = false;
+        _state.InkHold = null;
+        // la medición con Shift queda hasta el próximo clic
+        if (_state.Measure != null)
+        {
+            _state.Measure = null;
+            _model.Invalidate();
+        }
 
         // eje de precios
         if (l.PriceAxis.Contains(x, y))
@@ -273,6 +299,19 @@ public sealed class ChartController
 
         if (button == PointerButton.Left && ActiveTool is { } tool && l.Main.Rect.Contains(x, y))
         {
+            if (tool is DrawingKind.Brush or DrawingKind.Highlighter)
+            {
+                // a mano alzada: los puntos van saliendo mientras se arrastra (sin imán ni redondeo al tick)
+                _active = new ChartDrawing { Kind = tool, Points = { RawPoint(l, x, y) }, Color = _model.Theme.DrawingDefault };
+                if (DrawingDefaults?.Invoke(tool) is { } brushStyle) _active.CopyStyleFrom(brushStyle);
+                foreach (var d in _model.Drawings) d.Selected = false;
+                _active.Selected = true;
+                _model.Drawings.Add(_active);
+                _drag = DragMode.Freehand;
+                _model.Invalidate();
+                return;
+            }
+
             var pt = PointAt(x, y, mods);
             _active = new ChartDrawing { Kind = tool, Points = { pt }, Color = _model.Theme.DrawingDefault };
             if (DrawingDefaults?.Invoke(tool) is { } template) _active.CopyStyleFrom(template);
@@ -314,6 +353,7 @@ public sealed class ChartController
                 if (!d.HitTest(l, _model.Series, x, y, out int handle)) continue;
                 foreach (var o in _model.Drawings) o.Selected = false;
                 d.Selected = true;
+                DrawingSelected?.Invoke(d);
                 if (clicks == 2) // un triple clic no abre dos paneles
                 {
                     DrawingDoubleClicked?.Invoke(d);
@@ -344,6 +384,16 @@ public sealed class ChartController
                 return;
             }
 
+            // Shift + arrastre: medir (como la regla, pero no queda guardado)
+            if ((mods & InputModifiers.Shift) != 0 && ActiveTool == null && l.Main.Rect.Contains(x, y))
+            {
+                var m0 = PointAt(x, y, InputModifiers.None);
+                _state.Measure = new ChartDrawing { Kind = DrawingKind.Ruler, Points = { m0, m0 } };
+                _drag = DragMode.Measure;
+                _model.Invalidate();
+                return;
+            }
+
             // Ctrl + arrastre: rectángulo de zoom (se amplía a lo que encierra)
             if ((mods & (InputModifiers.Control | InputModifiers.Command)) != 0 && ActiveTool == null)
             {
@@ -356,8 +406,207 @@ public sealed class ChartController
             _startScroll = _model.Viewport.ScrollBars;
             _startTop = l.Main.Top;
             _startBottom = l.Main.Bottom;
+            _startAuto = _model.Viewport.AutoScale;
+            // mantener apretado sin moverse: dibujar con un gesto
+            _inkCandidate = InkGestures && clicks == 1 && !_model.Settings.LockDrawings && l.Main.Rect.Contains(x, y);
+            _downTick = Environment.TickCount64;
         }
     }
+
+    // ======================================================================= dibujar con un gesto
+
+    private bool _inkCandidate, _startAuto;
+    private long _downTick;
+    private readonly List<SKPoint> _ink = new();
+
+    /// <summary>Si está esperando que se mantenga apretado (la vista lo llama seguido mientras tanto).</summary>
+    public bool InkPending => _inkCandidate || _drag == DragMode.Ink;
+
+    /// <summary>
+    /// Avanza la espera del gesto: llena el anillo y, a los <see cref="InkRecognizer.HoldMs"/> ms sin moverse, empieza a
+    /// dibujar. Devuelve true si hay que redibujar.
+    /// </summary>
+    public bool InkTick()
+    {
+        if (!_inkCandidate || _drag != DragMode.Pan)
+        {
+            _inkCandidate = false;
+            if (_state.InkHold == null) return false;
+            _state.InkHold = null;
+            return true;
+        }
+
+        long elapsed = Environment.TickCount64 - _downTick;
+        if (elapsed >= InkRecognizer.HoldMs)
+        {
+            BeginInk();
+            return true;
+        }
+
+        if (elapsed < InkRecognizer.RingStartMs) return false;
+        _state.InkHold = (elapsed - InkRecognizer.RingStartMs) / (float)(InkRecognizer.HoldMs - InkRecognizer.RingStartMs);
+        _state.InkHoldAt = new SKPoint(_downX, _downY);
+        _model.Invalidate();
+        return true;
+    }
+
+    private void BeginInk()
+    {
+        // deshace lo poquito que se haya corrido el gráfico mientras se mantenía apretado
+        var vp = _model.Viewport;
+        vp.ScrollBars = _startScroll;
+        vp.AutoScale = _startAuto;
+        if (!vp.AutoScale)
+        {
+            vp.PriceTop = _startTop;
+            vp.PriceBottom = _startBottom;
+        }
+
+        _inkCandidate = false;
+        _state.InkHold = null;
+        _drag = DragMode.Ink;
+        _ink.Clear();
+        _ink.Add(new SKPoint(_downX, _downY));
+        _state.InkStroke = _ink;
+        _state.InkVictims = null;
+        _model.Invalidate();
+    }
+
+    private void CancelInk()
+    {
+        _drag = DragMode.None;
+        _ink.Clear();
+        _state.InkStroke = null;
+        _state.InkVictims = null;
+        _state.InkHold = null;
+        _model.Invalidate();
+    }
+
+    private void InkMove(float x, float y)
+    {
+        var last = _ink[^1];
+        if ((last.X - x) * (last.X - x) + (last.Y - y) * (last.Y - y) < 2.25f) return;
+        _ink.Add(new SKPoint(x, y));
+        // si va saliendo un garabato, se apaga lo que va a borrar
+        if (L is { } l && _ink.Count % 3 == 0)
+        {
+            var shape = InkRecognizer.Recognize(_ink, l.Main.Rect.Right);
+            _state.InkVictims = shape?.Kind == InkShapeKind.Scribble ? InkDrawings.ScribbleVictims(_model, l, shape.Raw).ToHashSet() : null;
+        }
+    }
+
+    private void CommitInk(float x, float y)
+    {
+        var l = L;
+        var stroke = _ink.ToList();
+        CancelInk();
+        if (l == null) return;
+        var shape = InkRecognizer.Recognize(stroke, l.Main.Rect.Right);
+        if (shape == null) return; // solo se mantuvo apretado, sin trazar nada
+
+        if (shape.Kind == InkShapeKind.Scribble)
+        {
+            var victims = InkDrawings.ScribbleVictims(_model, l, shape.Raw);
+            var removed = victims.Select(v => (_model.Drawings.IndexOf(v), v)).ToList();
+            foreach (var v in victims) _model.Drawings.Remove(v);
+            if (victims.Count > 0) DrawingsChanged?.Invoke();
+            _model.Invalidate();
+            InkFinished?.Invoke(new InkResult { Erase = true, Removed = removed, X = x, Y = y });
+            return;
+        }
+
+        if (InkDrawings.KindOf(shape.Kind) is not { } kind) return;
+        bool unhid = _model.Settings.HideDrawings;
+        _model.Settings.HideDrawings = false;
+        var g = GeometryOf(l, shape);
+        var d = new ChartDrawing { Kind = kind, Color = _model.Theme.DrawingDefault };
+        if (DrawingDefaults?.Invoke(kind) is { } template) d.CopyStyleFrom(template);
+        d.Points = InkDrawings.PointsFor(kind, g);
+        foreach (var o in _model.Drawings) o.Selected = false;
+        d.Selected = true;
+        _model.Drawings.Add(d);
+        DrawingsChanged?.Invoke();
+        _model.Invalidate();
+        InkFinished?.Invoke(new InkResult { Drawing = d, Geometry = g, Alternatives = InkDrawings.Alternatives(kind), X = x, Y = y, Unhid = unhid });
+    }
+
+    /// <summary>El trazo reconocido pasado a tiempo y precio (con el imán como esté).</summary>
+    private InkGeometry GeometryOf(ChartLayout l, InkShape shape)
+    {
+        var main = l.Main.Rect;
+        ChartPoint At(SKPoint p) => PointAt(Math.Clamp(p.X, main.Left, main.Right), Math.Clamp(p.Y, main.Top, main.Bottom), InputModifiers.None);
+        var start = At(shape.A);
+        if (shape.Kind == InkShapeKind.Vertical && _model.Series.Count > 0)
+        {
+            // la vertical va en una vela
+            int bar = Math.Clamp(l.BarAt(shape.A.X), 0, _model.Series.Count - 1);
+            start = new ChartPoint(_model.Series[bar].Time, start.Price);
+        }
+
+        return new InkGeometry
+        {
+            Start = start,
+            End = At(shape.B),
+            Level = shape.Kind == InkShapeKind.Horizontal && shape.Level is { } y ? LevelPrice(l, shape, y) : null,
+            Corners = shape.Corners.Select(At).ToList(),
+            Raw = InkRecognizer.Simplify(shape.Raw, 0.75f).Select(p => RawPoint(l, p.X, p.Y)).ToList(),
+        };
+    }
+
+    /// <summary>Precio de una línea horizontal hecha con el gesto: con imán, el máximo/mínimo/apertura/cierre más cercano de las velas que cruzó.</summary>
+    private double LevelPrice(ChartLayout l, InkShape shape, float y)
+    {
+        double price = l.Main.ValueAt(y);
+        var series = _model.Series;
+        if (Magnet != MagnetMode.Off && series.Count > 0)
+        {
+            int a = Math.Clamp(l.BarAt(shape.Bounds.Left), 0, series.Count - 1), b = Math.Clamp(l.BarAt(shape.Bounds.Right), 0, series.Count - 1);
+            double? best = null;
+            float bestD = 6;
+            for (int i = Math.Min(a, b); i <= Math.Max(a, b); i++)
+            {
+                var c = series[i];
+                foreach (var t in new[] { c.HighTicks, c.LowTicks, c.OpenTicks, c.CloseTicks })
+                {
+                    double p = (double)series.TicksToPrice(t);
+                    float d = Math.Abs(l.Main.Y(p) - y);
+                    if (d >= bestD) continue;
+                    bestD = d;
+                    best = p;
+                }
+            }
+
+            if (best is { } snapped) return snapped;
+        }
+
+        double tick = (double)_model.Instrument.TickSize;
+        return tick > 0 ? Math.Round(price / tick) * tick : price;
+    }
+
+    /// <summary>Cambia el tipo de un dibujo hecho con el gesto (la barrita que aparece al lado), con el mismo trazo.</summary>
+    public void RetypeInk(ChartDrawing d, InkGeometry g, DrawingKind kind)
+    {
+        d.Kind = kind;
+        d.Points = InkDrawings.PointsFor(kind, g);
+        DrawingsChanged?.Invoke();
+        _model.Invalidate();
+    }
+
+    /// <summary>Deshace lo que borró un garabato.</summary>
+    public void UndoErase(IReadOnlyList<(int Index, ChartDrawing Drawing)> removed)
+    {
+        foreach (var (i, d) in removed.OrderBy(r => r.Index))
+        {
+            if (_model.Drawings.Contains(d)) continue;
+            _model.Drawings.Insert(Math.Clamp(i, 0, _model.Drawings.Count), d);
+        }
+
+        DrawingsChanged?.Invoke();
+        _model.Invalidate();
+    }
+
+    /// <summary>Un punto sin imán ni redondeo (a mano alzada).</summary>
+    private ChartPoint RawPoint(ChartLayout l, float x, float y) => new(ChartDrawing.TimeAt(l, _model.Series, x), l.Main.ValueAt(y));
 
     public void MouseMove(float x, float y, InputModifiers mods)
     {
@@ -367,8 +616,28 @@ public sealed class ChartController
         if (l == null) return;
         var vp = _model.Viewport;
 
+        if (_inkCandidate && (Math.Abs(x - _downX) > InkRecognizer.HoldSlop || Math.Abs(y - _downY) > InkRecognizer.HoldSlop))
+        {
+            // se movió: es arrastrar el gráfico, no el gesto
+            _inkCandidate = false;
+            _state.InkHold = null;
+        }
+
         switch (_drag)
         {
+            case DragMode.Ink:
+                InkMove(x, y);
+                break;
+            case DragMode.Freehand when _active != null:
+            {
+                var lastPt = _active.Points[^1];
+                float lx = ChartDrawing.XOf(l, _model.Series, lastPt.Time), ly = l.Main.Y(lastPt.Price);
+                if ((lx - x) * (lx - x) + (ly - y) * (ly - y) >= 4) _active.Points.Add(RawPoint(l, x, y));
+                break;
+            }
+            case DragMode.Measure when _state.Measure is { } measure:
+                measure.Points[1] = PointAt(x, y, InputModifiers.None);
+                break;
             case DragMode.Pan:
             {
                 vp.ScrollBars = _startScroll + (x - _downX) / vp.BarWidth;
@@ -469,6 +738,40 @@ public sealed class ChartController
         if (_drag is DragMode.MoveOrder or DragMode.Bracket && L is { } lu)
             _state.DragPrice = _model.Instrument.RoundPrice((decimal)lu.Main.ValueAt(y));
 
+        _inkCandidate = false;
+        _state.InkHold = null;
+        if (_drag == DragMode.Ink)
+        {
+            CommitInk(x, y);
+            return;
+        }
+
+        if (_drag == DragMode.Freehand && _active != null)
+        {
+            // menos puntos (los que hacen falta para el mismo trazo)
+            if (L is { } lf)
+            {
+                var pts = _active.ScreenPoints(lf, _model.Series);
+                var keep = InkRecognizer.Simplify(pts, 0.75f).ToHashSet();
+                _active.Points = _active.Points.Where((_, i) => keep.Contains(pts[i])).ToList();
+            }
+
+            if (_active.Points.Count < 2) _model.Drawings.Remove(_active);
+            FinishDrawing();
+            _active = null;
+            _model.Invalidate();
+            return;
+        }
+
+        if (_drag == DragMode.Measure)
+        {
+            _drag = DragMode.None;
+            // un Shift + clic sin arrastrar no deja nada
+            if (Math.Abs(x - _downX) < 3 && Math.Abs(y - _downY) < 3) _state.Measure = null;
+            _model.Invalidate();
+            return;
+        }
+
         if (_drag == DragMode.CreateDrawing && _active != null)
         {
             // si casi no se movió, se interpreta como "clic, clic": espera el segundo clic
@@ -476,6 +779,16 @@ public sealed class ChartController
             {
                 _drag = DragMode.None;
                 _pendingSecondClick = true;
+                return;
+            }
+
+            // trayectoria: el primer tramo se puede arrastrar y sigue con clics (doble clic termina)
+            if (_active.Kind == DrawingKind.Path)
+            {
+                _active.Points.Add(_active.Points[^1]);
+                _drag = DragMode.None;
+                _pendingSecondClick = true;
+                _model.Invalidate();
                 return;
             }
 
@@ -548,16 +861,58 @@ public sealed class ChartController
         _model.Invalidate();
     }
 
-    /// <summary>Segundo clic de una herramienta de dos puntos (modo clic-clic).</summary>
-    public bool TryCompletePending(float x, float y, InputModifiers mods)
+    /// <summary>Segundo clic de una herramienta de dos puntos (modo clic-clic); en la trayectoria, un punto más (doble clic termina).</summary>
+    public bool TryCompletePending(float x, float y, InputModifiers mods, int clicks = 1)
     {
         if (!_pendingSecondClick || _active == null) return false;
-        _active.Points[^1] = PointAt(x, y, mods);
+        var p = PointAt(x, y, mods);
+        _active.Points[^1] = p;
+        if (_active.Kind == DrawingKind.Path)
+        {
+            // un clic sobre el punto anterior (o el segundo clic del doble clic) termina
+            bool onPrevious = false;
+            if (L is { } l && _active.Points.Count >= 2)
+            {
+                var prev = _active.Points[^2];
+                onPrevious = Math.Abs(ChartDrawing.XOf(l, _model.Series, prev.Time) - x) < 5 && Math.Abs(l.Main.Y(prev.Price) - y) < 5;
+            }
+
+            if (clicks < 2 && !onPrevious)
+            {
+                _active.Points.Add(p);
+                _model.Invalidate();
+                return true;
+            }
+
+            FinishPath();
+            return true;
+        }
+
         _pendingSecondClick = false;
         FinishDrawing();
         _active = null;
         _model.Invalidate();
         return true;
+    }
+
+    /// <summary>Termina la trayectoria que se está haciendo: saca el punto que seguía al puntero si quedó repetido.</summary>
+    private void FinishPath()
+    {
+        if (_active == null) return;
+        var pts = _active.Points;
+        if (pts.Count > 2 && L is { } l)
+        {
+            var a = pts[^1];
+            var b = pts[^2];
+            if (Math.Abs(ChartDrawing.XOf(l, _model.Series, a.Time) - ChartDrawing.XOf(l, _model.Series, b.Time)) < 5 && Math.Abs(l.Main.Y(a.Price) - l.Main.Y(b.Price)) < 5)
+                pts.RemoveAt(pts.Count - 1);
+        }
+
+        _pendingSecondClick = false;
+        if (pts.Count < 2 || pts.All(q => q.Time == pts[0].Time && Math.Abs(q.Price - pts[0].Price) < 1e-12)) _model.Drawings.Remove(_active);
+        FinishDrawing();
+        _active = null;
+        _model.Invalidate();
     }
 
     public void HoverPending(float x, float y, InputModifiers mods)
@@ -579,7 +934,7 @@ public sealed class ChartController
         }
 
         _drag = DragMode.None;
-        if (!StickyTool) ActiveTool = null;
+        if (!StickyTool && (KeepTool == null || KeepTool != ActiveTool)) ActiveTool = null;
         ToolFinished?.Invoke();
         DrawingsChanged?.Invoke();
     }
@@ -671,7 +1026,32 @@ public sealed class ChartController
                 _model.Invalidate();
                 return true;
             }
+            case "Return" or "Enter" when _pendingSecondClick && _active?.Kind == DrawingKind.Path:
+                if (_active.Points.Count > 2) _active.Points.RemoveAt(_active.Points.Count - 1);
+                FinishPath();
+                return true;
             case "Escape":
+                // corta el gesto que se estaba haciendo
+                if (_drag == DragMode.Ink || _inkCandidate)
+                {
+                    _inkCandidate = false;
+                    CancelInk();
+                    return true;
+                }
+
+                // la trayectoria queda con los puntos que ya tenía
+                if (_pendingSecondClick && _active is { Kind: DrawingKind.Path, Points.Count: > 2 })
+                {
+                    _active.Points.RemoveAt(_active.Points.Count - 1);
+                    FinishPath();
+                    ActiveTool = null;
+                    KeepTool = null;
+                    ToolFinished?.Invoke();
+                    return true;
+                }
+
+                if (_state.Measure != null) _state.Measure = null;
+                KeepTool = null;
                 // cancela un arrastre de orden o de stop/objetivo
                 if (_drag is DragMode.MoveOrder or DragMode.Bracket)
                 {

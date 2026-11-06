@@ -26,7 +26,7 @@ por qué todavía no están. Con una cuenta real elegida, el Chart Trader muestr
 
 Está en dos lugares que muestran lo mismo:
 
-- **En cada gráfico**, a la derecha. Se pliega con la flechita o con ⌥T, y cada gráfico opera solo lo suyo.
+- **En cada gráfico**, a la derecha. Se pliega con la flechita o con ⌥⇧T, y cada gráfico opera solo lo suyo.
 - **En el panel derecho**, arriba del DOM. Sigue al gráfico activo («Opera en el gráfico activo: …»). Si lo sacás a
   una ventana aparte, al cerrarla vuelve al panel.
 

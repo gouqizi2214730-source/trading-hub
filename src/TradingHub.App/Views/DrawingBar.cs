@@ -43,7 +43,17 @@ internal sealed class DrawingBar : Border
     }
 
     private ChartDrawing? Selected =>
-        _chart.Model is { Settings.HideDrawings: false } m ? m.Drawings.FirstOrDefault(d => d.Selected && d.IsVisibleOn(m.Period)) : null;
+        _chart.Model is { Settings.HideDrawings: false } m ? m.Drawings.FirstOrDefault(d => d.Selected && d.IsVisibleOn(m.Period) && d.Id != _suppressed) : null;
+
+    private Guid? _suppressed;
+
+    /// <summary>No mostrarla para este dibujo (recién hecho, sin «la barrita después de dibujar») hasta que lo elijan con un clic; null: volver a mostrarla.</summary>
+    public void Suppress(ChartDrawing? d)
+    {
+        _suppressed = d?.Id;
+        _sig = "-";
+        Refresh();
+    }
 
     /// <summary>Se muestra, se esconde o se rehace si cambió el dibujo elegido (lo llama el ciclo de los gráficos).</summary>
     public void Refresh()
@@ -165,7 +175,7 @@ internal sealed class DrawingBar : Border
         if (_chart.Model is { } model)
         {
             var lines = ChartAlertEngine.DrawingLines(model, d);
-            bool horizontal = d.Kind is DrawingKind.HorizontalLine or DrawingKind.HorizontalRay;
+            bool horizontal = d.Kind is DrawingKind.HorizontalLine or DrawingKind.HorizontalRay or DrawingKind.CrossLine;
             if (lines.Count > 0 || horizontal)
             {
                 var alert = Small(Ui.Icon(d.IsAlert ? MaterialIconKind.Bell : MaterialIconKind.BellPlusOutline, 17, d.IsAlert ? Ui.Accent : Ui.Text1), "Alerta sobre este dibujo");

@@ -40,6 +40,15 @@ public static class Hotkeys
         new("autoscale", "Gráfico", "Escala automática"),
         new("go-last", "Gráfico", "Ir al último precio"),
         new("tool-hline", "Gráfico", "Dibujar línea horizontal", "Alt+H"),
+        // como en TradingView y OpenMarket
+        new("tool-trend", "Gráfico", "Dibujar línea de tendencia", "Alt+T"),
+        new("tool-hray", "Gráfico", "Dibujar rayo horizontal", "Alt+J"),
+        new("tool-vline", "Gráfico", "Dibujar línea vertical", "Alt+V"),
+        new("tool-cross", "Gráfico", "Dibujar línea cruzada", "Alt+C"),
+        new("tool-fib", "Gráfico", "Dibujar retroceso de Fibonacci", "Alt+F"),
+        new("tool-rect", "Gráfico", "Dibujar rectángulo", "Alt+Shift+R"),
+        new("tool-brush", "Gráfico", "Dibujar con el pincel", "Alt+B"),
+        new("tool-text", "Gráfico", "Escribir un texto", "Alt+N"),
         new("tool-cursor", "Gráfico", "Cursor (soltar herramienta)"),
 
         new("layout-1", "Ventanas", "Diseño de un gráfico"),
@@ -48,8 +57,22 @@ public static class Hotkeys
         new("prev-tab", "Ventanas", "Pestaña anterior", "Ctrl+Shift+Tab"),
         new("detach", "Ventanas", "Sacar el gráfico a una ventana"),
         new("toggle-dom", "Ventanas", "Mostrar u ocultar el DOM"),
-        new("toggle-trader", "Ventanas", "Mostrar u ocultar el Chart Trader del gráfico", "Alt+T"),
+        new("toggle-trader", "Ventanas", "Mostrar u ocultar el Chart Trader del gráfico", "Alt+Shift+T"),
         new("toggle-panel", "Ventanas", "Mostrar u ocultar el panel derecho"),
+    };
+
+    /// <summary>El atajo de cada herramienta de dibujo que tiene uno.</summary>
+    public static readonly IReadOnlyDictionary<TradingHub.Charting.Drawings.DrawingKind, string> DrawingTools = new Dictionary<TradingHub.Charting.Drawings.DrawingKind, string>
+    {
+        [TradingHub.Charting.Drawings.DrawingKind.HorizontalLine] = "tool-hline",
+        [TradingHub.Charting.Drawings.DrawingKind.TrendLine] = "tool-trend",
+        [TradingHub.Charting.Drawings.DrawingKind.HorizontalRay] = "tool-hray",
+        [TradingHub.Charting.Drawings.DrawingKind.VerticalLine] = "tool-vline",
+        [TradingHub.Charting.Drawings.DrawingKind.CrossLine] = "tool-cross",
+        [TradingHub.Charting.Drawings.DrawingKind.FibRetracement] = "tool-fib",
+        [TradingHub.Charting.Drawings.DrawingKind.Rectangle] = "tool-rect",
+        [TradingHub.Charting.Drawings.DrawingKind.Brush] = "tool-brush",
+        [TradingHub.Charting.Drawings.DrawingKind.Text] = "tool-text",
     };
 
     public static string? GestureOf(AppSettings s, string id) =>

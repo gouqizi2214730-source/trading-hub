@@ -33,6 +33,9 @@ public sealed class ChartView : SkiaView
             {
                 _controller.Magnet = _magnet;
                 _controller.StickyTool = _sticky;
+                _controller.InkGestures = _ink;
+                _controller.InkFinished += r => InkFinished?.Invoke(r);
+                _controller.DrawingSelected += d => DrawingSelected?.Invoke(d);
             }
 
             if (_controller != null) _controller.IndicatorsChanged += () => IndicatorsChanged?.Invoke();
@@ -47,7 +50,48 @@ public sealed class ChartView : SkiaView
     public ChartController? Controller => _controller;
 
     private TradingHub.Charting.MagnetMode _magnet;
-    private bool _sticky;
+    private bool _sticky, _ink;
+    private Avalonia.Threading.DispatcherTimer? _inkTimer;
+
+    /// <summary>Dibujar con un gesto (mantener apretado y trazar).</summary>
+    public bool InkGestures
+    {
+        get => _ink;
+        set
+        {
+            _ink = value;
+            if (_controller != null) _controller.InkGestures = value;
+        }
+    }
+
+    /// <summary>Terminó un gesto (el dibujo que dejó o lo que borró).</summary>
+    public event Action<TradingHub.Charting.Drawings.InkResult>? InkFinished;
+
+    /// <summary>Se eligió un dibujo con un clic.</summary>
+    public event Action<TradingHub.Charting.Drawings.ChartDrawing>? DrawingSelected;
+
+    /// <summary>Mientras se mantiene apretado, el anillo se llena y a tiempo empieza el gesto.</summary>
+    private void StartInkTimer()
+    {
+        if (_controller?.InkPending != true) return;
+        _inkTimer ??= new Avalonia.Threading.DispatcherTimer(TimeSpan.FromMilliseconds(16), Avalonia.Threading.DispatcherPriority.Input, (_, _) =>
+        {
+            if (_controller == null || !_controller.InkPending)
+            {
+                _inkTimer?.Stop();
+                _controller?.InkTick();
+                InvalidateVisual();
+                return;
+            }
+
+            if (_controller.InkTick())
+            {
+                UpdateCursor();
+                InvalidateVisual();
+            }
+        });
+        _inkTimer.Start();
+    }
 
     /// <summary>Imán de los dibujos (también para los gráficos que se arman después).</summary>
     public TradingHub.Charting.MagnetMode Magnet
@@ -168,7 +212,7 @@ public sealed class ChartView : SkiaView
             return;
         }
 
-        if (_controller.TryCompletePending((float)p.X, (float)p.Y, mods))
+        if (_controller.TryCompletePending((float)p.X, (float)p.Y, mods, e.ClickCount))
         {
             InvalidateVisual();
             return;
@@ -177,6 +221,7 @@ public sealed class ChartView : SkiaView
         var button = props.IsMiddleButtonPressed ? PointerButton.Middle : PointerButton.Left;
         _controller.MouseDown((float)p.X, (float)p.Y, button, e.ClickCount, mods);
         e.Pointer.Capture(this);
+        StartInkTimer();
         UpdateCursor();
         InvalidateVisual();
     }
@@ -200,6 +245,7 @@ public sealed class ChartView : SkiaView
         if (_controller == null) return;
         var p = e.GetPosition(this);
         _controller.MouseUp((float)p.X, (float)p.Y, e.InitialPressMouseButton == MouseButton.Right ? PointerButton.Right : PointerButton.Left, Mods(e.KeyModifiers));
+        _inkTimer?.Stop();
         e.Pointer.Capture(null);
         InvalidateVisual();
     }

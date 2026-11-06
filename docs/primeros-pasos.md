@@ -144,8 +144,8 @@ combinación; Esc cancela y ⌫ lo deja sin asignar. «Restablecer los de fábri
 | Atajo de fábrica | Acción |
 |---|---|
 | ⌥1 a ⌥6 | Período de 1 minuto, 5 minutos, 15 minutos, 1 hora, 4 horas y diario |
-| ⌥H | Dibujar una línea horizontal |
-| ⌥T | Mostrar u ocultar el Chart Trader del gráfico |
+| ⌥T, ⌥H, ⌥J, ⌥V, ⌥C, ⌥F, ⌥⇧R, ⌥B, ⌥N | Dibujar: tendencia, horizontal, rayo horizontal, vertical, cruzada, Fibonacci, rectángulo, pincel y texto |
+| ⌥⇧T | Mostrar u ocultar el Chart Trader del gráfico |
 | ⌃Tab / ⌃⇧Tab | Pestaña siguiente / anterior |
 
 Los atajos para operar (comprar, vender, cerrar, revertir, cancelar, parciales, breakeven y otros) vienen sin asignar

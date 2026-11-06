@@ -840,11 +840,16 @@ public sealed partial class TradingView
                 model.Viewport.ScrollBars = 0;
                 model.Invalidate();
                 break;
-            case "tool-hline":
             case "tool-cursor":
+            case var tool when tool.StartsWith("tool-", StringComparison.Ordinal) && Hotkeys.DrawingTools.Any(t => t.Value == tool):
             {
-                DrawingKind? kind = id == "tool-hline" ? DrawingKind.HorizontalLine : null;
-                if (chart.View.Controller is { } c) c.ActiveTool = kind;
+                DrawingKind? kind = id == "tool-cursor" ? null : Hotkeys.DrawingTools.First(t => t.Value == id).Key;
+                if (chart.View.Controller is { } c)
+                {
+                    c.ActiveTool = kind;
+                    if (c.KeepTool != kind) c.KeepTool = null;
+                }
+
                 chart.Tools?.Check(kind);
                 chart.View.Focus();
                 break;
@@ -1017,7 +1022,7 @@ public sealed partial class TradingView
             foreach (var (name, c) in new[] { ("Azul", 0xFF3D8BFDu), ("Ámbar", 0xFFF2B53Au), ("Verde", 0xFF26C281u), ("Rojo", 0xFFF0525Au), ("Blanco", 0xFFFFFFFFu), ("Violeta", 0xFFB478FFu) })
                 colors.Items.Add(Item(name, null, () => { sel.ColorArgb = c; DrawingsTouched(tab); }));
             items.Add(colors);
-            if (sel.Kind is DrawingKind.HorizontalLine or DrawingKind.HorizontalRay)
+            if (sel.Kind is DrawingKind.HorizontalLine or DrawingKind.HorizontalRay or DrawingKind.CrossLine)
                 items.Add(Item(sel.IsAlert ? "Quitar alerta" : "Alertar cuando el precio toque", MaterialIconKind.BellOutline, () =>
                 {
                     if (sel.IsAlert)

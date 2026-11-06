@@ -66,6 +66,12 @@ public sealed class ChartTab
     /// <summary>La barrita flotante del dibujo elegido.</summary>
     internal DrawingBar? DrawingBar { get; set; }
 
+    /// <summary>La barrita que aparece al terminar un gesto (cambiar el tipo, borrar, deshacer).</summary>
+    internal InkChip? InkChip { get; set; }
+
+    /// <summary>Indicadores que se ocultaron con «ocultar los indicadores» (vuelven a verse al mostrarlos).</summary>
+    internal List<IndicatorSlot>? HiddenIndicators { get; set; }
+
     /// <summary>Botón de agrandar / achicar de la barra del marco.</summary>
     internal Avalonia.Controls.Button? MaximizeButton { get; set; }
 
@@ -167,8 +173,16 @@ public sealed partial class TradingView : UserControl
     internal void SetStatus(string text) => _status(text);
 
     /// <summary>La barra de dibujos de un gráfico con su estado (imán y seguir dibujando son de todos; bloquear y ocultar, del gráfico).</summary>
-    internal void SyncDrawingTools(ChartTab chart) =>
-        chart.Tools?.SetStates(_svc.Settings.DrawingMagnet, _svc.Settings.DrawingSticky, chart.Model?.Settings.LockDrawings ?? false, chart.Model?.Settings.HideDrawings ?? false);
+    internal void SyncDrawingTools(ChartTab chart)
+    {
+        if (chart.Tools == null) return;
+        chart.Tools.SetStates(_svc.Settings.DrawingMagnet, _svc.Settings.DrawingSticky, chart.Model?.Settings.LockDrawings ?? false, chart.Model?.Settings.HideDrawings ?? false,
+            _svc.Settings.InkGestures, _svc.Settings.DrawingBarAfterDrawing, chart.HiddenIndicators != null);
+        chart.Tools.SetFavorites(FavoriteDrawingTools());
+    }
+
+    private List<DrawingKind> FavoriteDrawingTools() =>
+        _svc.Settings.FavoriteDrawingTools.Select(n => Enum.TryParse<DrawingKind>(n, out var k) ? (DrawingKind?)k : null).OfType<DrawingKind>().ToList();
 
     // ===================================================================== layout
 
@@ -489,6 +503,7 @@ public sealed partial class TradingView : UserControl
         var chart = new ChartTab { View = view, Frame = frame, Header = headerBorder, Title = title, FeedId = feedId, Symbol = symbol, AccountId = accountId, HistoryHours = historyHours };
 
         // cada gráfico con su barra de dibujos (izquierda) y su Chart Trader (derecha), como en ATAS
+        DrawingToolStrip.ShortcutOf = k => Hotkeys.DrawingTools.TryGetValue(k, out var hk) ? Hotkeys.GestureOf(_svc.Settings, hk) : null;
         var tools = new DrawingToolStrip();
         chart.Tools = tools;
         DockPanel.SetDock(tools, Dock.Left);
@@ -499,8 +514,44 @@ public sealed partial class TradingView : UserControl
             if (chart.View.Controller is { } ctl)
             {
                 ctl.ActiveTool = kind;
+                if (ctl.KeepTool != kind) ctl.KeepTool = null;
                 chart.View.Focus();
             }
+        };
+        tools.ToolKept += kind =>
+        {
+            Activate(chart);
+            if (chart.View.Controller is not { } ctl) return;
+            ctl.ActiveTool = kind;
+            ctl.KeepTool = kind;
+            tools.MarkKept(kind);
+            chart.View.Focus();
+            _status($"«{ChartDrawing.KindName(kind)}» queda fija: sigue activa después de cada dibujo (Esc la suelta)");
+        };
+        tools.InkChanged += on =>
+        {
+            _svc.Settings.InkGestures = on;
+            _svc.Settings.Save();
+            foreach (var c in AllCharts)
+            {
+                c.View.InkGestures = on;
+                SyncDrawingTools(c);
+            }
+
+            _status(on ? "Dibujar con un gesto: mantené apretado sobre el gráfico y trazá la forma" : "Dibujar con un gesto, apagado");
+        };
+        tools.AfterBarChanged += on =>
+        {
+            _svc.Settings.DrawingBarAfterDrawing = on;
+            _svc.Settings.Save();
+            foreach (var c in AllCharts) SyncDrawingTools(c);
+        };
+        tools.HideIndicatorsChanged += on => SetIndicatorsHidden(chart, on);
+        tools.FavoritesChanged += list =>
+        {
+            _svc.Settings.FavoriteDrawingTools = list.Select(k => k.ToString()).ToList();
+            _svc.Settings.Save();
+            foreach (var c in AllCharts) SyncDrawingTools(c);
         };
         tools.ClearRequested += () =>
         {
@@ -525,6 +576,7 @@ public sealed partial class TradingView : UserControl
         };
         view.Magnet = _svc.Settings.DrawingMagnet;
         view.StickyTool = _svc.Settings.DrawingSticky;
+        view.InkGestures = _svc.Settings.InkGestures;
         tools.MagnetChanged += m =>
         {
             _svc.Settings.DrawingMagnet = m;
@@ -572,6 +624,9 @@ public sealed partial class TradingView : UserControl
         var drawingBar = new DrawingBar(this, chart);
         chart.DrawingBar = drawingBar;
         viewHost.Children.Add(drawingBar);
+        var inkChip = new InkChip(this, chart);
+        chart.InkChip = inkChip;
+        viewHost.Children.Add(inkChip);
 
         // color de vinculación en la esquina de la barrita del gráfico
         var link = new LinkButton(this, () => chart) { Margin = new Thickness(0, 0, 6, 0) };
@@ -600,7 +655,14 @@ public sealed partial class TradingView : UserControl
         // clic en cualquier parte del gráfico: pasa a ser el activo
         frame.AddHandler(PointerPressedEvent, (_, _) => Activate(chart), RoutingStrategies.Tunnel, handledEventsToo: true);
         // con «seguir dibujando» la herramienta sigue marcada
-        view.ToolFinished += () => chart.Tools?.Check(chart.View.Controller?.ActiveTool);
+        view.ToolFinished += () =>
+        {
+            chart.Tools?.Check(chart.View.Controller?.ActiveTool);
+            // sin «la barrita después de dibujar», la del dibujo recién hecho no aparece hasta elegirlo con un clic
+            if (!_svc.Settings.DrawingBarAfterDrawing) chart.DrawingBar?.Suppress(chart.Model?.Drawings.FirstOrDefault(d => d.Selected));
+        };
+        view.DrawingSelected += _ => chart.DrawingBar?.Suppress(null);
+        view.InkFinished += r => OnInkFinished(chart, r);
         view.DrawingsChanged += () => DrawingsTouched(chart);
         view.DrawingDefaults = k => _svc.Settings.DrawingDefaults.TryGetValue(k.ToString(), out var d) ? d : null;
         view.MenuRequested += (_, p) => ShowChartMenu(chart, p);
@@ -1150,6 +1212,41 @@ public sealed partial class TradingView : UserControl
         var w = new IndicatorsWindow(_svc, chart.Model);
         w.Show(owner);
         if (slot != null) w.Select(slot);
+    }
+
+    /// <summary>Terminó un gesto: la barrita para cambiar el tipo o deshacer el borrado.</summary>
+    private void OnInkFinished(ChartTab chart, InkResult r)
+    {
+        if (r.Unhid)
+        {
+            SyncDrawingTools(chart);
+            Workspace.Save(this);
+        }
+
+        if (r.Drawing != null && !_svc.Settings.DrawingBarAfterDrawing) chart.DrawingBar?.Suppress(r.Drawing);
+        chart.InkChip?.Show(r);
+        if (r.Erase) _status(r.Removed.Count switch { 0 => "El garabato no tocó ningún dibujo", 1 => "Se borró un dibujo", _ => $"Se borraron {r.Removed.Count} dibujos" });
+    }
+
+    /// <summary>Ocultar o mostrar todos los indicadores del gráfico (vuelven los que estaban a la vista).</summary>
+    internal void SetIndicatorsHidden(ChartTab chart, bool hidden)
+    {
+        if (chart.Model is not { } m) return;
+        if (hidden && chart.HiddenIndicators == null)
+        {
+            chart.HiddenIndicators = m.Indicators.Where(s => s.Visible).ToList();
+            foreach (var s in chart.HiddenIndicators) s.Visible = false;
+        }
+        else if (!hidden && chart.HiddenIndicators is { } list)
+        {
+            foreach (var s in list.Where(m.Indicators.Contains)) s.Visible = true;
+            chart.HiddenIndicators = null;
+        }
+
+        m.Invalidate();
+        SyncDrawingTools(chart);
+        Workspace.Save(this);
+        _status(hidden ? "Indicadores ocultos (el ojo de la barra de dibujos los vuelve a mostrar)" : "Indicadores a la vista");
     }
 
     /// <summary>Cambió un dibujo: se guarda y se redibujan todos los gráficos del mismo instrumento.</summary>
