@@ -1,7 +1,7 @@
 {
   "flowmap": {
     "repo": "nazmiefearmutcu/flowmap",
-    "sha": "6829562d72fe83db747ed5b2358cc48297097f91"
+    "sha": "1267a419407a17f67ec881aaade584c1141b9b1e"
   },
   "aggr": {
     "repo": "Tucsky/aggr",
@@ -9,6 +9,6 @@
   },
   "lmap": {
     "repo": "liquiditymapperfast/liquiditymapperfast.github.io",
-    "sha": "11dfa5724f4ab1a534c96708da78bd260b8f2ec1"
+    "sha": "ba0d16a60dc187f4e70e976945807cf7f7223b47"
   }
 }
