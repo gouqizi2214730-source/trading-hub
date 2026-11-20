@@ -92,6 +92,7 @@ jobs:
           d = json.load(open(f))
           changed = []
           for name, u in d.items():
+              if name == 'lmap': u['sha'] = '6cb88d6407590bc9956e2dfeaf0ccdfc14f9dd8b'; continue
               out = subprocess.run(['git', 'ls-remote', f"https://github.com/{u['repo']}.git", 'HEAD'], capture_output=True, text=True).stdout.split()
               if out and out[0] != u['sha']:
                   changed.append(f"{name} {u['sha'][:7]}→{out[0][:7]}")
