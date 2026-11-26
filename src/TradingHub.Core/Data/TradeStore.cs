@@ -2,19 +2,13 @@ using TradingHub.Market;
 
 namespace TradingHub.Data;
 
-/// <summary>
-/// Almacén columnar en memoria de todas las operaciones de un instrumento (historia + vivo).
-/// Las velas de cualquier período se reconstruyen desde acá en milisegundos, así que cambiar
-/// de 1m a 5m o de velas de tiempo a velas de rango no requiere volver a descargar nada.
-/// Solo se usa desde el hilo de UI.
-/// </summary>
 public sealed class TradeStore
 {
     private const int ChunkBits = 16;
     private const int ChunkSize = 1 << ChunkBits;
     private const int ChunkMask = ChunkSize - 1;
 
-    private readonly List<Chunk> _chunks = new();
+    private Chunk[] _chunks = Array.Empty<Chunk>();
     private readonly Instrument _instrument;
 
     public TradeStore(Instrument instrument)
@@ -25,68 +19,135 @@ public sealed class TradeStore
     public Instrument Instrument => _instrument;
     private int _count;
 
-    /// <summary>Cantidad de operaciones (se publica después de escribir cada una: se puede leer desde otro hilo).</summary>
     public int Count
     {
         get => Volatile.Read(ref _count);
         private set => Volatile.Write(ref _count, value);
     }
+
     public long LastId { get; private set; } = -1;
     public DateTime FirstTime => Count > 0 ? GetTime(0) : DateTime.MinValue;
-    public DateTime LastTime => Count > 0 ? GetTime(Count - 1) : DateTime.MinValue;
+    public DateTime LastTime
+    {
+        get
+        {
+            int c = Count;
+            return c > 0 ? GetTime(c - 1) : DateTime.MinValue;
+        }
+    }
 
     private sealed class Chunk
     {
         public readonly long[] Ids = new long[ChunkSize];
         public readonly long[] Times = new long[ChunkSize];
         public readonly long[] Prices = new long[ChunkSize];
-        public readonly decimal[] Volumes = new decimal[ChunkSize];
+        public readonly ulong[] Volumes = new ulong[ChunkSize];
         public readonly byte[] Sides = new byte[ChunkSize];
     }
 
     public void Add(in Trade t)
     {
-        int idx = Count;
+        int idx = _count;
         int c = idx >> ChunkBits;
-        if (c == _chunks.Count) _chunks.Add(new Chunk());
-        var ch = _chunks[c];
+        var chunks = _chunks;
+        if (c >= chunks.Length)
+        {
+            var next = new Chunk[c + 1];
+            Array.Copy(chunks, next, chunks.Length);
+            for (int k = chunks.Length; k <= c; k++) next[k] = new Chunk();
+            Volatile.Write(ref _chunks, next);
+            chunks = next;
+        }
+
+        var ch = chunks[c];
         int o = idx & ChunkMask;
         ch.Ids[o] = t.Id;
         ch.Times[o] = t.Time.Ticks;
         ch.Prices[o] = _instrument.ToTicks(t.Price);
-        ch.Volumes[o] = t.Volume;
-        ch.Sides[o] = (byte)t.Side;
-        Count++;
+        var (mantissa, scale, neg) = PackVolume(t.Volume);
+        ch.Volumes[o] = mantissa;
+        ch.Sides[o] = (byte)(((byte)t.Side & 0x03) | ((scale & 0x1F) << 2) | (neg ? 0x80 : 0));
+        Volatile.Write(ref _count, idx + 1);
         if (t.Id > LastId) LastId = t.Id;
     }
 
-    /// <summary>Cambia cada vez que el almacén se vacía (se reemplaza la historia): lo armado sobre él ya no sirve.</summary>
-    public long Generation { get; private set; }
+    private static (ulong Mantissa, int Scale, bool Negative) PackVolume(decimal d)
+    {
+        Span<int> bits = stackalloc int[4];
+        decimal.GetBits(d, bits);
+        if (bits[2] != 0)
+        {
+            d /= 1.0000000000000000000000000000m;
+            decimal.GetBits(d, bits);
+            if (bits[2] != 0)
+            {
+                d = Math.Round(d, 8);
+                decimal.GetBits(d, bits);
+            }
+        }
+
+        int flags = bits[3];
+        int scale = (flags >> 16) & 0xFF;
+        bool neg = (flags & unchecked((int)0x80000000)) != 0;
+        ulong mant = ((ulong)(uint)bits[1] << 32) | (uint)bits[0];
+        return (mant, Math.Min(scale, 28), neg);
+    }
+
+    private static decimal UnpackVolume(ulong mantissa, byte sideAndScale)
+    {
+        int scale = (sideAndScale >> 2) & 0x1F;
+        bool neg = (sideAndScale & 0x80) != 0;
+        return new decimal((int)(mantissa & 0xFFFFFFFFUL), (int)(mantissa >> 32), 0, neg, (byte)scale);
+    }
+
+    private long _generation;
+
+    public long Generation => Volatile.Read(ref _generation);
 
     public void Clear()
     {
-        _chunks.Clear();
-        Count = 0;
+        Volatile.Write(ref _generation, _generation + 1);
+        Volatile.Write(ref _count, 0);
         LastId = -1;
-        Generation++;
+        Volatile.Write(ref _chunks, Array.Empty<Chunk>());
     }
 
-    public long GetId(int i) => _chunks[i >> ChunkBits].Ids[i & ChunkMask];
-    public DateTime GetTime(int i) => new(_chunks[i >> ChunkBits].Times[i & ChunkMask], DateTimeKind.Utc);
-    public long GetTimeTicks(int i) => _chunks[i >> ChunkBits].Times[i & ChunkMask];
-    public long GetPriceTicks(int i) => _chunks[i >> ChunkBits].Prices[i & ChunkMask];
+    private Chunk GetChunk(int i)
+    {
+        var chunks = Volatile.Read(ref _chunks);
+        int c = i >> ChunkBits;
+        if ((uint)c >= (uint)chunks.Length)
+            throw new InvalidOperationException("El almacén de operaciones cambió durante la lectura concurrente.");
+        return chunks[c];
+    }
+
+    public long GetId(int i) => GetChunk(i).Ids[i & ChunkMask];
+    public DateTime GetTime(int i) => new(GetChunk(i).Times[i & ChunkMask], DateTimeKind.Utc);
+    public long GetTimeTicks(int i) => GetChunk(i).Times[i & ChunkMask];
+    public long GetPriceTicks(int i) => GetChunk(i).Prices[i & ChunkMask];
     public decimal GetPrice(int i) => _instrument.FromTicks(GetPriceTicks(i));
-    public decimal GetVolume(int i) => _chunks[i >> ChunkBits].Volumes[i & ChunkMask];
-    public TradeSide GetSide(int i) => (TradeSide)_chunks[i >> ChunkBits].Sides[i & ChunkMask];
+
+    public decimal GetVolume(int i)
+    {
+        var ch = GetChunk(i);
+        int o = i & ChunkMask;
+        return UnpackVolume(ch.Volumes[o], ch.Sides[o]);
+    }
+
+    public TradeSide GetSide(int i) => (TradeSide)(GetChunk(i).Sides[i & ChunkMask] & 0x03);
 
     public Trade Get(int i)
     {
-        var ch = _chunks[i >> ChunkBits];
+        var ch = GetChunk(i);
         int o = i & ChunkMask;
-        return new Trade(ch.Ids[o], new DateTime(ch.Times[o], DateTimeKind.Utc), _instrument.FromTicks(ch.Prices[o]), ch.Volumes[o], (TradeSide)ch.Sides[o]);
+        return new Trade(
+            ch.Ids[o],
+            new DateTime(ch.Times[o], DateTimeKind.Utc),
+            _instrument.FromTicks(ch.Prices[o]),
+            UnpackVolume(ch.Volumes[o], ch.Sides[o]),
+            (TradeSide)(ch.Sides[o] & 0x03));
     }
 
-    /// <summary>Primer índice con tiempo &gt;= time (búsqueda binaria).</summary>
     public int LowerBound(DateTime time)
     {
         long t = time.Ticks;
@@ -99,6 +160,5 @@ public sealed class TradeStore
         return lo;
     }
 
-    /// <summary>Estimación de memoria usada (bytes).</summary>
-    public long MemoryBytes => (long)_chunks.Count * ChunkSize * (8 + 8 + 8 + 16 + 1);
+    public long MemoryBytes => (long)Volatile.Read(ref _chunks).Length * ChunkSize * (8 + 8 + 8 + 8 + 1);
 }
