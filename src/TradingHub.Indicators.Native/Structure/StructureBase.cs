@@ -3,23 +3,24 @@ using System.Drawing;
 using TradingHub.Rendering;
 using TradingHub.Rendering.Context;
 using TradingHub.Rendering.Tools;
-
 using TradingHub.Indicators.Native.VpUltimate;
 
 namespace TradingHub.Indicators.Native.Structure;
 
-/// <summary>
-/// Base de los indicadores de estructura: arma las velas simples (las últimas <see cref="MaxBars"/>), recalcula cuando
-/// aparece una vela nueva (y cada pocos segundos para la que se está formando) y dibuja cajas, líneas y etiquetas.
-/// </summary>
 public abstract class StructureIndicator : Indicator
 {
     protected readonly List<Bar> Bars = new();
-    protected int Offset; // índice de la primera vela de «Bars» en el gráfico
+    protected int Offset;
     private int _computedCount = -1;
+    private int _prevOffset = -1;
+    private (long T, double O, double H, double L, double C, double V) _lastForming;
     private DateTime _lastLive = DateTime.MinValue;
     private readonly Action _tick;
     private int _maxBars = 3000;
+
+    [System.ComponentModel.Browsable(false)]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public long IncrementalRefreshes { get; private set; }
 
     protected StructureIndicator() : base(true)
     {
@@ -39,9 +40,14 @@ public abstract class StructureIndicator : Indicator
 
     protected override void OnInitialize() => SubscribeToTimer(TimeSpan.FromSeconds(4), _tick);
 
-    protected override void OnDispose() => UnsubscribeFromTimer(TimeSpan.FromSeconds(4), _tick);
+    protected override void OnDispose() => UnsubscribeToTimer(TimeSpan.FromSeconds(4), _tick);
 
-    protected override void OnRecalculate() => _computedCount = -1;
+    protected override void OnRecalculate()
+    {
+        _computedCount = -1;
+        _prevOffset = -1;
+        _lastForming = default;
+    }
 
     protected override void OnCalculate(int bar, decimal value)
     {
@@ -51,20 +57,49 @@ public abstract class StructureIndicator : Indicator
 
     protected static long Sec(DateTime t) => (long)(DateTime.SpecifyKind(t, DateTimeKind.Utc) - DateTime.UnixEpoch).TotalSeconds;
 
+    private Bar ReadBar(int i)
+    {
+        var c = GetCandle(i);
+        return new Bar(Sec(c.Time), (double)c.Open, (double)c.High, (double)c.Low, (double)c.Close, (double)c.Volume);
+    }
+
     private void Refresh(bool force)
     {
         int n = CurrentBar;
         if (n == 0) return;
         if (!force && n == _computedCount) return;
-        Bars.Clear();
-        Offset = Math.Max(0, n - _maxBars);
-        for (int i = Offset; i < n; i++)
+
+        var lastCandle = ReadBar(n - 1);
+        var formingKey = (lastCandle.T, lastCandle.O, lastCandle.H, lastCandle.L, lastCandle.C, lastCandle.V);
+        if (force && n == _computedCount && formingKey == _lastForming)
         {
-            var c = GetCandle(i);
-            Bars.Add(new Bar(Sec(c.Time), (double)c.Open, (double)c.High, (double)c.Low, (double)c.Close, (double)c.Volume));
+            _lastLive = DateTime.UtcNow;
+            return;
         }
 
+        int newOffset = Math.Max(0, n - _maxBars);
+        if (_computedCount > 0 && newOffset == _prevOffset && n >= _computedCount && Bars.Count == _computedCount - _prevOffset)
+        {
+            int startIdx = Math.Max(newOffset, _computedCount - 1);
+            for (int i = startIdx; i < n; i++)
+            {
+                var b = i == n - 1 ? lastCandle : ReadBar(i);
+                int local = i - newOffset;
+                if (local < Bars.Count) Bars[local] = b;
+                else Bars.Add(b);
+            }
+            IncrementalRefreshes++;
+        }
+        else
+        {
+            Bars.Clear();
+            for (int i = newOffset; i < n; i++)
+                Bars.Add(i == n - 1 ? lastCandle : ReadBar(i));
+        }
+
+        Offset = _prevOffset = newOffset;
         _computedCount = n;
+        _lastForming = formingKey;
         _lastLive = DateTime.UtcNow;
         try
         {
@@ -73,25 +108,19 @@ public abstract class StructureIndicator : Indicator
         }
         catch (Exception ex)
         {
-            // un cálculo que falla no tira el gráfico: queda lo anterior
             ComputeError = ex.ToString();
         }
 
         RedrawChart();
     }
 
-    /// <summary>El error del último cálculo (null si anduvo).</summary>
     [System.ComponentModel.Browsable(false)]
     [System.Text.Json.Serialization.JsonIgnore]
     public string? ComputeError { get; private set; }
 
-    /// <summary>Recalcula la estructura con <see cref="Bars"/>.</summary>
     protected abstract void Compute();
 
-    /// <summary>Largo de la vela del gráfico (0 si no es por tiempo).</summary>
     protected TimeSpan BarLength => ChartInfo?.GetTimeFrameTypeChartPeriod() ?? TimeSpan.Zero;
-
-    // ===================================================================== dibujo
 
     protected static readonly RenderFont SmallFont = new("Arial", 9);
     protected static readonly RenderFont BoldFont = new("Arial", 9, FontStyle.Bold);
@@ -101,7 +130,6 @@ public abstract class StructureIndicator : Indicator
 
     protected int RightEdge => ChartInfo!.PriceChartContainer.Region.Right;
 
-    /// <summary>Caja entre dos velas (la segunda puede ser -1: hasta el borde derecho).</summary>
     protected void Box(RenderContext ctx, int fromBar, int toBar, double top, double bottom, Color fill, Color border)
     {
         int x0 = X(fromBar);
@@ -135,11 +163,6 @@ public abstract class StructureIndicator : Indicator
         ctx.DrawString(text, font, color, x, y - size.Height / 2);
     }
 
-    /// <summary>
-    /// Un nivel para las alertas (de la vela local <paramref name="fromBar"/> a <paramref name="toBar"/>; −1 = sigue a la
-    /// derecha). El Id lleva la hora de la vela de inicio (no el precio, que puede moverse: un EQH es un promedio), así es el
-    /// mismo al recalcular; <paramref name="kind"/> distingue lo que empieza en la misma vela.
-    /// </summary>
     protected IndicatorLevel Level(string kind, string name, int fromBar, int toBar, double price, string? part = null)
     {
         int from = Math.Clamp(fromBar + Offset, 0, Math.Max(0, CurrentBar - 1));
@@ -149,7 +172,6 @@ public abstract class StructureIndicator : Indicator
             (decimal)price, from, toBar < 0 ? int.MaxValue : toBar + Offset);
     }
 
-    /// <summary>Los dos bordes de una caja como niveles.</summary>
     protected IEnumerable<IndicatorLevel> BoxLevels(string kind, string name, int fromBar, int toBar, double top, double bottom)
     {
         yield return Level(kind + ".top", name, fromBar, toBar, Math.Max(top, bottom), "borde de arriba");
