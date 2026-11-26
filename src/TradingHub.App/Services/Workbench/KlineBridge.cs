@@ -9,16 +9,10 @@ using TradingHub.Market;
 
 namespace TradingHub.App.Services.Workbench;
 
-/// <summary>
-/// Las velas que piden los módulos web (las mismas URL de Binance y Bybit que usaban en VPFM) salen de la caché de velas
-/// de KVP: una sola descarga para los gráficos y para el Workbench, y lo ya bajado no se vuelve a pedir. La respuesta
-/// tiene exactamente el formato del exchange, así los módulos no cambian (y se pueden actualizar desde sus originales).
-/// </summary>
 public static class KlineBridge
 {
     private static readonly Dictionary<string, IKlineHistory> Fallback = new();
 
-    /// <summary>Minutos de un intervalo («1m», «4h», «1d», «60», «D», «W»…); 0 si no se reconoce.</summary>
     public static int Minutes(string interval)
     {
         interval = interval.Trim();
@@ -30,7 +24,7 @@ public static class KlineBridge
             case "M": return 43200;
         }
 
-        if (int.TryParse(interval, NumberStyles.Integer, CultureInfo.InvariantCulture, out var plain)) return plain; // Bybit: minutos
+        if (int.TryParse(interval, NumberStyles.Integer, CultureInfo.InvariantCulture, out var plain)) return plain;
         char unit = interval[^1];
         if (!int.TryParse(interval[..^1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) || n <= 0) return 0;
         return unit switch
@@ -44,7 +38,6 @@ public static class KlineBridge
         };
     }
 
-    /// <summary>El feed de velas de una conexión (o, sin conexión, el público de Binance futuros).</summary>
     public static IKlineHistory? FeedFor(AppServices svc, string conn)
     {
         if (conn.Length > 0)
@@ -66,7 +59,6 @@ public static class KlineBridge
         return Public(BinanceFeed.FuturesId);
     }
 
-    /// <summary>Feeds públicos (sin perfil) de Binance futuros / spot y Bybit.</summary>
     private static IKlineHistory? Public(string id)
     {
         lock (Fallback)
@@ -95,21 +87,15 @@ public static class KlineBridge
             }
             catch
             {
-                // el público
             }
         }
 
         return Public(feedId);
     }
 
-    /// <summary>
-    /// Velas de <paramref name="minutes"/> minutos entre dos instantes: se arman con las de 1, 5 o 15 minutos de la caché
-    /// (la que divide al intervalo), alineadas en UTC (las diarias empiezan a las 00:00 UTC, como en los exchanges).
-    /// </summary>
     public static async Task<List<Kline>> LoadAsync(IKlineHistory feed, string symbol, int minutes, DateTime from, DateTime to, CancellationToken ct, Instrument? instrument = null)
     {
         int baseMin = minutes % 15 == 0 ? 15 : minutes % 5 == 0 ? 5 : 1;
-        // muchos años de velas de 15 min son demasiadas para pedir de una: en diarias o más se usa la propia del exchange
         long step = minutes * 60_000L;
         long fromMs = new DateTimeOffset(DateTime.SpecifyKind(from, DateTimeKind.Utc)).ToUnixTimeMilliseconds() / step * step;
         long toMs = new DateTimeOffset(DateTime.SpecifyKind(to, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
@@ -157,21 +143,98 @@ public static class KlineBridge
 
     private static string N(decimal d) => d.ToString(CultureInfo.InvariantCulture);
 
-    /// <summary>
-    /// Si la URL es la de velas de Binance (futuros /fapi/v1/klines o spot /api/v3/klines) o de Bybit (/v5/market/kline,
-    /// lineales o spot), responde desde KVP y devuelve true. Si no, false (se pide al exchange como siempre).
-    /// </summary>
+    public static InstrumentData? FindOpenData(AppServices svc, string feedId, string symbol)
+    {
+        string upper = symbol.ToUpperInvariant();
+        return svc.Hub.Items.FirstOrDefault(d =>
+            d.Instrument.FeedId.Equals(feedId, StringComparison.OrdinalIgnoreCase) &&
+            d.Instrument.Symbol.Equals(upper, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static string? BuildDepthJson(InstrumentData data, int limit, bool bybit)
+    {
+        var snap = data.Depth;
+        if (!snap.HasBid && !snap.HasAsk) return null;
+        var inst = data.Instrument;
+        int cap = Math.Clamp(limit, 1, 1000);
+        long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var sb = new StringBuilder(cap * 48 + 128);
+        if (bybit)
+        {
+            sb.Append("{\"retCode\":0,\"retMsg\":\"OK\",\"result\":{\"s\":\"").Append(inst.Symbol).Append("\",\"b\":[");
+            int bi = 0;
+            foreach (var b in snap.Bids.Take(cap))
+            {
+                if (bi++ > 0) sb.Append(',');
+                sb.Append("[\"").Append(inst.FormatPrice(inst.FromTicks(b.PriceTicks))).Append("\",\"").Append(N(b.Size)).Append("\"]");
+            }
+            sb.Append("],\"a\":[");
+            int ai = 0;
+            foreach (var a in snap.Asks.Take(cap))
+            {
+                if (ai++ > 0) sb.Append(',');
+                sb.Append("[\"").Append(inst.FormatPrice(inst.FromTicks(a.PriceTicks))).Append("\",\"").Append(N(a.Size)).Append("\"]");
+            }
+            sb.Append("],\"ts\":").Append(now).Append(",\"u\":1},\"retExtInfo\":{},\"time\":").Append(now).Append('}');
+        }
+        else
+        {
+            sb.Append("{\"lastUpdateId\":").Append(now).Append(",\"E\":").Append(now).Append(",\"T\":").Append(now).Append(",\"bids\":[");
+            int bi = 0;
+            foreach (var b in snap.Bids.Take(cap))
+            {
+                if (bi++ > 0) sb.Append(',');
+                sb.Append("[\"").Append(inst.FormatPrice(inst.FromTicks(b.PriceTicks))).Append("\",\"").Append(N(b.Size)).Append("\"]");
+            }
+            sb.Append("],\"asks\":[");
+            int ai = 0;
+            foreach (var a in snap.Asks.Take(cap))
+            {
+                if (ai++ > 0) sb.Append(',');
+                sb.Append("[\"").Append(inst.FormatPrice(inst.FromTicks(a.PriceTicks))).Append("\",\"").Append(N(a.Size)).Append("\"]");
+            }
+            sb.Append("]}");
+        }
+        return sb.ToString();
+    }
+
     public static async Task<bool> TryServeAsync(AppServices svc, Uri target, HttpContext ctx)
     {
         string host = target.Host.ToLowerInvariant(), path = target.AbsolutePath;
-        bool binanceFut = host == "fapi.binance.com" && path == "/fapi/v1/klines";
-        bool binanceSpot = host is "api.binance.com" or "data-api.binance.vision" && path == "/api/v3/klines";
-        bool bybit = (host is "api.bybit.com" or "api.bytick.com") && path == "/v5/market/kline";
+        bool isBinanceFutHost = host == "fapi.binance.com";
+        bool isBinanceSpotHost = host is "api.binance.com" or "data-api.binance.vision";
+        bool isBybitHost = host is "api.bybit.com" or "api.bytick.com";
+
+        if ((isBinanceFutHost && path == "/fapi/v1/depth") ||
+            (isBinanceSpotHost && path == "/api/v3/depth") ||
+            (isBybitHost && path == "/v5/market/orderbook"))
+        {
+            string? sym = Query(target, "symbol");
+            if (!string.IsNullOrEmpty(sym))
+            {
+                string fid = isBybitHost ? BybitFeed.LinearId : isBinanceFutHost ? BinanceFeed.FuturesId : BinanceFeed.SpotId;
+                if (FindOpenData(svc, fid, sym) is { } openData)
+                {
+                    int lim = int.TryParse(Query(target, "limit"), out var dl) ? dl : 100;
+                    if (BuildDepthJson(openData, lim, isBybitHost) is { } depthJson)
+                    {
+                        ctx.Response.ContentType = "application/json; charset=utf-8";
+                        ctx.Response.Headers.CacheControl = "no-store";
+                        ctx.Response.Headers["X-KVP-Source"] = "memory-depth-bus";
+                        await ctx.Response.WriteAsync(depthJson, ctx.RequestAborted).ConfigureAwait(false);
+                        return true;
+                    }
+                }
+            }
+        }
+
+        bool binanceFut = isBinanceFutHost && path == "/fapi/v1/klines";
+        bool binanceSpot = isBinanceSpotHost && path == "/api/v3/klines";
+        bool bybit = isBybitHost && path == "/v5/market/kline";
         if (!binanceFut && !binanceSpot && !bybit) return false;
         string? symbol = Query(target, "symbol"), interval = Query(target, "interval");
         if (string.IsNullOrEmpty(symbol) || string.IsNullOrEmpty(interval)) return false;
         int minutes = Minutes(interval);
-        // meses y semanas no se alinean con la grilla UTC fija: esos los da el exchange
         if (minutes <= 0 || minutes >= 10080) return false;
         if (bybit && (Query(target, "category") ?? "linear") != "linear") return false;
 
@@ -183,21 +246,17 @@ public static class KlineBridge
         long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         long toMs = end ?? (start != null ? start.Value + stepMs * limit : now);
         long fromMs = start ?? toMs - stepMs * limit;
-        // muy largo para la caché en velas chicas (años en diarias: miles de velas de 15 min por mes): igual sirve, la
-        // caché es por mes
         var feed = FeedFor(svc, bybit ? BybitFeed.LinearId : binanceFut ? BinanceFeed.FuturesId : BinanceFeed.SpotId, true);
         if (feed == null) return false;
         var bars = await LoadAsync(feed, symbol.ToUpperInvariant(), minutes,
             DateTimeOffset.FromUnixTimeMilliseconds(Math.Max(0, fromMs)).UtcDateTime, DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(toMs, now + stepMs)).UtcDateTime, ctx.RequestAborted).ConfigureAwait(false);
         bars = bars.Where(b => b.OpenTimeMs >= fromMs && b.OpenTimeMs <= toMs).ToList();
-        // Binance: desde startTime las primeras «limit»; sin startTime, las últimas
         if (bars.Count > limit) bars = start != null && !bybit ? bars.Take(limit).ToList() : bars.Skip(bars.Count - limit).ToList();
-        if (bars.Count == 0) return false; // nada en KVP: que responda el exchange
+        if (bars.Count == 0) return false;
 
         var sb = new StringBuilder(bars.Count * 96);
         if (bybit)
         {
-            // Bybit: de la más nueva a la más vieja, todo como texto
             sb.Append("{\"retCode\":0,\"retMsg\":\"OK\",\"result\":{\"category\":\"linear\",\"symbol\":\"").Append(symbol.ToUpperInvariant()).Append("\",\"list\":[");
             for (int i = bars.Count - 1; i >= 0; i--)
             {
@@ -212,7 +271,6 @@ public static class KlineBridge
         }
         else
         {
-            // Binance: [apertura, o, h, l, c, volumen, cierre, volumen en USDT, operaciones, comprador base, comprador USDT, "0"]
             sb.Append('[');
             for (int i = 0; i < bars.Count; i++)
             {
