@@ -62,7 +62,8 @@ public sealed class InstrumentData : IMarketDataSink, IDisposable
         lock (_autoSteps)
             if (_autoSteps.TryGetValue(key, out var v) && v.Generation == gen) return v.Step;
         int step = CandleSeries.SuggestPriceStep(Trades, Instrument, period, targetRows);
-        lock (_autoSteps) _autoSteps[key] = (gen, step);
+        if (Trades.Generation == gen)
+            lock (_autoSteps) _autoSteps[key] = (gen, step);
         return step;
     }
 
