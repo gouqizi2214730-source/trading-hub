@@ -81,6 +81,7 @@ public sealed class BracketManager : IDisposable
         Account = account;
         _lastVolume = account.Position.Volume;
         _entryPrice = account.Position.AveragePrice;
+        ReconcileCore(includeUntaggedReduceOnly: false);
         account.Changed += OnAccountChanged;
     }
 
@@ -646,8 +647,95 @@ public sealed class BracketManager : IDisposable
         }
 
         _lastVolume = v;
+        ReconcileCore(includeUntaggedReduceOnly: false);
         Prune();
         return Volume != v;
+    }
+
+    /// <summary>
+    /// Reconcilia el estado local de brackets con las órdenes vivas del exchange (tras una reconexión WebSocket o reinicio):
+    /// adopta órdenes SL/TP huérfanas, elimina duplicados de stop loss, ajusta cantidades al tamaño real de la posición
+    /// y cancela brackets residuales si la posición ya está cerrada. Devuelve la cantidad de órdenes adoptadas o limpiadas.
+    /// </summary>
+    public int ReconcileWithExchange(bool includeUntaggedReduceOnly = true) => Run(() => ReconcileCore(includeUntaggedReduceOnly));
+
+    private int ReconcileCore(bool includeUntaggedReduceOnly)
+    {
+        int actions = 0;
+        decimal v = Volume;
+        if (v == 0)
+        {
+            if (_pending.Count == 0)
+            {
+                foreach (var o in Account.ActiveOrders.ToList())
+                {
+                    if (_cancelled.Contains(o)) continue;
+                    bool isTaggedBracket = o.Comment is "SL" or "TP";
+                    bool isOrphanReduceOnly = includeUntaggedReduceOnly && o.ReduceOnly && o.Type is OrderTypes.Stop or OrderTypes.Limit;
+                    if (isTaggedBracket || isOrphanReduceOnly)
+                    {
+                        _cancelled.Add(o);
+                        Account.Cancel(o);
+                        actions++;
+                    }
+                }
+            }
+
+            _stops.Clear();
+            _targets.Clear();
+            return actions;
+        }
+
+        var exitDir = ExitDirection;
+        int side = Math.Sign(v);
+        decimal refPrice = EntryPrice > 0 ? EntryPrice : Account.LastPrice;
+
+        foreach (var o in Account.ActiveOrders.ToList())
+        {
+            if (o.Direction != exitDir || _cancelled.Contains(o)) continue;
+            if (_stops.Any(s => Same(s, o)) || _targets.Any(t => Same(t, o)) || _pending.Any(p => Same(p.Entry, o))) continue;
+
+            bool isSl = o.Type == OrderTypes.Stop &&
+                        (o.Comment == "SL" || (includeUntaggedReduceOnly && o.ReduceOnly && Validate(BracketRole.StopLoss, PriceOf(o), side, refPrice) == null));
+            bool isTp = o.Type == OrderTypes.Limit &&
+                        (o.Comment == "TP" || (includeUntaggedReduceOnly && o.ReduceOnly && Validate(BracketRole.Target, PriceOf(o), side, refPrice) == null));
+
+            if (isSl)
+            {
+                var existingStops = LiveOf(_stops);
+                if (existingStops.Count == 0)
+                {
+                    _stops.Add(o);
+                    actions++;
+                }
+                else
+                {
+                    _cancelled.Add(o);
+                    Account.Cancel(o);
+                    actions++;
+                }
+            }
+            else if (isTp)
+            {
+                _targets.Add(o);
+                actions++;
+            }
+        }
+
+        var liveStops = LiveOf(_stops);
+        if (liveStops.Count > 1)
+        {
+            for (int i = 1; i < liveStops.Count; i++)
+            {
+                _cancelled.Add(liveStops[i].Tracked);
+                Account.Cancel(liveStops[i].Live);
+                _stops.Remove(liveStops[i].Tracked);
+                actions++;
+            }
+        }
+
+        if (actions > 0) ResizeToPosition();
+        return actions;
     }
 
     /// <summary>Objetivos que desaparecieron sin que los cancelemos: se llenaron.</summary>
