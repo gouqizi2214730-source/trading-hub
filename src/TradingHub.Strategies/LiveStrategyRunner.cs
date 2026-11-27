@@ -563,17 +563,120 @@ public sealed class LiveStrategyRunner : IStrategyHost, IDisposable
     /// </summary>
     private void ProtectInherited()
     {
-        string prefix = StrategyName + ": ";
-        bool already;
-        lock (CanceledOrders)
-            already = _account.ActiveOrders.Any(o => o.Comment.StartsWith(prefix, StringComparison.Ordinal) && o.Type is OrderTypes.Stop or OrderTypes.Limit && !CanceledOrders.Contains(o.Id));
-        if (already)
+        if (ReconcileWithExchange() > 0)
         {
             Log("Ya hay órdenes de esta estrategia en la cuenta: no se ponen stop ni objetivo nuevos (revisalas en el Chart Trader)");
             return;
         }
 
         UpdateProtection();
+    }
+
+    /// <summary>
+    /// Reconcilia las órdenes protectoras (Stop loss / Take profit) de esta estrategia con las órdenes activas de la cuenta:
+    /// adopta órdenes vivas tras un reinicio o reconexión para mantener el vínculo OCO y el trailing stop, elimina duplicados
+    /// y cancela órdenes protectoras huérfanas si la posición de la estrategia ya está cerrada.
+    /// </summary>
+    public int ReconcileWithExchange()
+    {
+        string prefix = StrategyName + ": ";
+        decimal pos = Ledger?.Position ?? 0;
+        int actions = 0;
+
+        List<Order> candidates;
+        lock (CanceledOrders)
+        {
+            candidates = _account.ActiveOrders
+                .Where(o => o.Comment.StartsWith(prefix, StringComparison.Ordinal) &&
+                            o.Type is OrderTypes.Stop or OrderTypes.Limit &&
+                            !CanceledOrders.Contains(o.Id) &&
+                            !_orders.Any(so => ReferenceEquals(so.Live, o) || (o.ExchangeOrderId.Length > 0 && so.Live is Order lo && lo.ExchangeOrderId == o.ExchangeOrderId)))
+                .ToList();
+        }
+
+        if (pos == 0)
+        {
+            if (!_closing)
+            {
+                foreach (var o in candidates)
+                {
+                    if (o.Comment.EndsWith("Stop loss", StringComparison.OrdinalIgnoreCase) ||
+                        o.Comment.EndsWith("Take profit", StringComparison.OrdinalIgnoreCase))
+                    {
+                        lock (CanceledOrders) CanceledOrders.Add(o.Id);
+                        _account.Cancel(o);
+                        actions++;
+                    }
+                }
+            }
+
+            return actions;
+        }
+
+        var expectedExit = pos > 0 ? OrderDirections.Sell : OrderDirections.Buy;
+        var exitSide = pos > 0 ? OrderSide.Sell : OrderSide.Buy;
+        _highWater = _lowWater = LastPrice > 0 ? LastPrice : _data.LastPrice;
+
+        foreach (var o in candidates)
+        {
+            if (o.Direction != expectedExit) continue;
+            if (o.Type == OrderTypes.Stop)
+            {
+                if (_sl is { IsActive: true })
+                {
+                    lock (CanceledOrders) CanceledOrders.Add(o.Id);
+                    _account.Cancel(o);
+                    actions++;
+                    continue;
+                }
+
+                var so = new StrategyOrder
+                {
+                    Id = _nextId++,
+                    Side = exitSide,
+                    Type = StrategyOrderType.Stop,
+                    Quantity = Math.Abs(_virtual > 0 ? _virtual : ToVirtual(pos)),
+                    LiveQuantity = o.Unfilled,
+                    Price = o.TriggerPrice,
+                    Name = "Stop loss",
+                    Time = o.Time,
+                    IsProtective = true,
+                    Live = o,
+                };
+                _sl = so;
+                _orders.Add(so);
+                actions++;
+            }
+            else if (o.Type == OrderTypes.Limit)
+            {
+                if (_tp is { IsActive: true })
+                {
+                    lock (CanceledOrders) CanceledOrders.Add(o.Id);
+                    _account.Cancel(o);
+                    actions++;
+                    continue;
+                }
+
+                var so = new StrategyOrder
+                {
+                    Id = _nextId++,
+                    Side = exitSide,
+                    Type = StrategyOrderType.Limit,
+                    Quantity = Math.Abs(_virtual > 0 ? _virtual : ToVirtual(pos)),
+                    LiveQuantity = o.Unfilled,
+                    Price = o.Price,
+                    Name = "Take profit",
+                    Time = o.Time,
+                    IsProtective = true,
+                    Live = o,
+                };
+                _tp = so;
+                _orders.Add(so);
+                actions++;
+            }
+        }
+
+        return actions;
     }
 
     // ----------------------------------------------------------------- órdenes
