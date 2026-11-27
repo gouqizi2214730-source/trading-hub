@@ -730,7 +730,10 @@ public sealed class ChartController
         UpdateCursor(x, y);
         _lastX = x;
         _lastY = y;
-        _model.Invalidate();
+        if (_drag is DragMode.Pan or DragMode.PriceScale or DragMode.TimeScale or DragMode.PanelResize)
+            _model.Invalidate();
+        else
+            _model.InvalidateOverlay();
     }
 
     public void MouseUp(float x, float y, PointerButton button, InputModifiers mods)
@@ -1008,7 +1011,7 @@ public sealed class ChartController
         _state.MouseY = null;
         var ci = _model.ChartInfo.MouseLocationInfo;
         ci.IsMouseLeave = true;
-        _model.Invalidate();
+        _model.InvalidateOverlay();
     }
 
     public bool KeyDown(string key, InputModifiers mods)
