@@ -148,20 +148,27 @@ public abstract class SceneIndicator : StructureIndicator
     [Display(Name = "Tamaño del texto", GroupName = "Tablero", Order = 902)]
     public TextSize TextSize { get => _text; set { _text = value; RedrawChart(); } }
 
-    /// <summary>Lo que se dibuja ahora (para las pruebas).</summary>
+    /// <summary>Lo que se dibuja ahora (intercambio atómico de doble búfer sin bloqueo).</summary>
     [System.ComponentModel.Browsable(false)]
     [System.Text.Json.Serialization.JsonIgnore]
-    public Scene CurrentScene => _scene;
+    public Scene CurrentScene => Volatile.Read(ref _scene);
 
     /// <summary>Última vela local cerrada (la que se está formando no dispara eventos: no se redibuja hacia atrás).</summary>
     protected int LastClosed => Bars.Count - 2;
 
     /// <summary>Última vela local (la que se está formando).</summary>
     protected int LastBar => Bars.Count - 1;
-
+    
+    private int _keysOffset = -1;
+    private int _keysCount = -1;
+    private long _keysFirstTime = -1;
+    
     protected sealed override void Compute()
     {
         int n = Bars.Count;
+        long firstT = n > 0 ? Bars[0].T : 0;
+        if (n != _keysCount || Offset != _keysOffset || firstT != _keysFirstTime || DayKey.Length != n)
+        {
         DayKey = new int[n];
         WeekKey = new int[n];
         MonthKey = new int[n];
@@ -197,9 +204,14 @@ public abstract class SceneIndicator : StructureIndicator
             YearKey[i] = y;
         }
 
+            _keysOffset = Offset;
+            _keysCount = n;
+            _keysFirstTime = firstT;
+        }    
+
         var s = new Scene();
         Build(s);
-        _scene = s;
+        Volatile.Write(ref _scene, s);
     }
 
     /// <summary>Arma lo que se dibuja con <see cref="StructureIndicator.Bars"/>.</summary>
@@ -227,7 +239,7 @@ public abstract class SceneIndicator : StructureIndicator
     /// <summary>Las líneas y bordes que siguen vivos (a la derecha o hasta la última vela), con su nombre.</summary>
     public override IEnumerable<IndicatorLevel> GetAlertLevels()
     {
-        var s = _scene;
+        var s = Volatile.Read(ref _scene);
         int last = Bars.Count - 1;
         if (last < 0) yield break;
         foreach (var l in s.Lines)
@@ -250,7 +262,7 @@ public abstract class SceneIndicator : StructureIndicator
     protected override void OnRender(RenderContext ctx, DrawingLayouts layout)
     {
         if (ChartInfo == null || Bars.Count == 0) return;
-        var s = _scene;
+        var s = Volatile.Read(ref _scene);
         DashRect = Rectangle.Empty;
         var pc = ChartInfo.PriceChartContainer;
         int first = FirstVisibleBarNumber - Offset, last = LastVisibleBarNumber - Offset;
