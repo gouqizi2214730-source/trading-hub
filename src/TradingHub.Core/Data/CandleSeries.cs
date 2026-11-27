@@ -364,9 +364,17 @@ public sealed class CandleSeries
         else from = Math.Max(0, store.Count - 3_000_000);
         var probe = new CandleSeries(instrument, period, 1);
         // con decenas de millones de operaciones (velas diarias de un año) alcanza con una de cada k para el rango típico
+        long gen = store.Generation;
         int count = store.Count;
         int stride = Math.Max(1, (count - from) / 2_000_000);
-        for (int i = from; i < count; i += stride) probe.ProcessTrade(store, i);
+        try
+        {    
+        for (int i = from; i < count && store.Generation == gen; i += stride) probe.ProcessTrade(store, i);
+        }  
+        catch (InvalidOperationException)
+        {
+            return 1;
+        }
         if (probe.Count < 2) return 1;
         var ranges = new List<long>();
         int tail = Math.Max(0, probe.Count - 200);
