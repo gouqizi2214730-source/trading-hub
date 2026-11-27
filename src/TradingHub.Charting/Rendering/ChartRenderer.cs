@@ -100,6 +100,46 @@ public sealed class ChartRenderer
     private readonly SKPaint _stroke = new() { IsAntialias = false, Style = SKPaintStyle.Stroke, StrokeWidth = 1 };
     private readonly SKPaint _text = new() { IsAntialias = true };
 
+    private SKPicture? _staticPicture;
+    private StaticCacheKey _staticKey;
+    public long StaticCacheHits { get; private set; }
+    public long StaticCacheMisses { get; private set; }
+
+    public void InvalidateCache() { _staticPicture?.Dispose(); _staticPicture = null; _staticKey = default; }
+
+    private readonly record struct StaticCacheKey(
+        int WidthBits, int HeightBits, long StaticVersion, int SeriesCount, int TradesCount, long TradesGen,
+        int PriceStep, long LastTimeTicks, long LastCloseTicks, long LastHighTicks, long LastLowTicks,
+        decimal LastVolume, decimal LastDelta, int FirstVisible, int LastVisible,
+        long BarWidthBits, long ScrollBarsBits, long MainTopBits, long MainBottomBits, int StructuralHash);
+
+    private static StaticCacheKey BuildStaticKey(ChartModel model, ChartLayout layout, float width, float height)
+    {
+        var series = model.Series;
+        var last = series.Count > 0 ? series[^1] : null;
+        var hc = new HashCode();
+        hc.Add(model.Settings.Style); hc.Add(model.Settings.PriceStep); hc.Add(model.Settings.ShowGrid);
+        hc.Add(model.Settings.ShowLiquidityHeatmap); hc.Add(model.Settings.ShowSessionLines);
+        hc.Add(model.Settings.ShowLastPriceLine); hc.Add(model.Settings.ShowTradeMarks);
+        hc.Add(model.Settings.TimeZoneId); hc.Add(model.Settings.BlindReplay);
+        hc.Add(model.Theme.BackgroundTop); hc.Add(model.Theme.BackgroundBottom);
+        hc.Add(model.Theme.UpCandle); hc.Add(model.Theme.DownCandle);
+        hc.Add(model.Data.Liquidity.Count); hc.Add(model.Indicators.Count);
+        for (int i = 0; i < model.Indicators.Count; i++) { var s = model.Indicators[i]; hc.Add(s.Visible); hc.Add(s.NeedsRecalc); hc.Add(s.Error); }
+        hc.Add(model.SubPanels.Count);
+        for (int i = 0; i < layout.Panels.Count; i++) { var p = layout.Panels[i]; hc.Add(p.Rect.Top); hc.Add(p.Rect.Bottom); hc.Add(p.Top); hc.Add(p.Bottom); }
+        hc.Add(model.Strategies.Count);
+        for (int i = 0; i < model.Strategies.Count; i++) { var st = model.Strategies[i]; hc.Add(st.Visible); hc.Add(st.Signals.Count); hc.Add(st.Lines.Count); hc.Add(st.Shapes.Count); }
+        hc.Add(model.TradeMarks.Count); hc.Add(model.TradeLinks.Count);
+        return new StaticCacheKey(
+            BitConverter.SingleToInt32Bits(width), BitConverter.SingleToInt32Bits(height), model.StaticVersion,
+            series.Count, model.Data.Trades.Count, model.Data.Trades.Generation, series.PriceStep,
+            last?.Time.Ticks ?? 0, last?.CloseTicks ?? 0, last?.HighTicks ?? 0, last?.LowTicks ?? 0,
+            last?.Volume ?? 0m, last?.Delta ?? 0m, layout.FirstVisible, layout.LastVisible,
+            BitConverter.DoubleToInt64Bits(layout.BarWidth), BitConverter.DoubleToInt64Bits(layout.ScrollBars),
+            BitConverter.DoubleToInt64Bits(layout.Main.Top), BitConverter.DoubleToInt64Bits(layout.Main.Bottom), hc.ToHashCode());
+    }
+
     public ChartLayout Render(SKCanvas canvas, ChartModel model, float width, float height, ChartRenderState? state = null)
     {
         state ??= new ChartRenderState();
@@ -113,38 +153,56 @@ public sealed class ChartRenderer
         model.LastLayout = layout;
         model.ChartInfo.Region = new Rectangle(0, 0, (int)width, (int)height);
 
-        // fondo
-        using (var bg = new SKPaint())
-        {
-            bg.Shader = SKShader.CreateLinearGradient(new SKPoint(0, 0), new SKPoint(0, height), new[] { t.BackgroundTop, t.BackgroundBottom }, SKShaderTileMode.Clamp);
-            canvas.DrawRect(0, 0, width, height, bg);
-        }
-
         var timeTicks = ComputeTimeTicks(model, layout);
-        var axisLabels = new List<AxisLabel>();
+        var key = BuildStaticKey(model, layout, width, height);
 
-        foreach (var panel in layout.Panels)
+        if (_staticPicture != null && key == _staticKey)
         {
-            canvas.Save();
-            canvas.ClipRect(panel.Rect);
-            if (model.Settings.ShowGrid) DrawGrid(canvas, model, layout, panel, timeTicks);
-            if (panel.IsPrice) DrawMainPanel(canvas, model, layout, panel, axisLabels);
-            else DrawSubPanel(canvas, model, layout, panel, axisLabels);
-            canvas.Restore();
+            StaticCacheHits++;
+            canvas.DrawPicture(_staticPicture);
+        }
+        else
+        {
+            StaticCacheMisses++;
+            _staticPicture?.Dispose();
+            using var recorder = new SKPictureRecorder();
+            var sc = recorder.BeginRecording(new SKRect(0, 0, width, height));
 
-            // renders personalizados de indicadores (pueden pintar sobre el eje)
-            DrawCustomRenders(canvas, model, layout, panel, width, height, above: true);
+            using (var bg = new SKPaint())
+            {
+                bg.Shader = SKShader.CreateLinearGradient(new SKPoint(0, 0), new SKPoint(0, height), new[] { t.BackgroundTop, t.BackgroundBottom }, SKShaderTileMode.Clamp);
+                sc.DrawRect(0, 0, width, height, bg);
+            }
+
+            var axisLabels = new List<AxisLabel>();
+            foreach (var panel in layout.Panels)
+            {
+                sc.Save();
+                sc.ClipRect(panel.Rect);
+                if (model.Settings.ShowGrid) DrawGrid(sc, model, layout, panel, timeTicks);
+                if (panel.IsPrice) DrawMainPanelStatic(sc, model, layout, panel, axisLabels);
+                else DrawSubPanel(sc, model, layout, panel, axisLabels);
+                sc.Restore();
+
+                DrawCustomRenders(sc, model, layout, panel, width, height, above: true);
+            }
+
+            _stroke.Color = t.PanelSeparator;
+            _stroke.StrokeWidth = 1;
+            foreach (var p in layout.Panels.Skip(1))
+                sc.DrawLine(0, MathF.Floor(p.Rect.Top) + 0.5f, width, MathF.Floor(p.Rect.Top) + 0.5f, _stroke);
+
+            DrawPriceAxis(sc, model, layout, axisLabels);
+            if (model.Strategies.Count > 0) DrawStrategySignals(sc, model, layout);
+            if (model.Settings.ShowTradeMarks) DrawTradeMarks(sc, model, layout);
+
+            _staticPicture = recorder.EndRecording();
+            _staticKey = key;
+            canvas.DrawPicture(_staticPicture);
         }
 
-        // separadores de paneles
-        _stroke.Color = t.PanelSeparator;
-        _stroke.StrokeWidth = 1;
-        foreach (var p in layout.Panels.Skip(1))
-            canvas.DrawLine(0, MathF.Floor(p.Rect.Top) + 0.5f, width, MathF.Floor(p.Rect.Top) + 0.5f, _stroke);
+        DrawUserDrawings(canvas, model, layout, state);
 
-        DrawPriceAxis(canvas, model, layout, axisLabels);
-        if (model.Strategies.Count > 0) DrawStrategySignals(canvas, model, layout);
-        if (model.Settings.ShowTradeMarks) DrawTradeMarks(canvas, model, layout);
         if (model.FocusTrade != null) DrawFocusTrade(canvas, model, layout, state);
         if (model.HighlightedLine != null) DrawHighlightedLine(canvas, model, layout);
         DrawTrading(canvas, model, layout, state);
@@ -313,7 +371,7 @@ public sealed class ChartRenderer
 
     // =================================================================== paneles
 
-    private void DrawMainPanel(SKCanvas canvas, ChartModel model, ChartLayout layout, PanelLayout main, List<AxisLabel> axisLabels)
+    private void DrawMainPanelStatic(SKCanvas canvas, ChartModel model, ChartLayout layout, PanelLayout main, List<AxisLabel> axisLabels)
     {
         var slots = model.Indicators.Where(s => s.Panel == null).ToList();
         if (model.Settings.ShowLiquidityHeatmap) _heatmap.Render(canvas, model, layout, main);
@@ -338,22 +396,6 @@ public sealed class ChartRenderer
         _series.RenderSeries(canvas, model, layout, main, slots, axisLabels);
         _series.RenderDrawingObjects(canvas, model, layout, main, slots);
 
-        int decimals = Instrument_Decimals(model);
-        if (!model.Settings.HideDrawings)
-        {
-            using var faded = _inkVictims is { Count: > 0 } ? new SKPaint { Color = SKColors.White.WithAlpha(60) } : null;
-            foreach (var d in model.Drawings)
-            {
-                // lo que el garabato va a borrar se ve apagado mientras se dibuja
-                bool victim = faded != null && _inkVictims!.Contains(d);
-                if (victim) canvas.SaveLayer(faded);
-                d.Render(canvas, layout, model.Series, model.Theme, decimals, model.Data.Trades);
-                if (victim) canvas.Restore();
-            }
-        }
-
-        _measure?.Render(canvas, layout, model.Series, model.Theme, decimals);
-
         if (model.Settings.ShowLastPriceLine && model.Series.Count > 0)
         {
             var last = model.Series[^1];
@@ -363,6 +405,29 @@ public sealed class ChartRenderer
             canvas.DrawLine(main.Rect.Left, y, main.Rect.Right, y, _stroke);
             _stroke.PathEffect = null;
         }
+    }
+
+    private void DrawUserDrawings(SKCanvas canvas, ChartModel model, ChartLayout layout, ChartRenderState state)
+    {
+        if (model.Settings.HideDrawings && _measure == null && state.Preview == null) return;
+        int decimals = Instrument_Decimals(model);
+        canvas.Save();
+        canvas.ClipRect(layout.Main.Rect);
+        if (!model.Settings.HideDrawings)
+        {
+            using var faded = _inkVictims is { Count: > 0 } ? new SKPaint { Color = SKColors.White.WithAlpha(60) } : null;
+            foreach (var d in model.Drawings)
+            {
+                bool victim = faded != null && _inkVictims!.Contains(d);
+                if (victim) canvas.SaveLayer(faded);
+                d.Render(canvas, layout, model.Series, model.Theme, decimals, model.Data.Trades);
+                if (victim) canvas.Restore();
+            }
+        }
+
+        state.Preview?.Render(canvas, layout, model.Series, model.Theme, decimals, model.Data.Trades);
+        _measure?.Render(canvas, layout, model.Series, model.Theme, decimals);
+        canvas.Restore();
     }
 
     private HashSet<ChartDrawing>? _inkVictims;
