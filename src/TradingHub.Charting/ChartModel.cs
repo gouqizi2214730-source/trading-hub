@@ -248,6 +248,8 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
 
     public bool IsDirty { get; private set; } = true;
 
+/// <summary>Versión de la capa estática (velas, footprint, mapa de calor, indicadores y ejes). No sube cuando solo cambia el cursor o la capa interactiva.</summary>
+public long StaticVersion { get; private set; } = 1;
     public event Action? Invalidated;
     public event Action<AlertInfo>? AlertRaised;
 
@@ -259,6 +261,14 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
     }
 
     public void Invalidate()
+    {
+        StaticVersion++;
+        IsDirty = true;
+        Invalidated?.Invoke();
+    }
+
+    /// <summary>Marca sucia solo la capa interactiva (cruz, dibujos del usuario, arrastre de órdenes/brackets, reloj) conservando la caché de la capa base.</summary>
+    public void InvalidateOverlay()
     {
         IsDirty = true;
         Invalidated?.Invoke();
@@ -507,7 +517,7 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
             catch (Exception ex) { this.LogError("Error en acción diferida", ex); }
         }
 
-        ProcessPending();
+        ProcessPending(enforceFrameBudget: true);
 
         if (_timers.Count > 0)
         {
@@ -523,15 +533,27 @@ public sealed class ChartModel : IIndicatorHost, IIndicatorDataProvider, IDispos
         }
     }
 
-    private void ProcessPending()
+    /// <summary>Presupuesto máximo por cuadro en milisঙ্গেundos para recálculos diferidos en vivo (0 = sin límite, procesa todos).</summary>
+    public int MaxSyncRecalcMsPerFrame { get; set; }
+
+    private void ProcessPending(bool enforceFrameBudget = false)
     {
+        long startTick = enforceFrameBudget && MaxSyncRecalcMsPerFrame > 0 ? Environment.TickCount64 : 0;
+        int recalcDone = 0;
         foreach (var slot in Indicators.ToArray())
         {
             if (slot.NeedsRecalc)
             {
+                if (startTick > 0 && recalcDone > 0 && Environment.TickCount64 - startTick >= MaxSyncRecalcMsPerFrame)
+                {
+                    IsDirty = true;
+                    continue;
+                }
+
                 slot.NeedsRecalc = false;
                 Safe(slot, () => slot.Indicator.HostRecalculate());
                 UpdateLinesTillTouch(slot.Indicator, 0);
+                recalcDone++;
                 Invalidate();
             }
 
