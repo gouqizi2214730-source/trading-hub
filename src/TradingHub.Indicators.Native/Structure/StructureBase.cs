@@ -40,7 +40,7 @@ public abstract class StructureIndicator : Indicator
 
     protected override void OnInitialize() => SubscribeToTimer(TimeSpan.FromSeconds(4), _tick);
 
-    protected override void OnDispose() => UnsubscribeToTimer(TimeSpan.FromSeconds(4), _tick);
+    protected override void OnDispose() => UnsubscribeFromTimer(TimeSpan.FromSeconds(4), _tick);
 
     protected override void OnRecalculate()
     {
